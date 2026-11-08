@@ -1,7 +1,7 @@
 # Costituzione del repo bottega
 
-Il repo della bottega: la skill e le pagine per porta (il plugin, in `plugin/`), il comando `bottega` (Python, sola libreria
-standard), i workflow, i quaderni e la casistica. Diventerà pubblico: chiunque lo riceve lo installa nella sua CLI.
+Il repo della bottega: la skill e le pagine per porta (il plugin, in `plugin/`), il comando `bottega` (Python, sola
+libreria standard), i workflow, i quaderni e la casistica. Diventerà pubblico: chi lo riceve lo installa nella sua CLI.
 
 ## Dove si lavora e cosa non si tocca
 
