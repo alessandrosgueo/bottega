@@ -27,8 +27,8 @@ Un file per area: `casistica/<area>.md` (l'area in minuscolo). Ogni caso è una 
 - La **fonte** è `deciso dall'utente`, `dal vivo AAAA-MM-GG` o `di chi decide`.
 - Un caso che parla di un progetto resta nel progetto, non qui.
 
-`python3 -m bottega casi` controlla il formato; `python3 -m bottega casi --domande` stampa i casi senza scelta, perché
-ed esito: è il foglio del banco di prova.
+`bottega casi` controlla il formato; `bottega casi --domande` stampa i casi senza scelta, perché ed esito: è il
+foglio del banco di prova. Nel repo della bottega, durante lo sviluppo: `uv run python -m bottega casi`.
 
 ## Quando si aggiunge un caso
 

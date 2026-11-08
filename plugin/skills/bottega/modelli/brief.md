@@ -6,13 +6,14 @@ non si ripete: la si cita.
 
 ---
 
-Sei l'esecutore del **compito <N>** della tappa <tappa>: <cosa produce il compito, in una frase>. <Chi lo userà dopo,
+Sei l'esecutore del **compito <N>** della tappa <tappa> (per un lavoro sciolto: **del lavoro #<N>**): <cosa produce,
+in una frase>. <Chi lo userà dopo,
 in una frase.> Lavora in TDD: prima le prove, poi la prova rossa vista, poi il codice, poi la prova verde.
 
 ## Da leggere prima
 
 1. La costituzione del progetto: `docs/costituzione.md`. Valgono le sue regole su dove si lavora, prove e stile.
-2. Il piano: `<percorso>`, sezioni <per nome: «Ruling» (R…), «Review Focus», «Compito N»>.
+2. Il piano, se c'è: `<percorso>`, sezioni <per nome: «Ruling» (R…), «Review Focus», «Compito N»>.
    <I compiti fatti: «Il compito 1 è fatto (commit `abc1234`) e ti dà `modulo.funzione`.»>
 3. Il codice da imitare: `<funzione>` in `<file>` (<perché>).
 
@@ -25,8 +26,8 @@ grassetto, col suo perché. Per esempio:>
   suo campo, altrimenti il ricalcolo lo cancella.»>
 - **<Una chiave che sembra ovvia e non lo è.>** <«Il giorno viene dalla colonna `giorno`, non dall'istante.»>
 
-Dove il piano lascia spazio decidi tu e lo scrivi come Ruling. Se sei bloccato, o se la scelta contraddice il piano,
-è irreversibile o tocca segreti o dati veri, fermati e chiudi con `DOMANDA PER CHI DECIDE:` e una domanda precisa,
+Dove il piano lascia spazio decidi tu e lo scrivi come Ruling. Se sei bloccato, o se la scelta contraddice il piano o
+tocca segreti, dati veri, cancellazioni, azioni irreversibili o verso l'esterno, fermati e chiudi con `DOMANDA PER CHI DECIDE:` e una domanda precisa,
 con le opzioni che vedi. Ti rispondono e riprendi da dove eri.
 
 ## Fatto quando

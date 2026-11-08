@@ -6,5 +6,5 @@ Questo repo è la bottega stessa e lavora col suo metodo. Prima di ogni lavoro l
 
 - Niente di personale nei file: il repo diventerà pubblico.
 - Niente commit sul ramo principale, niente unioni.
-- Se una scelta contraddice il piano, è irreversibile o tocca segreti o dati veri, fermati e chiedi con
-  `DOMANDA PER CHI DECIDE:`.
+- Se una scelta contraddice il piano o tocca segreti, dati veri, cancellazioni, azioni irreversibili o verso
+  l'esterno, fermati e chiedi con `DOMANDA PER CHI DECIDE:`.

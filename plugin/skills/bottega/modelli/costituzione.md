@@ -12,7 +12,7 @@ Riempi le parti fra `<…>`; togli le sezioni vuote.
 
 ## Dove si lavora e cosa non si tocca
 
-- Si lavora solo nel worktree del compito (o nel clone del giro, fuori). Niente commit sul ramo principale.
+- Si lavora solo nel worktree della tappa o del lavoro (o nel clone del giro, fuori). Niente commit sul ramo principale.
 - Non si toccano: <file, cartelle, sistemi veri; per esempio la configurazione di produzione, i dati veri>.
 - <Strumenti che scrivono su sistemi veri e che nessun esecutore usa, per nome.>
 

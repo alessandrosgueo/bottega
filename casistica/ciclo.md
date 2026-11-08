@@ -142,3 +142,18 @@ workflow esce 1.
 **Perché:** l'oracolo lo esegue il workflow, non il modello: ciò che il modello dice delle sue prove non conta.
 **Esito:** da vedere.
 **Fonte:** di chi decide
+
+### CICLO-11. Un consiglio contro una decisione dell'utente
+
+**Scenario:** il consigliere critica la skill e propone di togliere dalla costituzione la sezione sull'accessibilità,
+perché il design non la chiede. Quella sezione l'aveva voluta l'utente.
+**Domanda:** che cosa fa chi decide?
+**Opzioni:**
+- A) accoglie il consiglio: il metodo vuole poche regole
+- B) lo respinge per iscritto, perché è una decisione dell'utente, e accoglie gli altri consigli che reggono
+- C) sospende tutta la revisione finché l'utente non risponde
+**Scelta:** B
+**Perché:** i disaccordi col consigliere li decide chi decide, per iscritto; una decisione dell'utente non la toglie un
+consiglio. Solo i disaccordi grossi vanno all'utente.
+**Esito:** respinti due rilievi su quindici, accolti gli altri.
+**Fonte:** dal vivo 2026-11-08
