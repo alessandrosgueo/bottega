@@ -5,9 +5,11 @@ import sys
 from collections.abc import Callable
 
 from bottega import VERSIONE
+from bottega.banco import argomenti_banco, comando_banco
 from bottega.board import ErroreBoard
 from bottega.casi import argomenti_casi, comando_casi
 from bottega.configurazione import ErroreConfigurazione, argomenti_configurazione, comando_configurazione
+from bottega.conti import argomenti_conti, comando_conti
 from bottega.distributore import argomenti_distribuisci, comando_distribuisci
 from bottega.dividi import argomenti_dividi, comando_dividi
 from bottega.firma import ErroreFirma, argomenti_firma, comando_firma
@@ -22,6 +24,8 @@ from bottega.segno import argomenti_segno, comando_segno
 COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "controlla-pubblico": controlla_pubblico,
     "casi": comando_casi,
+    "banco": comando_banco,
+    "conti": comando_conti,
     "configurazione": comando_configurazione,
     "giro": comando_giro,
     "scegli": comando_scegli,
@@ -35,6 +39,8 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "controlla-pubblico": argomenti_controlla_pubblico,
     "casi": argomenti_casi,
+    "banco": argomenti_banco,
+    "conti": argomenti_conti,
     "configurazione": argomenti_configurazione,
     "giro": argomenti_giro,
     "scegli": argomenti_scegli,

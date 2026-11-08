@@ -71,6 +71,16 @@ def leggi(percorso: Path) -> list[Caso]:
     return casi
 
 
+def leggi_casistica(cartella: Path) -> list[Caso]:
+    """Tutti i casi validi di una cartella di casistica o di un singolo file; con errori solleva ErroreCasi."""
+    if cartella.is_file():
+        return leggi(cartella)
+    casi, errori = _esamina(cartella)
+    if errori:
+        raise ErroreCasi("\n".join(errori))
+    return casi
+
+
 def controlla_casistica(cartella: Path) -> list[str]:
     """Gli errori di formato della casistica, come `file:riga: motivo`, nell'ordine dei file e delle righe.
 
