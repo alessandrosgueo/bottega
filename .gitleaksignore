@@ -1,0 +1,2 @@
+# Valori finti nelle prove, non segreti. Formato: <commit>:<file>:<regola>:<riga>.
+ff8ef80e0b609b651b7a4a8612c6dd633982c0b4:attrezzi/tests/test_porte.py:generic-api-key:121

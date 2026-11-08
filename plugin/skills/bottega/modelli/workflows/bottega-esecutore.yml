@@ -1,0 +1,28 @@
+# Modello di workflow per un esecutore della bottega.
+# Viene copiato nel progetto come `.github/workflows/bottega-esecutore-<id>.yml`.
+# Sostituisci i segnaposto fra parentesi angolari (<...>) con i valori del progetto e della bottega.
+name: bottega-esecutore-<id>
+
+on:
+  workflow_dispatch:
+    inputs:
+      lavoro:
+        description: 'Numero del lavoro'
+        required: true
+        type: string
+
+concurrency:
+  group: bottega-esecutore-<id>
+  cancel-in-progress: false
+
+jobs:
+  esecutore:
+    uses: <proprietario>/bottega/.github/workflows/esecutore.yml@<sha>
+    with:
+      bottega_repo: <proprietario>/bottega
+      bottega_ref: <tag>
+      runner: '["<etichetta del runner>"]'
+      bottega: <id>
+      lavoro: ${{ inputs.lavoro }}
+    secrets:
+      BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}

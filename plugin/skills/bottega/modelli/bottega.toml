@@ -10,6 +10,8 @@ adattatore = "<comando>"                        # facoltativo: il comando della 
 fuso = "Europe/Rome"                            # obbligatorio: il fuso delle ore (nome IANA, come Europe/Rome)
 notte = "01:30"                                 # facoltativo: l'ora del giro di notte; senza, niente notte
 manutenzione = ["03:00-04:30", "23:30-01:00"]   # facoltativo: finestre senza giri; possono passare la mezzanotte
+project = 1                                     # numero del Project GitHub; obbligatorio se un candidato ha runner
+liberi = ["<etichetta>"]                        # facoltativo: etichette dei compiti sciolti per la notte
 
 # Una bottega è un abbonamento con la sua quota. L'id (a-z, 0-9 e -) lo sceglie chi configura.
 [botteghe.principale]

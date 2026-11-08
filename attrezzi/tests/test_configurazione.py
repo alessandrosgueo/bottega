@@ -76,6 +76,8 @@ def test_esempio_si_legge_per_intero():
             fuso="Europe/Rome",
             notte="01:30",
             manutenzione=("03:00-04:30", "23:30-01:00"),
+            project=1,
+            liberi=("<etichetta>",),
         ),
         botteghe={
             "principale": Bottega("principale", "scarsa", ("claude-code",)),
@@ -111,7 +113,15 @@ def test_esempio_passa_il_controllo():
 def test_esempio_ha_ogni_chiave_ammessa():
     dati = tomllib.loads(MODELLO.read_text(encoding="utf-8"))
     assert set(dati) == {"versione", "progetto", "botteghe", "candidati"}
-    assert set(dati["progetto"]) == {"comandanti", "adattatore", "fuso", "notte", "manutenzione"}
+    assert set(dati["progetto"]) == {
+        "comandanti",
+        "adattatore",
+        "fuso",
+        "notte",
+        "manutenzione",
+        "project",
+        "liberi",
+    }
     assert {chiave for voce in dati["botteghe"].values() for chiave in voce} == {"quota", "porte"}
     assert {chiave for voce in dati["candidati"].values() for chiave in voce} == {
         "nome",
@@ -132,7 +142,13 @@ def test_base_e_valida_e_ha_i_facoltativi_di_serie(tmp_path):
     assert _errori(tmp_path, BASE) == []
     configurazione = leggi_configurazione(_scrivi(tmp_path, BASE))
     assert configurazione.progetto == Progetto(
-        comandanti=(), adattatore=None, fuso="Europe/Rome", notte=None, manutenzione=()
+        comandanti=(),
+        adattatore=None,
+        fuso="Europe/Rome",
+        notte=None,
+        manutenzione=(),
+        project=None,
+        liberi=(),
     )
     assert configurazione.candidati["maestro"].runner is None
 
@@ -345,6 +361,72 @@ ERRORI = [
         ["bottega.toml: candidati: nessun candidato con la funzione «decidere»"],
         id="nessun-candidato",
     ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nproject = "1"',
+        ["bottega.toml: progetto.project: tipo sbagliato: serve un numero intero"],
+        id="project-tipo-sbagliato-stringa",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nproject = true',
+        ["bottega.toml: progetto.project: tipo sbagliato: serve un numero intero"],
+        id="project-tipo-sbagliato-booleano",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nproject = 0',
+        ["bottega.toml: progetto.project: serve un intero positivo"],
+        id="project-zero",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nproject = -5',
+        ["bottega.toml: progetto.project: serve un intero positivo"],
+        id="project-negativo",
+    ),
+    pytest.param(
+        'funzioni = ["decidere", "rivedere"]',
+        'funzioni = ["decidere", "rivedere"]\nrunner = "self-hosted"',
+        ["bottega.toml: progetto.project: chiave obbligatoria se almeno un candidato ha «runner»"],
+        id="project-mancante-con-runner",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nliberi = "bug"',
+        ["bottega.toml: progetto.liberi: tipo sbagliato: serve una lista"],
+        id="liberi-tipo-sbagliato",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nliberi = [1]',
+        ["bottega.toml: progetto.liberi[0]: tipo sbagliato: serve una stringa"],
+        id="liberi-elemento-non-stringa",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nliberi = [""]',
+        ["bottega.toml: progetto.liberi[0]: valore vuoto"],
+        id="liberi-elemento-vuoto",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nliberi = ["   "]',
+        ["bottega.toml: progetto.liberi[0]: valore vuoto"],
+        id="liberi-elemento-solo-spazi",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nliberi = ["bug", "bug"]',
+        ["bottega.toml: progetto.liberi[1]: «bug» ripetuta"],
+        id="liberi-ripetuta",
+    ),
+    pytest.param(
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nliberi = ["bug", "BUG"]',
+        ["bottega.toml: progetto.liberi[1]: «BUG» ripetuta"],
+        id="liberi-ripetuta-maiuscole",
+    ),
 ]
 
 
@@ -485,3 +567,36 @@ def test_comando_file_mancante_esce_2(tmp_path, capsys):
 
 def test_comando_predefinisce_il_file_del_progetto():
     assert costruisci_parser().parse_args(["configurazione"]).file == ".github/bottega/bottega.toml"
+
+
+def test_project_e_liberi_validi(tmp_path):
+    testo = _cambia(
+        BASE,
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nproject = 42\nliberi = ["bug", "debito"]',
+    )
+    assert _errori(tmp_path, testo) == []
+    configurazione = leggi_configurazione(_scrivi(tmp_path, testo))
+    assert configurazione.progetto.project == 42
+    assert configurazione.progetto.liberi == ("bug", "debito")
+
+
+def test_liberi_vuota_e_valida(tmp_path):
+    testo = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nliberi = []')
+    assert _errori(tmp_path, testo) == []
+    configurazione = leggi_configurazione(_scrivi(tmp_path, testo))
+    assert configurazione.progetto.liberi == ()
+
+
+def test_project_obbligatorio_con_runner_valido(tmp_path):
+    testo = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nproject = 5')
+    testo = _cambia(
+        testo,
+        'funzioni = ["decidere", "rivedere"]',
+        'funzioni = ["decidere", "rivedere"]\nrunner = "self-hosted"',
+    )
+    assert _errori(tmp_path, testo) == []
+    configurazione = leggi_configurazione(_scrivi(tmp_path, testo))
+    assert configurazione.progetto.project == 5
+    assert configurazione.candidati["maestro"].runner == "self-hosted"
+

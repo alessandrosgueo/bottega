@@ -5,8 +5,13 @@ import sys
 from collections.abc import Callable
 
 from bottega import VERSIONE
+from bottega.board import ErroreBoard
 from bottega.casi import argomenti_casi, comando_casi
-from bottega.configurazione import argomenti_configurazione, comando_configurazione
+from bottega.configurazione import ErroreConfigurazione, argomenti_configurazione, comando_configurazione
+from bottega.distributore import argomenti_distribuisci, comando_distribuisci
+from bottega.dividi import argomenti_dividi, comando_dividi
+from bottega.forgia import ErroreForgia
+from bottega.giro import argomenti_giro, comando_giro
 from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
 from bottega.scelta import argomenti_scegli, comando_scegli
 
@@ -15,14 +20,20 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "controlla-pubblico": controlla_pubblico,
     "casi": comando_casi,
     "configurazione": comando_configurazione,
+    "giro": comando_giro,
     "scegli": comando_scegli,
+    "distribuisci": comando_distribuisci,
+    "dividi": comando_dividi,
 }
 # Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "controlla-pubblico": argomenti_controlla_pubblico,
     "casi": argomenti_casi,
     "configurazione": argomenti_configurazione,
+    "giro": argomenti_giro,
     "scegli": argomenti_scegli,
+    "distribuisci": argomenti_distribuisci,
+    "dividi": argomenti_dividi,
 }
 
 
@@ -76,7 +87,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.comando is None:
         parser.print_usage(sys.stderr)
         return 2
-    return COMANDI[args.comando](args)
+    try:
+        return COMANDI[args.comando](args)
+    except (ErroreBoard, ErroreConfigurazione, ErroreForgia, FileNotFoundError) as e:
+        motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+        print(f"errore: {motivo}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

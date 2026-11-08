@@ -20,7 +20,7 @@ FUNZIONI = ("decidere", "eseguire", "rivedere", "consigliare")
 QUOTE = ("scarsa", "normale", "abbondante")
 
 _CHIAVI_TOP = ("versione", "progetto", "botteghe", "candidati")
-_CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione")
+_CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione", "project", "liberi")
 _CHIAVI_BOTTEGA = ("quota", "porte")
 _CHIAVI_CANDIDATO = ("nome", "bottega", "porta", "modello", "funzioni", "runner")
 _ID = re.compile(r"[a-z0-9-]+")
@@ -37,6 +37,8 @@ class Progetto:
     fuso: str
     notte: str | None
     manutenzione: tuple[str, ...]
+    project: int | None = None
+    liberi: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -148,7 +150,7 @@ def _valida(dati: dict) -> tuple[Configurazione | None, list[str]]:
     errori: list[str] = []
     _sconosciute(dati, _CHIAVI_TOP, "", errori)
     versione = _versione(dati, errori)
-    progetto = _progetto(dati, errori)
+    progetto = _progetto(dati, errori, ha_runner=_ha_runner(dati))
     botteghe = _botteghe(dati, errori)
     grezze = dati.get("botteghe", {})
     ids = set(grezze) if isinstance(grezze, dict) else None  # senza tabella valida, niente controllo dei riferimenti
@@ -156,6 +158,17 @@ def _valida(dati: dict) -> tuple[Configurazione | None, list[str]]:
     if errori or versione is None or progetto is None:
         return None, errori
     return Configurazione(versione, progetto, botteghe, candidati), []
+
+
+def _ha_runner(dati: dict) -> bool:
+    """Vero se almeno un candidato dichiara un runner non vuoto."""
+    grezze = dati.get("candidati")
+    if not isinstance(grezze, dict):
+        return False
+    return any(
+        isinstance(voce, dict) and isinstance(voce.get("runner"), str) and bool(voce["runner"].strip())
+        for voce in grezze.values()
+    )
 
 
 def _versione(dati: dict, errori: list[str]) -> int | None:
@@ -172,7 +185,7 @@ def _versione(dati: dict, errori: list[str]) -> int | None:
     return valore
 
 
-def _progetto(dati: dict, errori: list[str]) -> Progetto | None:
+def _progetto(dati: dict, errori: list[str], ha_runner: bool = False) -> Progetto | None:
     if "progetto" not in dati:
         _errore(errori, "progetto", "chiave obbligatoria mancante")
         return None
@@ -188,6 +201,8 @@ def _progetto(dati: dict, errori: list[str]) -> Progetto | None:
     adattatore = _testo(tabella, "adattatore", "progetto", errori, obbligatoria=False)
     comandanti = _comandanti(tabella, "progetto", errori)
     manutenzione = _manutenzione(tabella, "progetto", errori)
+    project = _project(tabella, "progetto", errori, obbligatorio=ha_runner)
+    liberi = _liberi(tabella, "progetto", errori)
     if fuso is None:
         return None
     return Progetto(
@@ -196,6 +211,8 @@ def _progetto(dati: dict, errori: list[str]) -> Progetto | None:
         fuso=fuso,
         notte=notte,
         manutenzione=manutenzione,
+        project=project,
+        liberi=liberi,
     )
 
 
@@ -304,6 +321,45 @@ def _ora(tabella: dict, chiave: str, percorso: str, errori: list[str]) -> str | 
         _errore(errori, _completa(percorso, chiave), f"«{valore}» non è un'ora HH:MM")
         return None
     return valore
+
+
+def _project(tabella: dict, percorso: str, errori: list[str], obbligatorio: bool) -> int | None:
+    completa = _completa(percorso, "project")
+    if "project" not in tabella:
+        if obbligatorio:
+            _errore(errori, completa, "chiave obbligatoria se almeno un candidato ha «runner»")
+        return None
+    valore = tabella["project"]
+    if type(valore) is not int:  # bool è un int per Python: qui no
+        _errore(errori, completa, "tipo sbagliato: serve un numero intero")
+        return None
+    if valore <= 0:
+        _errore(errori, completa, "serve un intero positivo")
+        return None
+    return valore
+
+
+def _liberi(tabella: dict, percorso: str, errori: list[str]) -> tuple[str, ...]:
+    completa = _completa(percorso, "liberi")
+    if "liberi" not in tabella:
+        return ()
+    lista = _come_lista(tabella["liberi"], completa, errori)
+    if lista is None:
+        return ()
+    valori: list[str] = []
+    viste: set[str] = set()
+    for i, voce in enumerate(lista):
+        voce_completa = f"{completa}[{i}]"
+        valore = _come_testo(voce, voce_completa, errori)
+        if valore is None:
+            continue
+        chiave = valore.casefold()
+        if chiave in viste:
+            _errore(errori, voce_completa, f"«{valore}» ripetuta")
+        else:
+            viste.add(chiave)
+            valori.append(valore)
+    return tuple(valori)
 
 
 def _scelta(

@@ -1,0 +1,54 @@
+# Modello di workflow per il distributore della bottega.
+# Viene copiato nel progetto come `.github/workflows/bottega-distributore.yml`.
+# Sostituisci i segnaposto fra parentesi angolari (<...>) con i valori del progetto.
+name: bottega-distributore
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  schedule:
+    # Segnaposto: ora del giro di notte in UTC (es. '0 2 * * *')
+    - cron: '0 2 * * *' # <ora in UTC>
+  workflow_dispatch:
+    inputs:
+      notte:
+        description: 'Se vero, esegue il giro notturno'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  # Tre gruppi. I commenti con un comando (o qualunque commento senza segno) hanno ognuno il suo, così un comando in
+  # coda non si perde: GitHub tiene una sola esecuzione in attesa per gruppo. Il rumore (commenti col segno, etichette
+  # che non sono comandi) ha un gruppo per esecuzione. Tutto il resto distribuisce in fila nel gruppo del distributore.
+  group: >-
+    ${{ (github.event_name == 'issue_comment' &&
+        (startsWith(github.event.comment.body, '<!-- bottega:') && format('bottega-rumore-{0}', github.run_id) ||
+        format('bottega-comando-{0}', github.event.comment.id))) ||
+        ((github.event_name == 'issues' && github.event.label.name != 'bottega: fuori' &&
+        !startsWith(github.event.label.name, 'esegue:')) && format('bottega-rumore-{0}', github.run_id)) ||
+        'bottega-distributore' }}
+  cancel-in-progress: false
+
+jobs:
+  distributore:
+    # I giri scrivono col token dell'utente: i loro commenti (col segno) e le etichette che non sono comandi non devono
+    # far partire un altro giro.
+    # Un commento fa partire il job solo se può essere un comando di chi ha accesso al repo: un estraneo che commenta
+    # non occupa il runner (i comandanti li controlla poi il distributore).
+    if: >-
+      (github.event_name != 'issue_comment' || (!startsWith(github.event.comment.body, '<!-- bottega:') &&
+      contains(github.event.comment.body, '/bottega') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))) &&
+      (github.event_name != 'issues' || github.event.label.name == 'bottega: fuori' ||
+      startsWith(github.event.label.name, 'esegue:'))
+    uses: <proprietario>/bottega/.github/workflows/distributore.yml@<sha>
+    with:
+      bottega_repo: <proprietario>/bottega
+      bottega_ref: <tag>
+      runner: '["<etichetta del runner>"]'
+      notte: ${{ github.event_name == 'schedule' || inputs.notte == true }}
+    secrets:
+      BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}

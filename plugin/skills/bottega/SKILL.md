@@ -168,6 +168,12 @@ piano lascia spazio, chi esegue decide e lo scrive come Ruling.
   prende mai: decisioni dell'utente, design, lavori che aspettano l'utente o già presi, ciò che tocca le quattro
   barriere, più ciò che la costituzione aggiunge. Non tocca `.github/` né i rami protetti: la consegna lo rifiuta. Usa
   sotto-agenti solo col suo modello.
+- **Solo issue di un comandante:** il brief è il corpo dell'issue, e chi l'ha scritta lo può cambiare anche dopo
+  l'etichetta. Un lavoro proposto da altri si copia in un'issue nuova.
+- **La CI del progetto e i rami `bottega/*`:** quei rami li scrive un modello, e la CI che li prova esegue codice suo.
+  Nessun segreto ai job che lo eseguono (il controllo che ha bisogno di un segreto prende il suo codice dal ramo
+  principale e il ramo solo come dati) e nessun runner self-hosted per loro: lì il modello sarebbe l'utente del
+  runner.
 - **Fermi:** tre tentativi a giro; un lavoro che fallisce un giro intero diventa «bloccato» e torna a chi decide; ramo
   principale rosso = niente lavori nuovi; una porta che non risponde lascia un solo avviso e nessun lavoro toccato.
 - **L'interruttore**, dalla macchina di chi decide: `bottega ferma` spegne tutti i workflow della bottega del progetto,
