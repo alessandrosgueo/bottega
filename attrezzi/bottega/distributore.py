@@ -137,6 +137,7 @@ def _gestisci_evento_commento(
     adesso_fuso: datetime,
     caso: random.Random,
     porte: Mapping[str, Porta] | None = None,
+    prefisso: Sequence[str] = (),
 ) -> tuple[bool, list[str]]:
     """Gestisce un eventuale comando da issue_comment nell'evento GITHUB_EVENT_PATH.
 
@@ -192,7 +193,12 @@ def _gestisci_evento_commento(
             righe.append(riga)
             print(riga)
         else:
-            board.stato(num_issue, "pronto")
+            # Riprova riparte da capo: tentativi, attese e motivo si azzerano, il ramo resta.
+            lav_riprova = board.lavoro(num_issue)
+            d_riprova = nota(lav_riprova.nota) if lav_riprova else {}
+            for chiave in ("tentativi", "attese", "motivo"):
+                d_riprova.pop(chiave, None)
+            board.stato(num_issue, "pronto", nota=scrivi_nota(d_riprova))
             msg = f"Lavoro #{num_issue} rimesso a «pronto» su comando di @{autore}."
             forgia.commenta(num_issue, msg, "distributore")
             riga = f"lavoro {num_issue}: rimesso a pronto su comando di «{autore}»"
@@ -285,6 +291,7 @@ def _gestisci_evento_commento(
                 prompt=prompt,
                 modello=cand.modello,
                 sola_lettura=True,
+                prefisso=prefisso,
             )
 
         testo_cons = lancio.testo if lancio.esito == "fatto" else f"Errore consulto ({lancio.esito}): {lancio.testo}"
@@ -309,6 +316,7 @@ def distribuisci(
     notte: bool = False,
     percorso_evento: Path | str | None = None,
     porte: Mapping[str, Porta] | None = None,
+    prefisso: Sequence[str] = (),
 ) -> list[str]:
     """Esegue un giro di distribuzione dei lavori secondo la regola B3-R16."""
     righe: list[str] = []
@@ -329,6 +337,7 @@ def distribuisci(
         adesso_fuso=adesso_fuso,
         caso=caso,
         porte=porte,
+        prefisso=prefisso,
     )
     righe.extend(righe_ev)
     if not procedi:
@@ -547,6 +556,8 @@ def comando_distribuisci(args: argparse.Namespace) -> int:
             adesso=adesso,
             caso=caso,
             notte=args.notte,
+            # Il consigliere di `/bottega consulta` legge testi scritti da altri: gira come l'esecutore.
+            prefisso=tuple(shlex.split(os.environ.get("BOTTEGA_PREFISSO_ESECUTORE", ""))),
         )
         return 0
     except (ErroreBoard, ErroreForgia, FileNotFoundError) as e:

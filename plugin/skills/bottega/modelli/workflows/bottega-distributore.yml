@@ -21,7 +21,7 @@ on:
 
 concurrency:
   group: >-
-    ${{ ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '<!-- bottega:')) ||
+    ${{ ((github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '<!-- bottega:')) ||
         (github.event_name == 'issues' && github.event.label.name != 'bottega: fuori' && !startsWith(github.event.label.name, 'esegue:')))
         && format('bottega-rumore-{0}', github.run_id) || 'bottega-distributore' }}
   cancel-in-progress: false
@@ -31,7 +31,7 @@ jobs:
     # I giri scrivono col token dell'utente: i loro commenti (col segno) e le etichette che non sono comandi non devono
     # far partire un altro giro.
     if: >-
-      (github.event_name != 'issue_comment' || !contains(github.event.comment.body, '<!-- bottega:')) &&
+      (github.event_name != 'issue_comment' || !startsWith(github.event.comment.body, '<!-- bottega:')) &&
       (github.event_name != 'issues' || github.event.label.name == 'bottega: fuori' ||
       startsWith(github.event.label.name, 'esegue:'))
     uses: <proprietario>/bottega/.github/workflows/distributore.yml@<sha>

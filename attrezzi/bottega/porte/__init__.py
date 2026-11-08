@@ -169,16 +169,6 @@ def esegui_porta(
         return None, "", "", f"errore di sistema: {e}"
 
 
-def _abilita_prefisso_controlla(cls: type) -> None:
-    """Estende la classe porta per supportare `prefisso` in `controlla()`."""
-    if not getattr(cls, "_supporta_prefisso", False):
-        def controlla(self, prefisso: Sequence[str] = ()) -> Controllo:
-            return controlla_eseguibile(self.eseguibile, prefisso=prefisso)
-
-        cls.controlla = controlla  # type: ignore[assignment]
-        cls._supporta_prefisso = True  # type: ignore[attr-defined]
-
-
 def porta(nome: str, eseguibile: str | None = None) -> Porta:
     """Restituisce l'adattatore della porta richiesta. Accetta solo i nomi di `configurazione.PORTE`."""
     if nome not in configurazione.PORTE:
@@ -186,21 +176,17 @@ def porta(nome: str, eseguibile: str | None = None) -> Porta:
     if nome == "claude-code":
         from bottega.porte.claude_code import ClaudeCode
 
-        _abilita_prefisso_controlla(ClaudeCode)
         return ClaudeCode(eseguibile=eseguibile or "claude")
     if nome == "antigravity":
         from bottega.porte.antigravity import Antigravity
 
-        _abilita_prefisso_controlla(Antigravity)
         return Antigravity(eseguibile=eseguibile or "agy")
     if nome == "pi":
         from bottega.porte.pi import Pi
 
-        _abilita_prefisso_controlla(Pi)
         return Pi(eseguibile=eseguibile or "pi")
     if nome == "copilot-cli":
         from bottega.porte.copilot_cli import CopilotCli
 
-        _abilita_prefisso_controlla(CopilotCli)
         return CopilotCli(eseguibile=eseguibile or "copilot")
     raise ValueError(f"porta sconosciuta: {nome}")

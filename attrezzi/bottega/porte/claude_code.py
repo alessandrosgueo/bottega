@@ -77,9 +77,9 @@ class ClaudeCode:
     nome: str = "claude-code"
     eseguibile: str = "claude"
 
-    def controlla(self) -> Controllo:
-        """Verifica se l'eseguibile di Claude Code risponde a --version."""
-        return controlla_eseguibile(self.eseguibile)
+    def controlla(self, prefisso: Sequence[str] = ()) -> Controllo:
+        """Verifica se l'eseguibile di Claude Code risponde a --version, col prefisso dell'esecutore (RV9)."""
+        return controlla_eseguibile(self.eseguibile, prefisso=prefisso)
 
     def lancia(
         self,

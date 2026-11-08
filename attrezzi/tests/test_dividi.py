@@ -25,7 +25,7 @@ class PortaFinta:
         self.conversazione = conversazione
         self.chiamate: list[dict[str, Any]] = []
 
-    def controlla(self) -> Controllo:
+    def controlla(self, prefisso=()) -> Controllo:
         return Controllo(ok=True)
 
     def lancia(

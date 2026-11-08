@@ -45,6 +45,7 @@ jobs:
       - name: Scarica il progetto
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: progetto
           fetch-depth: 0
           persist-credentials: false
 
@@ -54,15 +55,17 @@ jobs:
           repository: ${{ inputs.bottega_repo }}
           ref: ${{ inputs.bottega_ref }}
           token: ${{ secrets.BOTTEGA_TOKEN }}
-          path: .bottega
+          path: bottega
           persist-credentials: false
 
       - name: Esegui il giro dell'esecutore
+        working-directory: progetto
         env:
           GH_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}
           BOTTEGA_VARIABILI: ${{ toJSON(vars) }}
-          BOTTEGA_CLONE: ${{ github.workspace }}/.bottega
-          PYTHONPATH: ${{ github.workspace }}/.bottega/attrezzi
+          BOTTEGA_CLONE: ${{ github.workspace }}/bottega
+          BOTTEGA_SPAZIO: ${{ runner.temp }}/bottega-spazio
+          PYTHONPATH: ${{ github.workspace }}/bottega/attrezzi
           LAVORO: ${{ inputs.lavoro }}
           BOTTEGA: ${{ inputs.bottega }}
         run: |

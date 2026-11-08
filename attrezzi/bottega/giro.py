@@ -19,6 +19,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import tempfile
 
 from bottega.board import Board, BoardComando, BoardProject
 from bottega.brief import fatto_quando, ramo
@@ -42,6 +43,9 @@ OPZIONI_GIT_RUNNER: tuple[str, ...] = (
     "-c", "diff.external=",
     "-c", "core.quotePath=false",
 )
+
+# Il ramo viene dalla nota, che un umano può modificare: solo nomi semplici sotto bottega/.
+_RAMO_VALIDO = re.compile(r"bottega/[A-Za-z0-9][A-Za-z0-9._/-]*")
 
 OPZIONI_GIT_CRED: tuple[str, ...] = (
     "-c", "credential.helper=",
@@ -81,7 +85,7 @@ def analizza_diff_raw(raw_bytes: bytes) -> list[tuple[str, str, str, str, str]]:
     risultato: list[tuple[str, str, str, str, str]] = []
     i = 0
     while i < len(tokens):
-        token = tokens[i]
+        token = tokens[i].lstrip(b"\n")
         if not token:
             i += 1
             continue
@@ -288,10 +292,6 @@ def _prepara_fascicolo(
         if q_bottega.exists():
             testi_quaderno.append(q_bottega.read_text(encoding="utf-8"))
 
-    q_locale = Path.cwd() / "quaderni" / f"{modello_slug}.md"
-    if q_locale.exists() and not (bottega_clone_env and Path(bottega_clone_env) == Path.cwd()):
-        testi_quaderno.append(q_locale.read_text(encoding="utf-8"))
-
     # Quaderno del progetto letto con git show dal ramo principale
     res_q_prog = subprocess.run(
         ["git", *OPZIONI_GIT_RUNNER, "show", f"origin/{ramo_principale}:.github/bottega/quaderni/{modello_slug}.md"],
@@ -370,8 +370,28 @@ def _verifica_e_consegna_bundle(
     )
     entries = analizza_diff_raw(proc_diff.stdout)
 
+    # 4b. La storia: niente commit di unione, e ogni commit passa gli stessi controlli del diff netto
+    # (un file sotto .github/ aggiunto e poi tolto non compare nel diff netto, ma resta nella storia spinta).
+    unioni = subprocess.run(
+        ["git", *OPZIONI_GIT_RUNNER, "rev-list", "--merges", f"{base_commit}..refs/bottega/consegna"],
+        cwd=str(clone_progetto),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    proc_storia = subprocess.run(
+        [
+            "git", *OPZIONI_GIT_RUNNER, "log", "--raw", "-z", "-M", "--no-ext-diff", "--no-merges", "--format=",
+            f"{base_commit}..refs/bottega/consegna",
+        ],
+        cwd=str(clone_progetto),
+        check=True,
+        capture_output=True,
+    )
+    entries_storia = analizza_diff_raw(proc_storia.stdout)
+
     # 5. Controlli di sicurezza sui percorsi e sui modi
-    motivo_violazione = controlla_violazioni_diff(entries)
+    motivo_violazione = "commit di unione vietati" if unioni else controlla_violazioni_diff(entries_storia + entries)
     if motivo_violazione:
         msg = (
             f"Consegna rifiutata: la patch tocca percorsi sotto .github/ ({motivo_violazione})"
@@ -414,7 +434,49 @@ def giro(
     adesso: datetime,
     caso: random.Random,
 ) -> EsitoGiro:
-    """Esegue un giro dell'esecutore per il lavoro e la bottega indicati."""
+    """Esegue un giro dell'esecutore per il lavoro e la bottega indicati. Non solleva mai (RV5).
+
+    Un errore prima dell'avvio (forgia o board che non rispondono, bottega sconosciuta) lascia il lavoro
+    `pronto` senza rilanciare il distributore: lo riprende il giro programmato, così un guasto fisso
+    non diventa un anello di workflow.
+    """
+    try:
+        return _giro(
+            lavoro,
+            bottega,
+            configurazione=configurazione,
+            forgia=forgia,
+            board=board,
+            porte=porte,
+            clone_progetto=clone_progetto,
+            spazio=spazio,
+            prefisso=prefisso,
+            adesso=adesso,
+            caso=caso,
+        )
+    except Exception as exc:
+        try:
+            board.stato(lavoro, "pronto")
+        except Exception:
+            pass
+        return EsitoGiro("errore", motivo=f"errore prima del giro: {exc}")
+
+
+def _giro(
+    lavoro: int,
+    bottega: str,
+    *,
+    configurazione: Configurazione,
+    forgia: Forgia,
+    board: Board,
+    porte: Mapping[str, Porta] | Callable[[str], Porta] | None = None,
+    clone_progetto: Path,
+    spazio: Path,
+    prefisso: Sequence[str] = (),
+    adesso: datetime,
+    caso: random.Random,
+) -> EsitoGiro:
+    """Il corpo del giro; `giro` lo avvolge."""
     if bottega not in configurazione.botteghe:
         raise ValueError(f"Bottega sconosciuta: {bottega!r}")
     bottega_cfg = configurazione.botteghe[bottega]
@@ -423,10 +485,7 @@ def giro(
     porta_esecutore = _ottieni_porta(candidato.porta, porte)
 
     # RV9: Controllo all'apertura con prefisso
-    try:
-        controllo = porta_esecutore.controlla(prefisso=prefisso)
-    except TypeError:
-        controllo = porta_esecutore.controlla()
+    controllo = porta_esecutore.controlla(prefisso=prefisso)
 
     chiave_avviso = f"porta_{porta_esecutore.nome}"
     titolo_avviso = f"Avviso della bottega: porta {porta_esecutore.nome}"
@@ -471,10 +530,11 @@ def giro(
     d_nota["compito"] = str(compito.numero)
 
     ramo_principale = forgia.ramo_principale()
-    if not nome_ramo.startswith("bottega/") or nome_ramo == ramo_principale:
+    if not _RAMO_VALIDO.fullmatch(nome_ramo) or ".." in nome_ramo or nome_ramo == ramo_principale:
         msg = f"Consegna rifiutata: ramo {nome_ramo!r} non valido o principale"
         forgia.commenta(compito.numero, msg, ruolo="esecutore")
-        board.stato(lavoro, "bloccato", nota=scrivi_nota({"motivo": "ramo non valido"}))
+        d_nota["motivo"] = "ramo non valido"
+        board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
         _rilancia_distributore(forgia)
         return EsitoGiro("bloccato", motivo="ramo non valido")
 
@@ -482,7 +542,8 @@ def giro(
     if not cmd_fatto_quando:
         msg = "Lavoro non pronto: manca il blocco «Fatto quando» nel brief."
         forgia.commenta(compito.numero, msg, ruolo="esecutore")
-        board.stato(lavoro, "pronto", nota=scrivi_nota({"motivo": "manca fatto quando"}))
+        d_nota["motivo"] = "manca fatto quando"
+        board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
         _rilancia_distributore(forgia)
         return EsitoGiro("senza_fatto_quando", motivo="manca fatto quando")
 
@@ -656,7 +717,7 @@ def giro(
                     _rilancia_distributore(forgia)
                     return EsitoGiro("in_attesa", motivo="troppi consulti")
 
-                idx = lancio.testo.find("DOMANDA PER CHI DECIDE:")
+                idx = lancio.testo.rfind("DOMANDA PER CHI DECIDE:")
                 domanda = lancio.testo[idx:].strip()
                 forgia.commenta(compito.numero, f"Consulto dell'esecutore:\n\n{recinta_testo_modello(domanda)}", ruolo="esecutore")
 
@@ -689,7 +750,13 @@ def giro(
 
                 # RV7: Il consigliere lavora in una copia usa e getta
                 dir_cons = dir_giro / f"consigliere-{consulti_effettuati}"
-                shutil.copytree(str(lavoro_dir), str(dir_cons), symlinks=False)
+                # La copia la fa l'utente dell'esecutore: il runner non deve seguire link messi dal modello.
+                subprocess.run(
+                    [*prefisso, "cp", "-a", "--", str(lavoro_dir), str(dir_cons)],
+                    check=True,
+                    capture_output=True,
+                    env=env_rip,
+                )
                 try:
                     lancio_cons = porta_cons.lancia(
                         cartella=dir_cons,
@@ -699,6 +766,8 @@ def giro(
                         prefisso=prefisso,
                     )
                 finally:
+                    if prefisso:
+                        subprocess.run([*prefisso, "rm", "-rf", "--", str(dir_cons)], capture_output=True)
                     shutil.rmtree(dir_cons, ignore_errors=True)
 
                 if lancio_cons.esito == "quota":
@@ -768,7 +837,7 @@ def giro(
                     capture_output=True,
                     env=env_rip,
                 )
-                ok_salv, _ = _verifica_e_consegna_bundle(
+                ok_salv, entries_salv = _verifica_e_consegna_bundle(
                     clone_progetto=clone_progetto,
                     bundle_file=bundle_salv,
                     base_commit=base_commit,
@@ -783,7 +852,7 @@ def giro(
                     _rilancia_distributore(forgia)
                     return EsitoGiro("bloccato", motivo=d_nota.get("motivo", "modifica a .github vietata"))
                 pr_num = forgia.pr_del_ramo(nome_ramo)
-                if pr_num is None:
+                if pr_num is None and entries_salv:
                     titolo_salv = iss_madre.titolo
                     corpo_salv = f"Lavoro: #{iss_madre.numero}\n\nSalvataggio parziale per quota esaurita."
                     forgia.apri_pr(nome_ramo, titolo_salv, corpo_salv)
@@ -795,8 +864,8 @@ def giro(
             _rilancia_distributore(forgia)
             return EsitoGiro("quota", motivo="quota esaurita")
 
-        # Accesso o errore
-        if lancio.esito in ("accesso", "errore"):
+        # Accesso, errore o ogni altro esito che non è «fatto»: conta un tentativo
+        if lancio.esito != "fatto":
             tentativi = int(d_nota.get("tentativi", 0)) + 1
             d_nota["tentativi"] = str(tentativi)
             if tentativi >= 3:
@@ -810,11 +879,6 @@ def giro(
                 board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
                 _rilancia_distributore(forgia)
                 return EsitoGiro("errore", motivo=f"tentativo {tentativi} fallito ({lancio.esito})")
-
-        if lancio.esito != "fatto":
-            board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
-            _rilancia_distributore(forgia)
-            return EsitoGiro(lancio.esito, motivo=lancio.testo)
 
         # RV4: Niente commit nuovi -> nessuna PR nuova, il lavoro torna pronto con tentativi+1 e rapporto in commento
         cur_head = subprocess.run(
@@ -906,7 +970,7 @@ def giro(
 
         testo_oracolo = (
             f"Esito dell'oracolo: {'VERDE' if oracolo_ok else 'ROSSO'} (codice {codice_oracolo})\n\n"
-            f"```\n{ultime_40}\n```"
+            f"{recinta_testo_modello(ultime_40)}"
         )
         forgia.commenta(compito.numero, testo_oracolo, ruolo="esecutore")
 
@@ -953,7 +1017,10 @@ def giro(
 
         if not segreti_trovati and shutil.which("gitleaks"):
             proc_gl = subprocess.run(
-                ["gitleaks", "git", "--pre-commit", "--log-opts", f"{base_commit}..refs/bottega/consegna"],
+                [
+                    "gitleaks", "git", "--no-banner", "--redact",
+                    f"--log-opts={base_commit}..refs/bottega/consegna", str(clone_progetto),
+                ],
                 cwd=str(clone_progetto),
                 capture_output=True,
             )
@@ -983,6 +1050,8 @@ def giro(
                 capture_output=True,
                 text=True,
             ).stdout
+            if len(diff_testo) > 60000:
+                diff_testo = diff_testo[:60000] + "\n[diff troncato a 60 000 caratteri]"
             prompt_rev = f"Rileggi il seguente diff per il compito {compito.numero}:\n\n{diff_testo}"
             dir_rev = dir_giro / "revisione"
             dir_rev.mkdir(exist_ok=True)
@@ -1024,10 +1093,15 @@ def giro(
         d_nota["tentativi"] = str(tentativi)
         d_nota["motivo"] = f"errore: {exc}"
         stato_dest = "bloccato" if tentativi >= 3 else "pronto"
-        board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+        try:
+            board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+        except Exception:
+            pass
         try:
             target_comm = compito.numero if "compito" in locals() else lavoro
-            forgia.commenta(target_comm, f"Errore durante il giro dell'esecutore: {exc}", ruolo="esecutore")
+            forgia.commenta(
+                target_comm, f"Errore durante il giro dell'esecutore:\n\n{recinta_testo_modello(str(exc))}", ruolo="esecutore"
+            )
         except Exception:
             pass
         _rilancia_distributore(forgia)
@@ -1080,7 +1154,8 @@ def comando_giro(args: argparse.Namespace) -> int:
     prefisso = tuple(shlex.split(env_pref)) if env_pref else ()
 
     spazio_env = os.environ.get("BOTTEGA_SPAZIO")
-    spazio = Path(spazio_env) if spazio_env else Path.cwd() / ".bottega_spazio"
+    # Mai dentro il clone del progetto: il giro fa `git clean -fdx` e lo cancellerebbe.
+    spazio = Path(spazio_env) if spazio_env else Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "bottega-spazio"
 
     clone_progetto = Path.cwd()
 

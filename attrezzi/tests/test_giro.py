@@ -44,7 +44,7 @@ class PortaFinta:
         self.gestisce_sola_lettura = False
         self.lanci: list[dict] = []
 
-    def controlla(self) -> Controllo:
+    def controlla(self, prefisso=()) -> Controllo:
         return Controllo(ok=self.esito_controllo, versione=self.versione, motivo=self.motivo_controllo)
 
     def lancia(

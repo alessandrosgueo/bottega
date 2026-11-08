@@ -7,7 +7,7 @@ from collections.abc import Callable
 from bottega import VERSIONE
 from bottega.board import ErroreBoard
 from bottega.casi import argomenti_casi, comando_casi
-from bottega.configurazione import argomenti_configurazione, comando_configurazione
+from bottega.configurazione import ErroreConfigurazione, argomenti_configurazione, comando_configurazione
 from bottega.distributore import argomenti_distribuisci, comando_distribuisci
 from bottega.dividi import argomenti_dividi, comando_dividi
 from bottega.forgia import ErroreForgia
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         return COMANDI[args.comando](args)
-    except (ErroreBoard, ErroreForgia, FileNotFoundError) as e:
+    except (ErroreBoard, ErroreConfigurazione, ErroreForgia, FileNotFoundError) as e:
         motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
         print(f"errore: {motivo}", file=sys.stderr)
         return 1

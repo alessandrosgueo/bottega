@@ -209,10 +209,17 @@ def test_rv15_workflow():
     """RV15: fetch-depth: 0, BOTTEGA_CLONE, segreto passato per nome, uses per SHA."""
     testo_esec_riu = ESECUTORE_RIUSABILE.read_text(encoding="utf-8")
     assert "fetch-depth: 0" in testo_esec_riu
-    assert "BOTTEGA_CLONE: ${{ github.workspace }}/.bottega" in testo_esec_riu
+    assert "BOTTEGA_CLONE: ${{ github.workspace }}/bottega" in testo_esec_riu
 
     testo_dist_riu = DISTRIBUTORE_RIUSABILE.read_text(encoding="utf-8")
-    assert "BOTTEGA_CLONE: ${{ github.workspace }}/.bottega" in testo_dist_riu
+    assert "BOTTEGA_CLONE: ${{ github.workspace }}/bottega" in testo_dist_riu
+
+    # La bottega sta accanto al progetto, mai dentro: il giro pulisce il clone con `git clean -fdx`.
+    for testo in (testo_esec_riu, testo_dist_riu):
+        assert "path: progetto" in testo
+        assert "working-directory: progetto" in testo
+        assert "path: .bottega" not in testo
+    assert "BOTTEGA_SPAZIO: ${{ runner.temp }}/bottega-spazio" in testo_esec_riu
 
     for mod in (DISTRIBUTORE_MODELLO, ESECUTORE_MODELLO):
         testo = mod.read_text(encoding="utf-8")

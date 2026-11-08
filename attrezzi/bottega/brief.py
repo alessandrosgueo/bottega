@@ -36,7 +36,8 @@ def fatto_quando(corpo: str) -> str | None:
                 recinto_aperto = m_recinto.group(1)
                 contenuto_blocco = []
         else:
-            if re.match(r"^[ \t]*" + re.escape(recinto_aperto) + r"[ \t]*$", riga):
+            # Chiude un recinto dello stesso carattere lungo almeno quanto quello d'apertura (CommonMark).
+            if re.match(r"^[ \t]*" + re.escape(recinto_aperto) + re.escape(recinto_aperto[0]) + r"*[ \t]*$", riga):
                 testo = "\n".join(contenuto_blocco).strip()
                 return testo if testo else None
             contenuto_blocco.append(riga)
