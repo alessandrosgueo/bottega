@@ -1,0 +1,14 @@
+{
+  "name": "bottega",
+  "version": "0.1.0",
+  "description": "Metodo «bottega»: chi decide scrive piano e brief, chi esegue lavora, un consigliere critica.",
+  "license": "MIT",
+  "private": true,
+  "author": {
+    "name": "gli autori della bottega"
+  },
+  "keywords": ["pi-package", "skills", "workflow", "bottega"],
+  "pi": {
+    "skills": ["./skills"]
+  }
+}

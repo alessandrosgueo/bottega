@@ -109,13 +109,13 @@ fa, per il massimo risultato al minimo costo. La scelta viva lo serve, non lo so
 | design e piani da criticare | PR in bozza, con commenti di revisione del consigliere |
 | il resoconto della notte | commenti sui lavori toccati, letti da chi decide |
 | lo stato della quota di ogni bottega | variabili di GitHub Actions del repo |
+| le misure | campi del Project, uno per misura |
+| lezioni per modello e casistica | file del repo `bottega`, cambiati solo con PR |
+| la skill e i suoi aggiornamenti | il repo `bottega`, installato come plugin |
 
 Un progetto che ha già un suo comando per la board lo collega come **adattatore**: i workflow non scrivono sul Project
 da soli ma passano da lui, con cinque operazioni (leggere i lavori pronti, prenderne uno, cambiarne lo stato, scrivere
 una consegna, scrivere un campo). Senza adattatore i workflow usano `gh` direttamente.
-| le misure | campi del Project, uno per misura |
-| lezioni per modello e casistica | file del repo `bottega`, cambiati solo con PR |
-| la skill e i suoi aggiornamenti | il repo `bottega`, installato come plugin |
 
 Niente cartelle condivise, niente copie, niente script di sincronia: ciò che serve a più macchine passa da git o da
 GitHub.
@@ -286,9 +286,10 @@ fatto l'accesso al suo abbonamento.
 - **Il repo `bottega`**, pubblico, licenza MIT, in italiano: il plugin (skill, pagine per porta, modelli di brief e di
   costituzione), i workflow modello, i quaderni, la casistica, la guida per le persone (`LEGGIMI.md`) e quella per la
   CLI (`INSTALLA.md`).
-- **Il plugin** si installa dal repo GitHub dove la porta lo sa fare da sé (Claude Code, coi marketplace); dove no
-  (Antigravity accetta solo una cartella locale o un marketplace già collegato, senza dipendenze) da un clone git del
-  repo sulla macchina, aggiornato con `git pull`: l'unico mezzo di sincronia resta git. Il modello dell'esecutore non
+- **Il plugin** si installa in ogni porta da un clone git del repo sulla macchina, aggiornato con `git pull`: l'unico
+  mezzo di sincronia resta git (Claude Code accetta un marketplace che è una cartella; Antigravity accetta solo una
+  cartella locale o un marketplace già collegato, senza dipendenze). Così nessun documento scrive il proprietario del
+  repo (deciso in B1). Il modello dell'esecutore non
   tocca GitHub, quindi non gli servono skill di board; le skill di stile (Python, Rust) restano facoltative, dalle loro
   fonti.
 - **L'installazione** (la CLI segue `INSTALLA.md`) fa da sola tutto ciò che può: riconosce porte e sistema, installa

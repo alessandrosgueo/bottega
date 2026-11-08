@@ -1,0 +1,18 @@
+{
+  "name": "bottega",
+  "description": "Marketplace del plugin «bottega»: si installa dalla cartella del clone.",
+  "owner": {
+    "name": "gli autori della bottega"
+  },
+  "plugins": [
+    {
+      "name": "bottega",
+      "source": "./plugin",
+      "description": "Metodo «bottega»: chi decide scrive piano e brief, chi esegue lavora, un consigliere critica.",
+      "version": "0.1.0",
+      "author": {
+        "name": "gli autori della bottega"
+      }
+    }
+  ]
+}
