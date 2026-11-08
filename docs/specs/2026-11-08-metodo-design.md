@@ -162,6 +162,16 @@ fatto l'accesso al suo abbonamento.
 - **Più progetti sulla stessa bottega:** un runner appartiene a un repo e `concurrency` vale dentro un repo, quindi
   due progetti possono far lavorare insieme due esecutori della stessa quota; li reggono la scelta viva e la «quota
   esaurita».
+- **L'oracolo lo esegue il workflow, non il modello.** Il «fatto quando» del brief è un comando; il workflow lo lancia
+  dopo il modello e scrive lui l'esito sulla PR. Ciò che il modello dice delle sue prove non conta. In un progetto con
+  la sua CI, la CI fa da oracolo.
+- **Ciò che salta all'occhio lo segna il workflow:** una PR che cambia prove già esistenti, o che fa scattare il
+  controllo dei segreti, prende un'etichetta, e la revisione la guarda per prima.
+- **Le issue senza brief** (scritte di getto dall'utente) l'esecutore non le prende: chi decide le trasforma in
+  compiti.
+- **Cosa scrive il modello alla fine:** il testo della PR, dei commenti e della consegna in file con un formato fisso,
+  nello spazio di lavoro del giro, che si butta a fine giro. Le sue trascrizioni restano sul runner, non nei log di
+  GitHub.
 - **Il fascicolo** che il workflow prepara contiene sempre, oltre al lavoro, la costituzione del progetto e il quaderno
   del modello dell'esecutore: le lezioni arrivano da sole.
 - **Una PR rifiutata** la chiude chi decide, col motivo scritto; la lezione va nel quaderno; il lavoro torna da rifare
