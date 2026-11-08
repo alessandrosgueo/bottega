@@ -97,6 +97,7 @@ class ForgiaFinta:
         return None
 
     def apri_pr(self, ramo: str, titolo: str, corpo: str) -> int:
+        corpo = segna(corpo, "esecutore")  # B3-R2: ogni PR scritta da un giro ha il segno
         num = self._prossimo_num_pr()
         self._pr[num] = {"ramo": ramo, "titolo": titolo, "corpo": corpo}
         self.registro.append(("apri_pr", num, ramo, titolo, corpo))

@@ -65,7 +65,7 @@ def test_dati_liberi_mai_su_riga_di_comando() -> None:
     assert "--body-file" in args_pr
     assert "-" in args_pr
     assert corpo_pr not in args_pr
-    assert stdin_pr == corpo_pr
+    assert stdin_pr == "<!-- bottega:esecutore -->\n" + corpo_pr  # la forgia mette il segno (B3-R2)
 
     valore_var = "valore_segreto_o_lungo"
     forgia.imposta_variabile("BOTTEGA_QUOTA", valore_var)

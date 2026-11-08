@@ -125,7 +125,7 @@ def _crea_configurazione() -> Configurazione:
             porta="finta",
             modello="finto-1",
             funzioni=("eseguire",),
-            runner=None,
+            runner="linux-x64",  # un esecutore fuori ha il runner; il consigliere del giro lo stesso
         ),
         "consigliere": Candidato(
             id="consigliere",

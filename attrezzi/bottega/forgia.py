@@ -174,6 +174,7 @@ class ForgiaGh:
         return d[0]["number"] if d else None
 
     def apri_pr(self, ramo: str, titolo: str, corpo: str) -> int:
+        corpo = segna(corpo, "esecutore")  # B3-R2: ogni PR scritta da un giro ha il segno
         out = self._esegui(
             ["pr", "create", "--repo", self.repo, "--head", ramo, "--title", titolo, "--draft", "--body-file", "-"],
             ingresso=corpo,

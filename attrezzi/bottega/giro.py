@@ -6,7 +6,7 @@ Solo libreria standard.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -70,6 +70,13 @@ def _trova_candidato(
             return cand
 
     raise ValueError(f"Nessun candidato esecutore trovato per la bottega {bottega_id!r}")
+
+
+def _solo_runner(configurazione: Configurazione, runner: str | None) -> Configurazione:
+    """La configurazione coi soli candidati che girano sul runner dato: il consigliere di un giro lavora nello stesso
+    job dell'esecutore, quindi deve avere la sua porta su quella macchina."""
+    candidati = {k: c for k, c in configurazione.candidati.items() if runner is not None and c.runner == runner}
+    return replace(configurazione, candidati=candidati)
 
 
 def _ottieni_porta(
@@ -441,7 +448,7 @@ def giro(
                 quote_map = {b_id: forgia.variabile(nome_variabile(b_id)) for b_id in configurazione.botteghe}
                 scelta_cons = scegli(
                     compito=compito_cons,
-                    configurazione=configurazione,
+                    configurazione=_solo_runner(configurazione, candidato.runner),
                     risultati={},
                     quote=quote_map,
                     adesso=adesso,
@@ -691,7 +698,7 @@ def giro(
         quote_map = {b_id: forgia.variabile(nome_variabile(b_id)) for b_id in configurazione.botteghe}
         scelta_cons = scegli(
             compito=compito_cons,
-            configurazione=configurazione,
+            configurazione=_solo_runner(configurazione, candidato.runner),
             risultati={},
             quote=quote_map,
             adesso=adesso,
