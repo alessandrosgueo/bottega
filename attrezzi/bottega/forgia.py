@@ -7,19 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-try:
-    from bottega.segni import RUOLI, segna
-except ImportError:
-    RUOLI = ("distributore", "esecutore", "consigliere", "revisore", "avviso")
-
-    def segna(testo: str, ruolo: str) -> str:
-        if ruolo not in RUOLI:
-            raise ValueError(f"Ruolo sconosciuto: {ruolo}")
-        segno = f"<!-- bottega:{ruolo} -->"
-        if testo.startswith(segno):
-            return testo
-        return f"{segno}\n{testo}" if testo else segno
-
+from bottega.segni import RUOLI, segna
 
 _REGEX_SEGNO = re.compile(r"^<!--\s*bottega:[a-z]+\s*-->\s*", re.IGNORECASE)
 

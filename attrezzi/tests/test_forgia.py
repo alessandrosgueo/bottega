@@ -27,7 +27,7 @@ def test_commenta_mette_segno_e_passa_da_stdin() -> None:
 
 def test_commenta_rifiuta_ruolo_sconosciuto() -> None:
     forgia = ForgiaGh("proprietario/repo", esegui=lambda args, ing=None: "")
-    with pytest.raises(ValueError, match="Ruolo sconosciuto"):
+    with pytest.raises(ValueError, match="Ruolo non valido"):
         forgia.commenta(1, "testo", "fantasma")
 
 
