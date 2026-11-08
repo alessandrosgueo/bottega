@@ -1,5 +1,7 @@
 # Controllo del repo bottega: prove, controllo dei dati personali e scansione dei segreti.
-# Gira a ogni push e a ogni PR sui runner di GitHub (ubuntu-24.04). Niente segreti, niente runner self-hosted.
+# Gira a ogni push e a ogni PR sui runner di GitHub (ubuntu-24.04). Niente runner self-hosted. L'unico segreto è
+# l'elenco delle parole vietate: sta fra i segreti, non fra le variabili, perché GitHub stampa nel log l'env di ogni
+# passo e maschera solo i segreti; ai workflow delle PR da un fork non arriva, e il controllo gira sulle regole fisse.
 # uv e gitleaks sono fissati a una versione: l'archivio scaricato si controlla con lo SHA256 scritto qui, preso dal
 # file di checksum ufficiale della stessa release. Chi cambia versione cambia anche lo SHA256.
 name: controllo
@@ -54,7 +56,7 @@ jobs:
 
       - name: Controllo dei dati personali
         env:
-          PAROLE_VIETATE: ${{ vars.PAROLE_VIETATE }}
+          PAROLE_VIETATE: ${{ secrets.PAROLE_VIETATE }}
         run: uv run python -m bottega controlla-pubblico
 
       - name: Installa gitleaks 8.30.1
