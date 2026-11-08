@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bottega"
+dynamic = ["version"]
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.dynamic]
+version = { attr = "bottega.VERSIONE" }
+
+[tool.setuptools.packages.find]
+where = ["attrezzi"]
+include = ["bottega*"]
+namespaces = false
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["attrezzi"]
+testpaths = ["attrezzi/tests"]
