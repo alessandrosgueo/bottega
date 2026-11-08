@@ -1,6 +1,7 @@
 """La board: interfaccia e adattatori per GitHub Projects (BoardProject e BoardComando)."""
 
 import json
+import math
 import os
 import subprocess
 from collections.abc import Callable, Sequence
@@ -20,6 +21,7 @@ class Lavoro:
     esecutore: str | None = None
     nota: str = ""
     repo: str | None = None
+    campi: dict[str, str] = field(default_factory=dict)
 
 
 class ErroreBoard(Exception):
@@ -32,6 +34,9 @@ class Board(Protocol):
     def pronti(self) -> list[Lavoro]: ...
 
     def in_corso(self) -> list[Lavoro]: ...
+
+    def elenco(self) -> list[Lavoro]: ...
+
     def lavoro(self, numero: int) -> Lavoro | None: ...
 
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool: ...
@@ -40,7 +45,7 @@ class Board(Protocol):
 
     def consegna(self, numero: int, pr: int) -> None: ...
 
-    def campo(self, numero: int, nome: str, valore: str) -> None: ...
+    def campo(self, numero: int, nome: str, valore: str | int | float | None) -> None: ...
 
     def aggiungi(self, numero: int) -> None: ...
 
@@ -97,7 +102,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               }
             }
           }
-          fieldValues(first: 20) {
+          fieldValues(first: 100) {
             nodes {
               ... on ProjectV2ItemFieldTextValue {
                 text
@@ -110,6 +115,10 @@ query($owner: String!, $number: Int!, $cursor: String) {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name
                 optionId
+                field { ... on ProjectV2FieldCommon { name } }
+              }
+              ... on ProjectV2ItemFieldDateValue {
+                date
                 field { ... on ProjectV2FieldCommon { name } }
               }
             }
@@ -173,7 +182,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               }
             }
           }
-          fieldValues(first: 20) {
+          fieldValues(first: 100) {
             nodes {
               ... on ProjectV2ItemFieldTextValue {
                 text
@@ -186,6 +195,10 @@ query($owner: String!, $number: Int!, $cursor: String) {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name
                 optionId
+                field { ... on ProjectV2FieldCommon { name } }
+              }
+              ... on ProjectV2ItemFieldDateValue {
+                date
                 field { ... on ProjectV2FieldCommon { name } }
               }
             }
@@ -227,6 +240,52 @@ mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
 """
 
 
+def _formatta_numero_str(val: Any) -> str:
+    if isinstance(val, bool):
+        return str(val)
+    if isinstance(val, int):
+        return str(val)
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return str(val)
+        if val.is_integer() or val == int(val):
+            return str(int(val))
+        return str(val)
+    if isinstance(val, str):
+        try:
+            f = float(val)
+            if math.isnan(f) or math.isinf(f):
+                return val
+            if f.is_integer() or f == int(f):
+                return str(int(f))
+            return str(f)
+        except ValueError:
+            return val
+    return str(val)
+
+
+def _valida_e_formatta_numero(nome: str, valore: Any) -> str:
+    if isinstance(valore, bool) or valore is None:
+        raise ErroreBoard(f"Campo {nome}: valore non numerico {valore!r}")
+    if isinstance(valore, (int, float)):
+        if math.isnan(valore) or math.isinf(valore):
+            raise ErroreBoard(f"Campo {nome}: valore non numerico {valore!r}")
+        if isinstance(valore, float) and (valore.is_integer() or valore == int(valore)):
+            return str(int(valore))
+        return str(valore)
+    if isinstance(valore, str):
+        try:
+            f = float(valore)
+        except ValueError:
+            raise ErroreBoard(f"Campo {nome}: valore non numerico {valore!r}")
+        if math.isnan(f) or math.isinf(f):
+            raise ErroreBoard(f"Campo {nome}: valore non numerico {valore!r}")
+        if f.is_integer() or f == int(f):
+            return str(int(f))
+        return str(f)
+    raise ErroreBoard(f"Campo {nome}: valore non numerico {valore!r}")
+
+
 class BoardProject:
     """Implementazione diretta su GitHub Projects (v2) tramite query GraphQL e comandi `gh`."""
 
@@ -244,12 +303,16 @@ class BoardProject:
         self._tipo_proprietario: str | None = None
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
-        risultato = subprocess.run(
-            ["gh", *argomenti],
-            input=ingresso,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            risultato = subprocess.run(
+                ["gh", *argomenti],
+                input=ingresso,
+                text=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise ErroreBoard(f"gh non ha risposto in 120 secondi: {argomenti[:2]}") from None
         if risultato.returncode != 0:
             raise ErroreBoard(f"gh ha fallito ({risultato.returncode}): {risultato.stderr.strip()}")
         return risultato.stdout
@@ -342,12 +405,14 @@ class BoardProject:
                 fn = f_info.get("name")
                 if not fn:
                     continue
-                if "name" in fv:
+                if "name" in fv and fv["name"] is not None:
                     valori[fn] = str(fv["name"])
-                elif "text" in fv:
+                elif "text" in fv and fv["text"] is not None:
                     valori[fn] = str(fv["text"])
-                elif "number" in fv:
-                    valori[fn] = str(fv["number"])
+                elif "number" in fv and fv["number"] is not None:
+                    valori[fn] = _formatta_numero_str(fv["number"])
+                elif "date" in fv and fv["date"] is not None:
+                    valori[fn] = str(fv["date"])
 
             lav = Lavoro(
                 numero=num,
@@ -358,6 +423,7 @@ class BoardProject:
                 esecutore=valori.get("Esecutore"),
                 nota=valori.get("Nota del giro", ""),
                 repo=item_repo,
+                campi=valori,
             )
             items[num] = (item_id, lav)
 
@@ -374,6 +440,10 @@ class BoardProject:
     def in_corso(self) -> list[Lavoro]:
         _, _, items = self._leggi_progetto()
         return [lav for _, lav in items.values() if lav.stato == "in corso"]
+
+    def elenco(self) -> list[Lavoro]:
+        _, _, items = self._leggi_progetto()
+        return [lav for _, lav in items.values()]
 
     def lavoro(self, numero: int) -> Lavoro | None:
         _, _, items = self._leggi_progetto()
@@ -404,7 +474,7 @@ class BoardProject:
     def consegna(self, numero: int, pr: int) -> None:
         self.campo(numero, "Bottega", "consegnato")
 
-    def campo(self, numero: int, nome: str, valore: str | None) -> None:
+    def campo(self, numero: int, nome: str, valore: str | int | float | None) -> None:
         proj, campi, items = self._leggi_progetto()
         if nome not in campi:
             raise ErroreBoard(f"Campo mancante nel Project: {nome}")
@@ -426,12 +496,24 @@ class BoardProject:
             ])
             return
 
+        is_number = field_info.get("dataType") == "NUMBER"
         is_select = field_info.get("dataType") == "SINGLE_SELECT" or "options" in field_info
-        if is_select:
+        if is_number:
+            val_num_str = _valida_e_formatta_numero(nome, valore)
+            self._esegui([
+                "api", "graphql",
+                "-f", f"query={_MUTATION_UPDATE}",
+                "-f", f"projectId={project_id}",
+                "-f", f"itemId={item_id}",
+                "-f", f"fieldId={field_id}",
+                "-F", f"value[number]={val_num_str}",
+            ])
+        elif is_select:
+            valore_str = str(valore)
             options = field_info.get("options", [])
-            opt = next((o for o in options if isinstance(o, dict) and o.get("name") == valore), None)
+            opt = next((o for o in options if isinstance(o, dict) and o.get("name") == valore_str), None)
             if not opt or "id" not in opt:
-                raise ErroreBoard(f"Opzione {valore!r} non trovata per il campo {nome}")
+                raise ErroreBoard(f"Opzione {valore_str!r} non trovata per il campo {nome}")
             opt_id = opt["id"]
             self._esegui([
                 "api", "graphql",
@@ -469,6 +551,12 @@ _CAMPI_LAVORO = {f.name for f in fields(Lavoro)}
 
 def _dati_a_lavoro(d: dict[str, Any]) -> Lavoro:
     d_filtrato = {k: v for k, v in d.items() if k in _CAMPI_LAVORO}
+    if "campi" in d_filtrato and isinstance(d_filtrato["campi"], dict):
+        d_filtrato["campi"] = {
+            str(k): _formatta_numero_str(v) if isinstance(v, (int, float)) else str(v)
+            for k, v in d_filtrato["campi"].items()
+            if v is not None
+        }
     return Lavoro(**d_filtrato)
 
 
@@ -493,12 +581,16 @@ class BoardComando:
     def _esegui(self, argomenti: list[str], ingresso: str | None = None) -> str:
         if self._esegui_custom is not None:
             return self._esegui_custom(argomenti, ingresso)
-        risultato = subprocess.run(
-            argomenti,
-            input=ingresso,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            risultato = subprocess.run(
+                argomenti,
+                input=ingresso,
+                text=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}") from None
         if risultato.returncode != 0:
             raise ErroreBoard(f"Comando {argomenti} fallito ({risultato.returncode}): {risultato.stderr.strip()}")
         return risultato.stdout
@@ -513,9 +605,24 @@ class BoardComando:
         dati = json.loads(out)
         return [_dati_a_lavoro(d) for d in dati]
 
+    def elenco(self) -> list[Lavoro]:
+        out = self._esegui([*self._cmd, "elenco"])
+        dati = json.loads(out)
+        return [_dati_a_lavoro(d) for d in dati]
+
     def lavoro(self, numero: int) -> Lavoro | None:
-        # Il lavoro del giro di regola è già «in corso» (l'ha preso il distributore): si cerca in tutti e due gli elenchi.
-        for lav in [*self.in_corso(), *self.pronti()]:
+        # B5: si cerca fra tutti gli elementi (anche un compito consegnato o senza stato riceve le sue misure); un
+        # adattatore di prima di B5, senza `elenco`, cerca ancora fra in corso e pronti.
+        try:
+            tutti = self.elenco()
+        except ErroreBoard as errore_elenco:
+            # Ripiego per un adattatore senza `elenco`; se il lavoro non c'è, l'errore vero (anche di rete) torna
+            # fuori, invece di un «non trovato» che farebbe perdere le misure in silenzio.
+            for lav in [*self.in_corso(), *self.pronti()]:
+                if lav.numero == numero:
+                    return lav
+            raise errore_elenco
+        for lav in tutti:
             if lav.numero == numero:
                 return lav
         return None
@@ -544,8 +651,9 @@ class BoardComando:
     def consegna(self, numero: int, pr: int) -> None:
         self._esegui([*self._cmd, "consegna", str(numero), "--pr", str(pr)])
 
-    def campo(self, numero: int, nome: str, valore: str) -> None:
-        self._esegui([*self._cmd, "campo", str(numero), nome, valore])
+    def campo(self, numero: int, nome: str, valore: str | int | float | None) -> None:
+        val_str = "" if valore is None else str(valore)
+        self._esegui([*self._cmd, "campo", str(numero), nome, val_str])
 
     def aggiungi(self, numero: int) -> None:
         self._esegui([*self._cmd, "aggiungi", str(numero)])

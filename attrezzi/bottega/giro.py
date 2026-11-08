@@ -19,7 +19,9 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
+import time
 
 from bottega.board import Board, BoardComando, BoardProject
 from bottega.brief import fatto_quando, ramo
@@ -31,6 +33,7 @@ from bottega.configurazione import (
     leggi_configurazione,
 )
 from bottega.forgia import Commento, Forgia, ForgiaGh, Issue, _spoglia_segno
+import bottega.misure as misure
 from bottega.porte import Controllo, Lancio, Porta, ambiente_ripulito, esegui_con_tetto, porta as fabbrica_porte
 from bottega.quota import nome_variabile, valore_esaurita
 from bottega.scelta import Compito, scegli
@@ -242,6 +245,57 @@ def _rilancia_distributore(forgia: Forgia) -> None:
         forgia.avvia_workflow("bottega-distributore.yml", {})
     except Exception:
         pass
+
+
+def _scrivi_misure(
+    board: Board,
+    compito_numero: int,
+    candidato: Candidato,
+    durata_secondi: int,
+    consulti: int,
+    token_esecutore: int,
+) -> None:
+    """Scrive le misure del compito sulla board nel finally del giro (B5-R6)."""
+    lav = None
+    try:
+        lav = board.lavoro(compito_numero)
+        if lav is None:
+            board.aggiungi(compito_numero)
+    except Exception as exc:
+        print(f"misure: errore verifica/aggiunta compito #{compito_numero}: {exc}", file=sys.stderr)
+
+    # Un compito già misurato per un altro candidato (cambio dopo una quota): le misure si sommano, ma il compito si
+    # segna «più esecutori» e non entra né nei risultati né nei costi di un candidato. Chi ha misurato per primo sta in
+    # `Misurato da` (l'id del candidato), che scrive solo il giro: `Esecutore` lo riscrive `prendi` prima del giro.
+    precedente = (lav.campi.get("Misurato da") or "").strip() if lav is not None else ""
+    if not precedente:
+        try:
+            board.campo(compito_numero, "Misurato da", candidato.id)
+        except Exception as exc:
+            print(f"misure: errore scrittura Misurato da per #{compito_numero}: {exc}", file=sys.stderr)
+    if precedente and precedente.lower() != candidato.id.lower():
+        voci = [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
+        if misure.PIU_ESECUTORI not in voci:
+            voci.append(misure.PIU_ESECUTORI)
+            try:
+                board.campo(compito_numero, "Misure parziali", ", ".join(voci))
+            except Exception as exc:
+                print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
+        # Esecutore resta com'è (lo usa `prendi` per il lavoro in corso): il compito è fuori dalle statistiche.
+        da_scrivere: tuple[tuple[str, str], ...] = ()
+    else:
+        da_scrivere = (("Esecutore", candidato.nome), ("Porta", candidato.porta), ("Dove", "fuori"))
+
+    for nome_campo, val in da_scrivere:
+        try:
+            board.campo(compito_numero, nome_campo, val)
+        except Exception as exc:
+            print(f"misure: errore scrittura {nome_campo} per #{compito_numero}: {exc}", file=sys.stderr)
+
+    misure.somma(board, compito_numero, "Durata", durata_secondi)
+    misure.somma(board, compito_numero, "Giri", 1)
+    misure.somma(board, compito_numero, "Consulti", consulti)
+    misure.somma(board, compito_numero, "Token esecutore", token_esecutore)
 
 
 def _prepara_fascicolo(
@@ -533,6 +587,15 @@ def _giro(
     candidato = _trova_candidato(lavoro, bottega, configurazione, board)
     porta_esecutore = _ottieni_porta(candidato.porta, porte)
 
+    try:
+        lavori_elenco = board.elenco()
+        risultati_storici = misure.risultati(lavori_elenco, configurazione)
+        costi_relativi = misure.costi_propri(lavori_elenco, configurazione)
+    except Exception as exc:
+        print(f"giro: errore lettura elenco board: {exc}", file=sys.stderr)
+        risultati_storici = {}
+        costi_relativi = None
+
     # RV9: Controllo all'apertura con prefisso
     controllo = porta_esecutore.controlla(prefisso=prefisso)
 
@@ -787,8 +850,14 @@ def _giro(
             "chiudi con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa.\n"
         )
         consulti_effettuati = 0
+        lanci_esecutore: list[Lancio] = []
+        lancio_partito = False
+        tempo_inizio_lancio: float | None = None
 
         while True:
+            if tempo_inizio_lancio is None:
+                tempo_inizio_lancio = time.monotonic()
+            lancio_partito = True
             lancio = porta_esecutore.lancia(
                 cartella=lavoro_dir,
                 prompt=prompt_testo,
@@ -796,6 +865,7 @@ def _giro(
                 conversazione=conversazione_id,
                 prefisso=prefisso,
             )
+            lanci_esecutore.append(lancio)
 
             # RV7: Il consulto parte solo con esito == "fatto" e se l'ultima riga non vuota comincia con DOMANDA PER CHI DECIDE:
             righe_lancio = [r.strip() for r in lancio.testo.splitlines() if r.strip()]
@@ -821,10 +891,11 @@ def _giro(
                 scelta_cons = scegli(
                     compito=compito_cons,
                     configurazione=_solo_runner(configurazione, candidato.runner),
-                    risultati={},
+                    risultati=risultati_storici,
                     quote=quote_map,
                     adesso=adesso,
                     caso=caso,
+                    costi_propri=costi_relativi,
                 )
 
                 if not scelta_cons.candidato or scelta_cons.aspetta:
@@ -1162,10 +1233,11 @@ def _giro(
         scelta_cons = scegli(
             compito=compito_cons,
             configurazione=_solo_runner(configurazione, candidato.runner),
-            risultati={},
+            risultati=risultati_storici,
             quote=quote_map,
             adesso=adesso,
             caso=caso,
+            costi_propri=costi_relativi,
         )
         if scelta_cons.candidato and not scelta_cons.aspetta:
             cand_cons = configurazione.candidati[scelta_cons.candidato]
@@ -1230,10 +1302,25 @@ def _giro(
         return EsitoGiro("bloccato" if tentativi >= 3 else "errore", motivo=str(exc))
 
     finally:
+        if "lancio_partito" in locals() and lancio_partito:
+            try:
+                durata_sec = int(time.monotonic() - tempo_inizio_lancio) if tempo_inizio_lancio is not None else 0
+                token_tot = sum(misure.token_dei_contatori(candidato.porta, l.contatori) for l in lanci_esecutore)
+                _scrivi_misure(
+                    board=board,
+                    compito_numero=compito.numero,
+                    candidato=candidato,
+                    durata_secondi=durata_sec,
+                    consulti=consulti_effettuati,
+                    token_esecutore=token_tot,
+                )
+            except Exception as exc:
+                print(f"misure: errore in _scrivi_misure: {exc}", file=sys.stderr)
+
         # Pulizia completa dello spazio del giro. C6: un errore qui (un `rm` che supera il tetto) non deve sostituire
         # l'esito già scritto sulla board.
         try:
-            if dir_giro.exists():
+            if "dir_giro" in locals() and dir_giro.exists():
                 if prefisso:
                     _esegui([*prefisso, "rm", "-rf", "--", str(dir_giro)], capture_output=True)
                 shutil.rmtree(dir_giro, ignore_errors=True)

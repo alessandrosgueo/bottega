@@ -1011,4 +1011,48 @@ def test_c5_esegui_porta_byte_non_utf8(tmp_path: Path) -> None:
     assert "\ufffd" in stdout
 
 
+def test_c1_pi_somma_i_messaggi(tmp_path: Path) -> None:
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_pi_somma.py",
+        """
+import json, sys
+print(json.dumps({"type": "session", "id": "pi-sess"}))
+print(json.dumps({"type": "message", "role": "assistant", "usage": {"input": 100, "output": 50}}))
+print(json.dumps({"type": "message", "role": "assistant", "usage": {"input": 200, "output": 75}}))
+print(json.dumps({"type": "message", "stopReason": "stop"}))
+sys.exit(0)
+""",
+    )
+    p = porta("pi", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.contatori == {"input": 300, "output": 125}
+
+
+def test_c1_copilot_somma_i_modelli(tmp_path: Path) -> None:
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_copilot_modelli.py",
+        """
+import json, sys
+print(json.dumps({"type": "session.start", "data": {"sessionId": "cop-sess"}}))
+print(json.dumps({
+    "type": "session.shutdown",
+    "data": {
+        "modelMetrics": {
+            "modello-1": {"usage": {"inputTokens": 100, "outputTokens": 40}},
+            "modello-2": {"usage": {"inputTokens": 200, "outputTokens": 60}},
+        }
+    }
+}))
+sys.exit(0)
+""",
+    )
+    p = porta("copilot-cli", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.contatori == {"inputTokens": 300, "outputTokens": 100}
+
+
+
+
 

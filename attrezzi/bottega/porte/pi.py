@@ -5,12 +5,14 @@ la sola lettura (`--tools read,grep,find,ls`), l'estrazione di sessione e messag
 Solo libreria standard.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import json
+import re
 
-from bottega.porte import Controllo, Lancio, controlla_eseguibile, esegui_porta
+from bottega.porte import Controllo, Lancio, Token, controlla_eseguibile, esegui_porta, somma_pesata
 
 
 @dataclass
@@ -76,14 +78,14 @@ class Pi:
                 usage = rec.get("usage")
                 if isinstance(usage, dict):
                     for k, v in usage.items():
-                        if isinstance(v, int):
-                            contatori[k] = v
+                        if isinstance(v, int) and not isinstance(v, bool):
+                            contatori[k] = contatori.get(k, 0) + v
             elif tipo == "usage":
                 usage = rec.get("usage")
                 if isinstance(usage, dict):
                     for k, v in usage.items():
-                        if isinstance(v, int):
-                            contatori[k] = v
+                        if isinstance(v, int) and not isinstance(v, bool):
+                            contatori[k] = contatori.get(k, 0) + v
 
             if rec.get("stopReason") == "error" or rec.get("errorMessage") or rec.get("type") == "error":
                 ha_errore = True
@@ -117,3 +119,146 @@ class Pi:
             rinnovo=None,
             contatori=contatori,
         )
+
+    def trascrizione(
+        self,
+        env: Mapping[str, str],
+        cartella: Path,
+        sessione: str | None = None,
+    ) -> Path | None:
+        """Individua il file .jsonl di trascrizione per Pi."""
+        casa = Path(env.get("HOME", "/"))
+        sessions_dir = (
+            Path(env["PI_CODING_AGENT_SESSION_DIR"])
+            if "PI_CODING_AGENT_SESSION_DIR" in env
+            else (casa / ".pi" / "agent" / "sessions")
+        )
+
+        sess = sessione or env.get("PI_SESSION_FILE")
+        if sess:
+            p_diretto = Path(sess)
+            if p_diretto.is_file():
+                return p_diretto
+            if (sessions_dir / sess).is_file():
+                return sessions_dir / sess
+            # Un nome di file senza cartella (quello che il segno scrive): si cerca nelle cartelle delle sessioni.
+            if "/" not in sess and "\\" not in sess and not sess.startswith(".") and sessions_dir.is_dir():
+                trovati = sorted(d / sess for d in sessions_dir.iterdir() if d.is_dir() and (d / sess).is_file())
+                if trovati:
+                    return trovati[0]
+
+        if not sessions_dir.is_dir():
+            return None
+
+        # Nome cartella sessioni di Pi: --<percorso>-- con separatori trasformati in '-'
+        s1 = str(cartella.resolve()).lstrip("/\\")
+        s1 = re.sub(r"[/\\:]", "-", s1)
+        folder = sessions_dir / f"--{s1}--"
+        if not folder.is_dir():
+            s2 = str(cartella).lstrip("/\\")
+            s2 = re.sub(r"[/\\:]", "-", s2)
+            folder = sessions_dir / f"--{s2}--"
+            if not folder.is_dir():
+                return None
+
+        if sess:
+            cands = [f for f in folder.glob(f"*{sess}*.jsonl") if f.is_file()] + [
+                f for f in folder.glob(f"{sess}*") if f.is_file()
+            ]
+            if cands:
+                return max(cands, key=lambda f: f.stat().st_mtime)
+            return None
+
+        candidati = [f for f in folder.glob("*.jsonl") if f.is_file()]
+        if not candidati:
+            return None
+        return max(candidati, key=lambda f: f.stat().st_mtime)
+
+    def token(
+        self,
+        percorso: Path,
+        dopo: datetime,
+        fino: datetime,
+        visti: set[str] | None = None,
+    ) -> Token:
+        """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
+        if dopo.tzinfo is None:
+            dopo = dopo.replace(tzinfo=timezone.utc)
+        if fino.tzinfo is None:
+            fino = fino.replace(tzinfo=timezone.utc)
+
+        totale = 0
+        messaggi = 0
+        with percorso.open("r", encoding="utf-8") as f:
+            for riga in f:
+                riga = riga.strip()
+                if not riga:
+                    continue
+                try:
+                    rec = json.loads(riga)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+
+                tipo = rec.get("type")
+                if tipo == "message":
+                    role = rec.get("role") or (
+                        rec.get("message", {}).get("role") if isinstance(rec.get("message"), dict) else None
+                    )
+                    if role != "assistant":
+                        continue
+                elif tipo not in ("usage", "compaction", "branch_summary"):
+                    continue
+
+                ts = rec.get("timestamp") or (
+                    rec.get("message", {}).get("timestamp") if isinstance(rec.get("message"), dict) else None
+                )
+                if ts is None:
+                    continue
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+                elif isinstance(ts, str):
+                    try:
+                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    except Exception:
+                        continue
+                else:
+                    continue
+
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if not (dopo <= dt <= fino):
+                    continue
+
+                usage = rec.get("usage")
+                if not isinstance(usage, dict) and isinstance(rec.get("message"), dict):
+                    usage = rec["message"].get("usage")
+                if not isinstance(usage, dict):
+                    continue
+
+                chiavi = ("input", "output", "cacheRead", "cacheWrite")
+                trovati = [k for k in chiavi if k in usage]
+                invalido = False
+                subtot = 0
+                if trovati:
+                    pesata = somma_pesata(usage, chiavi, cache_letta="cacheRead")
+                    if pesata is None:
+                        invalido = True
+                    else:
+                        subtot = pesata
+                elif "totalTokens" in usage:
+                    v = usage["totalTokens"]
+                    if isinstance(v, bool) or not isinstance(v, int):
+                        invalido = True
+                    else:
+                        subtot += v
+                else:
+                    continue
+
+                if invalido:
+                    continue
+                totale += subtot
+                messaggi += 1
+
+        return Token(totale=totale, parziale=False, messaggi=messaggi)

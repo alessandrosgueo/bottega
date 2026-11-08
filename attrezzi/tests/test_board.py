@@ -5,7 +5,7 @@ import stat
 from pathlib import Path
 import pytest
 
-from bottega.board import BoardComando, BoardProject, ErroreBoard, Lavoro
+from bottega.board import BoardComando, BoardProject, ErroreBoard, Lavoro, _dati_a_lavoro
 from bottega.finta import BoardFinta
 
 
@@ -629,5 +629,267 @@ def test_c5_adattatore_relativo_fissato_all_avvio(tmp_path: Path, monkeypatch: p
 
     atteso = str(board_sh.resolve())
     assert bc._cmd[0] == atteso
+
+
+def test_b5_campo_numero_scrive_number() -> None:
+    chiamate: list[list[str]] = []
+    graphql_data = {
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PVT_1",
+                    "fields": {
+                        "nodes": [
+                            {
+                                "id": "F_BOTTEGA",
+                                "name": "Bottega",
+                                "dataType": "SINGLE_SELECT",
+                                "options": [{"id": "OPT_1", "name": "pronto"}],
+                            },
+                            {"id": "F_ESITO", "name": "Esito", "dataType": "SINGLE_SELECT", "options": []},
+                            {"id": "F_ESECUTORE", "name": "Esecutore", "dataType": "TEXT"},
+                            {"id": "F_NOTA", "name": "Nota del giro", "dataType": "TEXT"},
+                            {"id": "F_DURATA", "name": "Durata", "dataType": "NUMBER"},
+                        ]
+                    },
+                    "items": {
+                        "nodes": [
+                            {
+                                "id": "ITEM_10",
+                                "content": {"number": 10, "title": "Compito"},
+                                "fieldValues": {"nodes": []},
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+    }
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(list(argomenti))
+        return json.dumps(graphql_data)
+
+    board = BoardProject("proprietario", 1, esegui=esegui_finto)
+    board.campo(10, "Durata", 42)
+    modifiche = [c for c in chiamate if any("updateProjectV2ItemFieldValue" in a for a in c)]
+    assert len(modifiche) == 1
+    assert "-F" in modifiche[0]
+    assert "value[number]=42" in modifiche[0]
+
+    chiamate.clear()
+    board.campo(10, "Durata", 2.5)
+    modifiche = [c for c in chiamate if any("updateProjectV2ItemFieldValue" in a for a in c)]
+    assert len(modifiche) == 1
+    assert "-F" in modifiche[0]
+    assert "value[number]=2.5" in modifiche[0]
+
+
+def test_b5_campo_numero_rifiuta_testo() -> None:
+    chiamate: list[list[str]] = []
+    graphql_data = {
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PVT_1",
+                    "fields": {
+                        "nodes": [
+                            {"id": "F_BOTTEGA", "name": "Bottega", "dataType": "SINGLE_SELECT", "options": []},
+                            {"id": "F_ESITO", "name": "Esito", "dataType": "SINGLE_SELECT", "options": []},
+                            {"id": "F_ESECUTORE", "name": "Esecutore", "dataType": "TEXT"},
+                            {"id": "F_NOTA", "name": "Nota del giro", "dataType": "TEXT"},
+                            {"id": "F_DURATA", "name": "Durata", "dataType": "NUMBER"},
+                        ]
+                    },
+                    "items": {
+                        "nodes": [
+                            {
+                                "id": "ITEM_10",
+                                "content": {"number": 10, "title": "Compito"},
+                                "fieldValues": {"nodes": []},
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+    }
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(list(argomenti))
+        return json.dumps(graphql_data)
+
+    board = BoardProject("proprietario", 1, esegui=esegui_finto)
+    for invalido in ("nan", "inf", "-inf", "12abc", [1], True):
+        chiamate.clear()
+        with pytest.raises(ErroreBoard, match="Durata"):
+            board.campo(10, "Durata", invalido)  # type: ignore[arg-type]
+        modifiche = [c for c in chiamate if any("updateProjectV2ItemFieldValue" in a for a in c)]
+        assert len(modifiche) == 0
+
+    bf = BoardFinta([Lavoro(numero=1, titolo="Compito")])
+    for invalido in ("nan", "inf", "-inf", "12abc"):
+        with pytest.raises(ErroreBoard, match="Durata"):
+            bf.campo(1, "Durata", invalido)
+
+
+def test_b5_leggi_campi_numero_e_testo() -> None:
+    graphql_data = {
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PVT_1",
+                    "fields": {
+                        "nodes": [
+                            {
+                                "id": "F_BOTTEGA",
+                                "name": "Bottega",
+                                "dataType": "SINGLE_SELECT",
+                                "options": [{"id": "OPT_1", "name": "pronto"}],
+                            },
+                            {"id": "F_ESITO", "name": "Esito", "dataType": "SINGLE_SELECT", "options": []},
+                            {"id": "F_ESECUTORE", "name": "Esecutore", "dataType": "TEXT"},
+                            {"id": "F_NOTA", "name": "Nota del giro", "dataType": "TEXT"},
+                            {"id": "F_DURATA", "name": "Durata", "dataType": "NUMBER"},
+                            {"id": "F_COSTO", "name": "Costo", "dataType": "NUMBER"},
+                            {"id": "F_DATA", "name": "Scadenza", "dataType": "DATE"},
+                        ]
+                    },
+                    "items": {
+                        "nodes": [
+                            {
+                                "id": "ITEM_10",
+                                "content": {"number": 10, "title": "Compito"},
+                                "fieldValues": {
+                                    "nodes": [
+                                        {"field": {"name": "Bottega"}, "name": "pronto"},
+                                        {"field": {"name": "Durata"}, "number": 3.0},
+                                        {"field": {"name": "Costo"}, "number": 2.5},
+                                        {"field": {"name": "Scadenza"}, "date": "2026-11-08"},
+                                    ]
+                                },
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+    }
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        return json.dumps(graphql_data)
+
+    board = BoardProject("proprietario", 1, esegui=esegui_finto)
+    lav = board.lavoro(10)
+    assert lav is not None
+    assert lav.campi["Durata"] == "3"
+    assert lav.campi["Costo"] == "2.5"
+    assert lav.campi["Scadenza"] == "2026-11-08"
+    assert lav.campi["Bottega"] == "pronto"
+
+
+def test_b5_elenco_project() -> None:
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        return json.dumps(_PROGETTO_GRAPHQL_OK)
+
+    board = BoardProject("proprietario", 1, repo="proprietario/repo", esegui=esegui_finto)
+    elenco = board.elenco()
+    numeri = [l.numero for l in elenco]
+    assert 10 in numeri
+    assert 20 in numeri
+    assert 30 in numeri
+    for lav in elenco:
+        assert isinstance(lav.campi, dict)
+
+
+def test_b5_elenco_adattatore() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_cmd(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        return json.dumps([
+            {
+                "numero": 100,
+                "titolo": "Compito Adattatore",
+                "etichette": ["bottega: fuori"],
+                "stato": "pronto",
+                "campi": {"Durata": "15", "Porta": "claude-code"},
+            }
+        ])
+
+    bc = BoardComando(["adattatore"], esegui=esegui_cmd)
+    elenco = bc.elenco()
+    assert len(chiamate) == 1
+    assert chiamate[0][-1] == "elenco"
+    assert len(elenco) == 1
+    assert elenco[0].numero == 100
+    assert elenco[0].campi == {"Durata": "15", "Porta": "claude-code"}
+
+
+def test_b5_lavoro_adattatore_con_campi() -> None:
+    dati = {
+        "numero": 50,
+        "titolo": "Compito",
+        "stato": "pronto",
+        "campi": {
+            "Durata": 10,
+            "Costo": 2.5,
+            "Giri": 3.0,
+            "Porta": "pi",
+        },
+    }
+    lav = _dati_a_lavoro(dati)
+    assert lav.campi["Durata"] == "10"
+    assert lav.campi["Costo"] == "2.5"
+    assert lav.campi["Giri"] == "3"
+    assert lav.campi["Porta"] == "pi"
+
+
+def test_c1_cento_valori_per_elemento() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        return json.dumps(_PROGETTO_GRAPHQL_OK)
+
+    board = BoardProject("proprietario", 1, repo="proprietario/repo", esegui=esegui_finto)
+    board.elenco()
+    assert any("fieldValues(first: 100)" in arg for c in chiamate for arg in c)
+
+
+def test_c1_adattatore_senza_elenco() -> None:
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        if argomenti[-1] == "elenco":
+            raise ErroreBoard("elenco non supportato")
+        if argomenti[-1] == "pronti":
+            return json.dumps([{"numero": 10, "titolo": "Compito", "stato": "pronto"}])
+        if argomenti[-1] == "in-corso":
+            return json.dumps([])
+        return json.dumps([])
+
+    bc = BoardComando(["adattatore"], esegui=esegui_finto)
+    lav = bc.lavoro(10)
+    assert lav is not None
+    assert lav.numero == 10
+
+
+def test_c1_null_dell_adattatore() -> None:
+    def esegui_cmd(argomenti: list[str], ingresso: str | None = None) -> str:
+        return json.dumps([
+            {
+                "numero": 10,
+                "titolo": "Compito",
+                "stato": "pronto",
+                "campi": {"Segno": None, "Giri": 2},
+            }
+        ])
+
+    bc = BoardComando(["adattatore"], esegui=esegui_cmd)
+    lav = bc.lavoro(10)
+    assert lav is not None
+    assert "Segno" not in lav.campi
+    assert lav.campi.get("Giri") == "2"
+
+
 
 

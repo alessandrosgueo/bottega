@@ -6,12 +6,13 @@ l'estrazione di sessione, messaggi e contatori dall'evento shutdown, e gli error
 Solo libreria standard.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 
-from bottega.porte import Controllo, Lancio, controlla_eseguibile, esegui_porta
+from bottega.porte import Controllo, Lancio, Token, controlla_eseguibile, esegui_porta, somma_pesata
 
 
 @dataclass
@@ -90,8 +91,8 @@ class CopilotCli:
                             u = mdata.get("usage")
                             if isinstance(u, dict):
                                 for uk, uv in u.items():
-                                    if isinstance(uv, int):
-                                        contatori[uk] = uv
+                                    if isinstance(uv, int) and not isinstance(uv, bool):
+                                        contatori[uk] = contatori.get(uk, 0) + uv
 
             # Rilevamento evento d'errore nel JSONL (senza mai leggere assistant.message)
             if tipo in ("error", "session.error") or (isinstance(tipo, str) and "error" in tipo):
@@ -146,3 +147,115 @@ class CopilotCli:
             rinnovo=None,
             contatori=contatori,
         )
+
+    def trascrizione(
+        self,
+        env: Mapping[str, str],
+        cartella: Path,
+        sessione: str | None = None,
+    ) -> Path | None:
+        """Individua il file events.jsonl di Copilot CLI per la sessione o l'ultima per cartella."""
+        casa = Path(env.get("HOME", "/"))
+        copilot_home = Path(env["COPILOT_HOME"]) if "COPILOT_HOME" in env else (casa / ".copilot")
+        session_state_dir = copilot_home / "session-state"
+        if not session_state_dir.is_dir():
+            return None
+
+        sid = sessione or env.get("COPILOT_AGENT_SESSION_ID")
+        if sid:
+            candidato = session_state_dir / sid / "events.jsonl"
+            return candidato if candidato.is_file() else None
+
+        # Ricerca per cartella tramite workspace.yaml
+        candidati: list[Path] = []
+        c_res = str(cartella.resolve())
+        c_raw = str(cartella)
+
+        for d in session_state_dir.iterdir():
+            if not d.is_dir():
+                continue
+            events = d / "events.jsonl"
+            if not events.is_file():
+                continue
+            ws = d / "workspace.yaml"
+            if ws.is_file():
+                try:
+                    for riga in ws.read_text(encoding="utf-8").splitlines():
+                        riga = riga.strip()
+                        if riga.startswith("cwd:"):
+                            cwd_val = riga.split(":", 1)[1].strip().strip("'\"")
+                            if cwd_val in (c_res, c_raw):
+                                candidati.append(events)
+                                break
+                except Exception:
+                    pass
+
+        if not candidati:
+            return None
+        return max(candidati, key=lambda f: f.stat().st_mtime)
+
+    def token(
+        self,
+        percorso: Path,
+        dopo: datetime,
+        fino: datetime,
+        visti: set[str] | None = None,
+    ) -> Token:
+        """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
+        if dopo.tzinfo is None:
+            dopo = dopo.replace(tzinfo=timezone.utc)
+        if fino.tzinfo is None:
+            fino = fino.replace(tzinfo=timezone.utc)
+
+        totale = 0
+        messaggi = 0
+        with percorso.open("r", encoding="utf-8") as f:
+            for riga in f:
+                riga = riga.strip()
+                if not riga:
+                    continue
+                try:
+                    rec = json.loads(riga)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+
+                tipo = rec.get("type")
+                if tipo not in ("assistant.usage", "subagent.completed"):
+                    continue
+
+                ts_raw = rec.get("timestamp")
+                if not ts_raw or not isinstance(ts_raw, str):
+                    continue
+                try:
+                    dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if not (dopo <= dt <= fino):
+                    continue
+
+                data = rec.get("data")
+                if not isinstance(data, dict):
+                    continue
+
+                if tipo == "assistant.usage":
+                    subtot = somma_pesata(
+                        data,
+                        ("inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"),
+                        cache_letta="cacheReadTokens",
+                    )
+                    if subtot is None:
+                        continue
+                    totale += subtot
+                    messaggi += 1
+                elif tipo == "subagent.completed":
+                    v = data.get("totalTokens")
+                    if isinstance(v, bool) or not isinstance(v, int):
+                        continue
+                    totale += v
+                    messaggi += 1
+
+        return Token(totale=totale, parziale=False, messaggi=messaggi)

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from bottega.board import ErroreBoard, Lavoro
+from bottega.board import ErroreBoard, Lavoro, _valida_e_formatta_numero
 from bottega.forgia import Commento, ErroreForgia, Issue, _spoglia_segno, segna
 from bottega.segni import ruolo
 
@@ -221,6 +221,15 @@ class BoardFinta:
 
     def _carica_lavoro(self, lavoro: Lavoro) -> None:
         chiave = (lavoro.repo, lavoro.numero)
+        campi = dict(lavoro.campi)
+        if lavoro.stato and "Bottega" not in campi:
+            campi["Bottega"] = lavoro.stato
+        if lavoro.esito and "Esito" not in campi:
+            campi["Esito"] = lavoro.esito
+        if lavoro.esecutore and "Esecutore" not in campi:
+            campi["Esecutore"] = lavoro.esecutore
+        if lavoro.nota and "Nota del giro" not in campi:
+            campi["Nota del giro"] = lavoro.nota
         self._lavori[chiave] = {
             "numero": lavoro.numero,
             "titolo": lavoro.titolo,
@@ -230,7 +239,7 @@ class BoardFinta:
             "esecutore": lavoro.esecutore,
             "nota": lavoro.nota,
             "repo": lavoro.repo,
-            "campi": {},
+            "campi": campi,
         }
 
     def aggiungi(self, lavoro: int | Lavoro, titolo: str = "", stato: str = "pronto") -> None:
@@ -249,7 +258,7 @@ class BoardFinta:
                 "esecutore": None,
                 "nota": "",
                 "repo": self.repo,
-                "campi": {},
+                "campi": {"Bottega": stato} if stato else {},
             }
             self.registro.append(("aggiungi", numero))
 
@@ -262,6 +271,15 @@ class BoardFinta:
         return None
 
     def _a_lavoro(self, d: dict[str, Any]) -> Lavoro:
+        campi = dict(d.get("campi", {}))
+        if d.get("stato") and "Bottega" not in campi:
+            campi["Bottega"] = d["stato"]
+        if d.get("esito") and "Esito" not in campi:
+            campi["Esito"] = d["esito"]
+        if d.get("esecutore") and "Esecutore" not in campi:
+            campi["Esecutore"] = d["esecutore"]
+        if d.get("nota") and "Nota del giro" not in campi:
+            campi["Nota del giro"] = d["nota"]
         return Lavoro(
             numero=d["numero"],
             titolo=d["titolo"],
@@ -271,6 +289,7 @@ class BoardFinta:
             esecutore=d.get("esecutore"),
             nota=d.get("nota", ""),
             repo=d.get("repo"),
+            campi=campi,
         )
 
     def pronti(self) -> list[Lavoro]:
@@ -291,6 +310,14 @@ class BoardFinta:
                 risultato.append(self._a_lavoro(d))
         return risultato
 
+    def elenco(self) -> list[Lavoro]:
+        risultato: list[Lavoro] = []
+        for (r, n), d in self._lavori.items():
+            if self.repo is not None and r is not None and r != self.repo:
+                continue
+            risultato.append(self._a_lavoro(d))
+        return risultato
+
     def lavoro(self, numero: int) -> Lavoro | None:
         d = self._trova_lavoro(numero)
         return self._a_lavoro(d) if d is not None else None
@@ -306,6 +333,12 @@ class BoardFinta:
         d["esecutore"] = esecutore
         d["nota"] = nota
         d["esito"] = None
+        campi = d.setdefault("campi", {})
+        campi["Bottega"] = "in corso"
+        campi["Esecutore"] = esecutore
+        if nota:
+            campi["Nota del giro"] = nota
+        campi.pop("Esito", None)
         self.registro.append(("prendi", numero, esecutore, nota))
         return True
 
@@ -314,8 +347,11 @@ class BoardFinta:
         if d is None:
             raise ErroreBoard(f"Lavoro {numero} non trovato")
         d["stato"] = stato
+        campi = d.setdefault("campi", {})
+        campi["Bottega"] = stato
         if nota is not None:
             d["nota"] = nota
+            campi["Nota del giro"] = nota
         self.registro.append(("stato", numero, stato, nota))
 
     def consegna(self, numero: int, pr: int) -> None:
@@ -323,13 +359,23 @@ class BoardFinta:
         if d is None:
             raise ErroreBoard(f"Lavoro {numero} non trovato")
         d["stato"] = "consegnato"
+        d.setdefault("campi", {})["Bottega"] = "consegnato"
         self.registro.append(("consegna", numero, pr))
 
-    def campo(self, numero: int, nome: str, valore: str | None) -> None:
+    def campo(self, numero: int, nome: str, valore: str | int | float | None) -> None:
         d = self._trova_lavoro(numero)
         if d is None:
             raise ErroreBoard(f"Lavoro {numero} non trovato")
-        if valore is None:
+        from bottega.misure import CAMPI
+        if nome in CAMPI and CAMPI[nome] == "NUMBER" and valore is not None:
+            val_str = _valida_e_formatta_numero(nome, valore)
+        elif valore is not None:
+            val_str = str(valore)
+        else:
+            val_str = None
+
+        campi = d.setdefault("campi", {})
+        if val_str is None:
             if nome == "Bottega":
                 d["stato"] = ""
             elif nome == "Esito":
@@ -338,17 +384,15 @@ class BoardFinta:
                 d["esecutore"] = None
             elif nome == "Nota del giro":
                 d["nota"] = ""
-            else:
-                d.setdefault("campi", {}).pop(nome, None)
+            campi.pop(nome, None)
         else:
             if nome == "Bottega":
-                d["stato"] = valore
+                d["stato"] = val_str
             elif nome == "Esito":
-                d["esito"] = valore
+                d["esito"] = val_str
             elif nome == "Esecutore":
-                d["esecutore"] = valore
+                d["esecutore"] = val_str
             elif nome == "Nota del giro":
-                d["nota"] = valore
-            else:
-                d.setdefault("campi", {})[nome] = valore
+                d["nota"] = val_str
+            campi[nome] = val_str
         self.registro.append(("campo", numero, nome, valore))
