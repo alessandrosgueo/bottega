@@ -1,0 +1,37 @@
+# Configurazione della bottega di un progetto. Il file va in `.github/bottega/bottega.toml` del repo del progetto.
+# Questo è il modello che l'installazione copia: ogni chiave ammessa c'è, con un segnaposto da sostituire.
+# Un'ora è HH:MM (ore 00-23, minuti 00-59). Per controllare il file: `bottega configurazione --file <percorso>`.
+
+versione = 1
+
+[progetto]
+comandanti = ["<account>"]                      # facoltativo: chi comanda la bottega; senza, il proprietario del repo
+adattatore = "<comando>"                        # facoltativo: il comando della board del progetto; senza, nessuno
+fuso = "Europe/Rome"                            # obbligatorio: il fuso delle ore (nome IANA, come Europe/Rome)
+notte = "01:30"                                 # facoltativo: l'ora del giro di notte; senza, niente notte
+manutenzione = ["03:00-04:30", "23:30-01:00"]   # facoltativo: finestre senza giri; possono passare la mezzanotte
+
+# Una bottega è un abbonamento con la sua quota. L'id (a-z, 0-9 e -) lo sceglie chi configura.
+[botteghe.principale]
+quota = "scarsa"                  # scarsa, normale o abbondante
+porte = ["claude-code"]           # fra claude-code, antigravity, pi, copilot-cli: come si entra nella bottega
+
+[botteghe.secondaria]
+quota = "abbondante"
+porte = ["pi"]
+
+# Un candidato è un modello di una bottega, da una porta, per le funzioni che fa. Almeno uno decide.
+[candidati.maestro]
+nome = "Maestro <modello forte>"        # titolo e modello, unico nel file
+bottega = "principale"                  # l'id di una bottega qui sopra
+porta = "claude-code"                   # una porta di quella bottega
+modello = "<modello forte>"             # il nome del modello, come lo vuole la porta
+funzioni = ["decidere", "rivedere"]     # fra decidere, eseguire, rivedere, consigliare
+
+[candidati.lavorante]
+nome = "Lavorante <modello economico>"
+bottega = "secondaria"
+porta = "pi"
+modello = "<modello economico>"
+funzioni = ["eseguire"]
+runner = "<etichetta del runner>"       # facoltativo: senza, il candidato lavora solo in sessione
