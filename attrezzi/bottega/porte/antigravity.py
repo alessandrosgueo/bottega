@@ -98,7 +98,8 @@ class Antigravity:
                 testo = stdout.strip()
         else:
             # RV16: quota e accesso cercati solo nei campi d'errore e in stderr, mai nel testo del modello
-            parole_quota = ("quota", "exhausted", "resource_exhausted", "rate limit", "429")
+            # «credits balance» dal vivo: i crediti AI finiti arrivano come errore senza la parola quota (PORTE-2).
+            parole_quota = ("quota", "exhausted", "resource_exhausted", "rate limit", "429", "credits balance")
             parole_accesso = ("authentication required", "unauthorized", "login required", "not logged in")
 
             if ha_codice_429 or any(k in testo_controllo_errore for k in parole_quota):

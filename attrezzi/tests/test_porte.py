@@ -909,6 +909,30 @@ sys.exit(1)
     assert res.esito == "quota"
 
 
+def test_antigravity_crediti_finiti_dal_vivo(tmp_path: Path) -> None:
+    """PORTE-2: l'uscita vera di agy coi crediti AI finiti (2026-11-08) è quota, anche senza stderr."""
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_agy_crediti.py",
+        """
+import json, sys
+print(json.dumps({
+    "conversation_id": "00000000-0000-0000-0000-000000000000",
+    "status": "ERROR",
+    "response": "",
+    "error": "Your AI credits balance is too low to continue.",
+    "duration_seconds": 312.1,
+    "num_turns": 1,
+    "finished_reason": "error",
+}))
+sys.exit(3)
+""",
+    )
+    p = porta("antigravity", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.esito == "quota"
+
+
 def test_rv16_pi_errore_con_quota_in_risposta_resta_errore(tmp_path: Path) -> None:
     """RV16: Pi in errore cerca la quota SOLO in errorMessage e stderr, mai nei messaggi del modello."""
     script = _crea_script_finto(
