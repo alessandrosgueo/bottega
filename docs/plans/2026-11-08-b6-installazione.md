@@ -27,7 +27,7 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
   `Defaults:bottega-runner umask=0007, umask_override` e
   `bottega-runner ALL=(bottega-esecutore) NOPASSWD: ALL`. Il runner diventa solo l'esecutore, mai root; l'esecutore
   non ha nessun `sudo`.
-- **B6-R3. Il runner,** per ogni progetto, in `~bottega-runner/runner-<owner>-<repo>` (la casa dell'utente del runner): l'archivio della
+- **B6-R3. Il runner,** per ogni progetto, in `/var/lib/bottega/runner-<owner>-<repo>` (fuori dalle case): l'archivio della
   versione scelta con lo SHA-256 letto dal corpo della release (`<!-- BEGIN SHA linux-<arch> -->`), `config.sh
   --unattended --url --token --name <host>-bottega --labels <etichetta> --work _work --replace` col token di
   registrazione di `gh api -X POST repos/<repo>/actions/runners/registration-token`, il servizio con `svc.sh install
@@ -67,6 +67,13 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
   sulla palestra, col signore per i codici nel browser. In B6: i passi di macchina girano davvero in un contenitore
   Ubuntu pulito (utenti, gruppo, cartelle, `sudoers`), due volte, e la seconda non cambia niente; i passi verso GitHub
   girano a vuoto (`--prova`) e con forge e board finte.
+
+- **B6-R11. I file di sistema** (`sudoers`, `.env` del runner, drop-in systemd) si installano con `passo_file`: un
+  passo solo, in una shell di root, col contenuto quotato nel comando, scritto in un `mktemp` di root, controllato con
+  `visudo -c -f` se è un sudoers, e installato con `install`. Nessun file temporaneo dal nome prevedibile e nessuna
+  finestra fra controllo e installazione (dalla revisione di B6.2: il primo codice scriveva in `/tmp` con un nome
+  fisso già mentre preparava i passi, e un altro utente poteva cambiare il sudoers prima dell'installazione). Il
+  `.env` è di `root:bottega`, `0640`: il runner lo legge, nessuno dei due utenti lo cambia.
 
 ## Review Focus
 
