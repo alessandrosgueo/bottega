@@ -122,24 +122,39 @@ sys.exit(2)
 
 
 def test_ambiente_ripulito() -> None:
-    """L'ambiente ripulito non contiene GH_TOKEN, BOTTEGA_TOKEN né variabili GITHUB_*."""
+    """L'ambiente ripulito include solo le variabili ammesse (elenco esplicito e LC_*)."""
     base = {
         "PATH": "/usr/bin",
+        "HOME": "/home/utente",
+        "USER": "utente",
+        "LOGNAME": "utente",
+        "SHELL": "/bin/bash",
+        "LANG": "it_IT.UTF-8",
+        "LANGUAGE": "it_IT",
+        "TERM": "xterm-256color",
+        "TMPDIR": "/tmp",
+        "TZ": "UTC",
+        "LC_ALL": "it_IT.UTF-8",
+        "LC_CTYPE": "it_IT.UTF-8",
         "GH_TOKEN": "segreto-gh",
         "BOTTEGA_TOKEN": "segreto-bottega",
         "GITHUB_TOKEN": "segreto-github",
-        "GITHUB_ACTION": "run",
-        "GITHUB_REPOSITORY": "mio/repo",
-        "ALTRA_VARIABILE": "valore-ok",
+        "ACTIONS_RUNTIME_TOKEN": "segreto-actions",
+        "QUALCOSA_SECRET": "segreto-ignoto",
+        "ALTRA_VARIABILE": "valore-scartato",
     }
     pulito = ambiente_ripulito(base)
     assert "GH_TOKEN" not in pulito
     assert "BOTTEGA_TOKEN" not in pulito
     assert "GITHUB_TOKEN" not in pulito
-    assert "GITHUB_ACTION" not in pulito
-    assert "GITHUB_REPOSITORY" not in pulito
+    assert "ACTIONS_RUNTIME_TOKEN" not in pulito
+    assert "QUALCOSA_SECRET" not in pulito
+    assert "ALTRA_VARIABILE" not in pulito
     assert pulito["PATH"] == "/usr/bin"
-    assert pulito["ALTRA_VARIABILE"] == "valore-ok"
+    assert pulito["HOME"] == "/home/utente"
+    assert pulito["USER"] == "utente"
+    assert pulito["LC_ALL"] == "it_IT.UTF-8"
+    assert pulito["LC_CTYPE"] == "it_IT.UTF-8"
 
 
 def test_processo_riceve_ambiente_ripulito(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

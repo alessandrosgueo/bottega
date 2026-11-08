@@ -71,6 +71,8 @@ class Forgia(Protocol):
 
     def crea_issue(self, titolo: str, corpo: str, madre: int | None = None) -> int: ...
 
+    def chiudi_issue(self, n: int) -> None: ...
+
     def avviso(self, chiave: str, titolo: str, motivo: str | None) -> None: ...
 
     def ramo_principale(self) -> str: ...
@@ -216,7 +218,8 @@ class ForgiaGh:
             push_runs = [r for r in push_runs if r.get("headSha") == sha]
         if any(r.get("conclusion") in ("failure", "timed_out", "startup_failure") for r in push_runs):
             return "rosso"
-        if all(r.get("status") == "completed" and r.get("conclusion") in ("success", "skipped", "neutral") for r in push_runs):
+        esiti_ok = ("success", "skipped", "neutral")
+        if all(r.get("status") == "completed" and r.get("conclusion") in esiti_ok for r in push_runs):
             return "verde"
         return "ignoto"
 
@@ -227,6 +230,9 @@ class ForgiaGh:
         out = self._esegui(cmd, ingresso=corpo)
         url_o_num = out.strip().split("/")[-1]
         return int(url_o_num)
+
+    def chiudi_issue(self, n: int) -> None:
+        self._esegui(["issue", "close", str(n), "--repo", self.repo])
 
     def avviso(self, chiave: str, titolo: str, motivo: str | None) -> None:
         out = self._esegui([

@@ -31,6 +31,7 @@ class Board(Protocol):
     def pronti(self) -> list[Lavoro]: ...
 
     def in_corso(self) -> list[Lavoro]: ...
+    def lavoro(self, numero: int) -> Lavoro | None: ...
 
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool: ...
 
@@ -213,6 +214,12 @@ class BoardProject:
         _, _, items = self._leggi_progetto()
         return [lav for _, lav in items.values() if lav.stato == "in corso"]
 
+    def lavoro(self, numero: int) -> Lavoro | None:
+        _, _, items = self._leggi_progetto()
+        if numero in items:
+            return items[numero][1]
+        return None
+
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool:
         _, _, items = self._leggi_progetto()
         if numero not in items:
@@ -291,6 +298,13 @@ class BoardComando:
         out = self._esegui([*self._cmd, "in-corso"])
         dati = json.loads(out)
         return [Lavoro(**d) for d in dati]
+
+    def lavoro(self, numero: int) -> Lavoro | None:
+        # Il lavoro del giro di regola è già «in corso» (l'ha preso il distributore): si cerca in tutti e due gli elenchi.
+        for lav in [*self.in_corso(), *self.pronti()]:
+            if lav.numero == numero:
+                return lav
+        return None
 
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool:
         cmd = [*self._cmd, "prendi", str(numero), "--esecutore", esecutore, "--nota", nota]

@@ -61,13 +61,27 @@ class Porta(Protocol):
         ...
 
 
+VARIABILI_AMMESSE: frozenset[str] = frozenset({
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LANGUAGE",
+    "TERM",
+    "TMPDIR",
+    "TZ",
+})
+
+
 def ambiente_ripulito(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Restituisce una copia dell'ambiente priva di GH_TOKEN, BOTTEGA_TOKEN e variabili GITHUB_*."""
+    """Restituisce una copia dell'ambiente che conserva esclusivamente le variabili ammesse."""
     sorgente = os.environ if base_env is None else base_env
-    env = dict(sorgente)
-    for k in list(env.keys()):
-        if k in ("GH_TOKEN", "BOTTEGA_TOKEN") or k.startswith("GITHUB_"):
-            del env[k]
+    env: dict[str, str] = {}
+    for k, v in sorgente.items():
+        if k in VARIABILI_AMMESSE or k.startswith("LC_"):
+            env[k] = v
     return env
 
 

@@ -57,7 +57,7 @@ class ForgiaFinta:
         return list(self._commenti.get(n, []))
 
     def commenta(self, n: int, testo: str, ruolo: str) -> None:
-        if n not in self._issues:
+        if n not in self._issues and n not in self._pr:
             raise ErroreForgia(f"Issue {n} non trovata")
         corpo = segna(testo, ruolo)
         comm = Commento(autore="bottega", corpo=corpo)
@@ -65,21 +65,29 @@ class ForgiaFinta:
         self.registro.append(("commenta", n, corpo, ruolo))
 
     def etichetta(self, n: int, nome: str, aggiungi: bool = True) -> None:
-        if n not in self._issues:
+        if n not in self._issues and n not in self._pr:
             raise ErroreForgia(f"Issue {n} non trovata")
-        cur = self._issues[n]
-        etichette = list(cur.etichette)
-        if aggiungi and nome not in etichette:
-            etichette.append(nome)
-        elif not aggiungi and nome in etichette:
-            etichette.remove(nome)
-        self._issues[n] = Issue(
-            numero=cur.numero,
-            titolo=cur.titolo,
-            corpo=cur.corpo,
-            stato=cur.stato,
-            etichette=etichette,
-        )
+        if n in self._issues:
+            cur = self._issues[n]
+            etichette = list(cur.etichette)
+            if aggiungi and nome not in etichette:
+                etichette.append(nome)
+            elif not aggiungi and nome in etichette:
+                etichette.remove(nome)
+            self._issues[n] = Issue(
+                numero=cur.numero,
+                titolo=cur.titolo,
+                corpo=cur.corpo,
+                stato=cur.stato,
+                etichette=etichette,
+            )
+        if n in self._pr:
+            etichette = list(self._pr[n].setdefault("etichette", []))
+            if aggiungi and nome not in etichette:
+                etichette.append(nome)
+            elif not aggiungi and nome in etichette:
+                etichette.remove(nome)
+            self._pr[n]["etichette"] = etichette
         self.registro.append(("etichetta", n, nome, aggiungi))
 
     def pr_del_ramo(self, ramo: str) -> int | None:
@@ -119,6 +127,19 @@ class ForgiaFinta:
             self._sotto_issue.setdefault(madre, []).append(num)
         self.registro.append(("crea_issue", num, titolo, corpo, madre))
         return num
+
+    def chiudi_issue(self, n: int) -> None:
+        if n not in self._issues:
+            raise ErroreForgia(f"Issue {n} non trovata")
+        cur = self._issues[n]
+        self._issues[n] = Issue(
+            numero=cur.numero,
+            titolo=cur.titolo,
+            corpo=cur.corpo,
+            stato="CLOSED",
+            etichette=cur.etichette,
+        )
+        self.registro.append(("chiudi_issue", n))
 
     def avviso(self, chiave: str, titolo: str, motivo: str | None) -> None:
         aperta_num: int | None = None
@@ -236,6 +257,10 @@ class BoardFinta:
             if d.get("stato") == "in corso":
                 risultato.append(self._a_lavoro(d))
         return risultato
+
+    def lavoro(self, numero: int) -> Lavoro | None:
+        d = self._trova_lavoro(numero)
+        return self._a_lavoro(d) if d is not None else None
 
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool:
         d = self._trova_lavoro(numero)
