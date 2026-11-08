@@ -235,12 +235,22 @@ fatto l'accesso al suo abbonamento.
   resta nel progetto.
 - **Il banco di prova:** quando la skill cambia, un consigliere risponde a 100-200 casi (tutti, finché sono meno) con
   la skill nuova e senza le risposte; un workflow confronta le scelte; chi decide guarda solo le divergenze.
-- **Le misure: tutto, nei campi del Project.** Per ogni lavoro: chi l'ha eseguito, con che modello, da che porta, in
-  sessione o fuori; la quota spesa da chi decide per brief e revisione (il numero che decide, dai token delle
-  trascrizioni della sua porta); le quote altrui e le durate, se la porta le dà; giri e consulti; l'esito della
-  revisione (unito com'era, corretto, rifiutato); i rilievi gravi e da dove venivano. Per i consiglieri, i consigli
-  accolti, respinti e, col tempo, giusti o sbagliati. Le misure alimentano la scelta viva; chi decide dice all'utente
-  solo ciò che cambia la strada.
+- **Le misure: tutto, nei campi del Project**, sul lavoro di ogni compito (al più 50 campi per Project):
+  - chi l'ha eseguito (titolo e modello), da che porta, in sessione o fuori; durata, giri, consulti; la quota
+    dell'esecutore se la porta la dà: li scrive il workflow, o chi decide in sessione;
+  - **la quota spesa da chi decide** per brief e revisione, il numero che decide: chi decide mette un segno d'inizio e
+    uno di fine quando scrive un brief o rivede; un comando legge i contatori della trascrizione della sua porta e
+    scrive il campo. Un segno dimenticato lascia il compito senza numero, mai con uno inventato;
+  - **l'esito della revisione** (unito com'era, corretto, rifiutato) **per compito** quando si può: ogni commento di
+    correzione indica il commit del compito; i compiti senza commenti sono «uniti com'erano»; se non si può dire,
+    l'esito vale per tutta la tappa;
+  - i rilievi gravi e da dove venivano (piano, brief, esecuzione); per i consiglieri, i consigli accolti e respinti,
+    e quelli che col tempo si rivelano giusti o sbagliati, quando chi decide lo vede.
+- **La lettura.** La scelta viva legge da sola esiti e costi per candidato ed etichetta. Chi decide legge i conti con un
+  comando che interroga il Project; tiene d'occhio la spia del metodo (rivedere il lavoro dell'esecutore fuori costa
+  meno che farlo in sessione?) e dice all'utente ciò che giudica utile, senza una regola. Le viste e i grafici del
+  Project, che le API di GitHub non creano, l'utente li può creare una volta a mano da un elenco che l'installazione gli
+  dà; la bottega funziona anche senza.
 
 ## Il repo, il plugin e l'installazione
 
