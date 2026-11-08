@@ -96,7 +96,7 @@ Chi decide guarda il Project: i lavori toccati nelle ultime 24 ore (i resoconti 
    disaccordi li decide chi decide, per iscritto; i grossi l'utente.
 4. **L'utente legge il piano** prima del lancio, con le decisioni in testa.
 5. **La costituzione del progetto** (`docs/costituzione.md`, modello in `modelli/costituzione.md`): ciò che vale per
-   ogni compito. `AGENTS.md` alla radice (modello in `modelli/AGENTS.md`) rimanda a lei. Se mancano, chi decide le
+   ogni compito. `AGENTS.md` alla radice (modello in `modelli/agents.md`) rimanda a lei. Se mancano, chi decide le
    scrive alla prima tappa.
 6. **Le issue.** Una tappa è un'issue madre; i compiti sono le sue sotto-issue, in ordine. Il brief di ogni compito è
    il corpo della sua issue (modello in `modelli/brief.md`), con la sezione **«Fatto quando»**: il comando che dice se
