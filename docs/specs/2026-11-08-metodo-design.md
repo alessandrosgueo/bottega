@@ -106,7 +106,19 @@ fatto l'accesso al suo abbonamento.
 - **Eventi:** un lavoro etichettato o assegnato all'esecuzione fuori fa partire un esecutore; un comando in un
   commento chiede un consulto o una nuova passata; un orario fa partire la notte, fuori dalla finestra di manutenzione
   del progetto.
-- **Un lavoro alla volta** per esecutore: `concurrency` di Actions, al posto di ogni lucchetto.
+- **La concorrenza.** `concurrency` di Actions non è una coda: tiene un giro in corso e uno solo in attesa, e cancella
+  l'attesa più vecchia quando ne arriva una nuova. Quindi:
+  - **il raccoglitore:** un giro non riceve un lavoro, lo prende; ogni giro sceglie dal Project il prossimo lavoro
+    pronto e, finito quello, il seguente, finché ce ne sono. Un giro cancellato non perde niente, perché lo stato sta
+    su GitHub; un orario fa da rete di sicurezza;
+  - **uno per bottega:** un gruppo di concorrenza per bottega, così due esecutori della stessa quota non girano
+    insieme, mentre esecutori di botteghe diverse possono;
+  - **mai due giri sullo stesso lavoro:** un commento che arriva mentre un esecutore ci lavora lo legge il giro dopo,
+    che parte appena il primo finisce; un giro in corso non si interrompe mai;
+  - **il consulto nello stesso giro:** esecutore, consigliere e ripresa stanno nello stesso job, così un solo runner
+    non si blocca aspettando se stesso;
+  - **le scritture su GitHub** di un giro (campi, commenti, etichette) restano sotto i limiti di GitHub: i giri lunghi
+    le raccolgono e le scrivono a fine lavoro.
 - **Chi può comandare:** solo i commenti e le etichette di chi ha il ruolo di proprietario o collaboratore del repo;
   il resto è testo.
 - **Un workflow sceglie il candidato** coi criteri della scelta viva; a quota esaurita (riconosciuta dai messaggi
