@@ -968,3 +968,47 @@ sys.exit(1)
     assert res.esito == "quota"
 
 
+def test_c5_esegui_porta_orfano(tmp_path: Path) -> None:
+    import subprocess
+    import time
+    from bottega.porte import esegui_porta
+
+    script = tmp_path / "orfano.sh"
+    script.write_text(
+        '#!/bin/sh\n'
+        'setsid sleep 21.6 &\n'
+        'printf "{}"\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    try:
+        t0 = time.monotonic()
+        codice, stdout, stderr, err = esegui_porta([str(script)], tmp_path, tempo=60)
+        durata = time.monotonic() - t0
+        assert durata < 10, f"esegui_porta ha impiegato {durata}s (atteso < 10s)"
+        assert codice == 0
+        assert stdout == "{}"
+        assert err is None
+    finally:
+        subprocess.run(["pkill", "-f", "sleep 21.6"], capture_output=True)
+
+
+def test_c5_esegui_porta_byte_non_utf8(tmp_path: Path) -> None:
+    from bottega.porte import esegui_porta
+
+    script = tmp_path / "non_utf8.py"
+    script.write_text(
+        '#!/usr/bin/env python3\n'
+        'import sys\n'
+        'sys.stdout.buffer.write(b"\\xff\\xfe")\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    codice, stdout, stderr, err = esegui_porta([str(script)], tmp_path, tempo=10)
+    assert err is None
+    assert "\ufffd" in stdout
+
+
+

@@ -227,3 +227,36 @@ def test_rv15_workflow():
         assert "BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}" in testo
         assert "@<sha>" in testo
 
+
+def test_c5_ci_segreto_senza_codice_del_ramo():
+    testo = CONTROLLO.read_text(encoding="utf-8")
+    blocchi = re.split(r"\n  ([a-zA-Z0-9_-]+):\n", testo)
+    jobs = {}
+    for i in range(1, len(blocchi), 2):
+        jobs[blocchi[i]] = blocchi[i + 1]
+
+    job_segreto = None
+    for nome, contenuto in jobs.items():
+        if "secrets.PAROLE_VIETATE" in contenuto:
+            job_segreto = contenuto
+            break
+
+    assert job_segreto is not None, "Nessun job usa secrets.PAROLE_VIETATE"
+    assert "uv" not in job_segreto
+    assert "pytest" not in job_segreto
+    assert "ref: ${{ github.event.repository.default_branch }}" in job_segreto
+    assert "python3 -P" in job_segreto
+
+
+def test_c5_workflow_tetti_e_comandi():
+    testo_esec = ESECUTORE_RIUSABILE.read_text(encoding="utf-8")
+    assert "timeout-minutes:" in testo_esec
+    assert "python3 -P -m bottega" in testo_esec
+
+    testo_dist = DISTRIBUTORE_RIUSABILE.read_text(encoding="utf-8")
+    assert "python3 -P -m bottega" in testo_dist
+
+    testo_modello_dist = DISTRIBUTORE_MODELLO.read_text(encoding="utf-8")
+    assert "bottega-comando-" in testo_modello_dist
+
+

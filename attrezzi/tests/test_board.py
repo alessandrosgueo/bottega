@@ -615,3 +615,19 @@ def test_rv11_board_finta_prendi_svuota_esito() -> None:
     assert lav.stato == "in corso"
     assert lav.esito is None
 
+
+def test_c5_adattatore_relativo_fissato_all_avvio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dir_a = tmp_path / "a"
+    strum = dir_a / "strumenti"
+    strum.mkdir(parents=True)
+    board_sh = strum / "board"
+    board_sh.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.chdir(dir_a)
+    bc = BoardComando(["strumenti/board"])
+    monkeypatch.chdir(tmp_path)
+
+    atteso = str(board_sh.resolve())
+    assert bc._cmd[0] == atteso
+
+

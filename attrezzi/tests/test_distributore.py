@@ -1034,6 +1034,115 @@ def test_c4_consulta_col_prefisso(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert chiamate_porta[0]["prefisso"] == ("env",)
 
 
+def test_c5_autore_estraneo_anche_con_etichetta() -> None:
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(
+            numero=1,
+            titolo="Compito Estraneo Etichettato",
+            stato="pronto",
+            etichette=["bottega: fuori"],
+        )
+    ])
+    forgia = ForgiaFinta([
+        Issue(
+            numero=1,
+            titolo="Compito Estraneo Etichettato",
+            corpo="## Fatto quando\n```\ntrue\n```",
+            autore="estraneo",
+        )
+    ])
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+    )
+
+    assert not any(r[0] == "prendi" and r[1] == 1 for r in board.registro)
+
+
+def test_c5_scadenza_conta_tentativi() -> None:
+    from bottega.segni import nota
+
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 18, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(
+            numero=10,
+            titolo="Compito Scaduto Tentativi",
+            stato="in corso",
+            esecutore="c-claude",
+            nota="inizio=2026-11-08T10:00:00+01:00;tentativi=2",
+            etichette=["bottega: fuori"],
+        )
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=10, titolo="Compito Scaduto Tentativi", corpo="## Fatto quando\n```\npytest\n```")
+    ])
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+    )
+
+    lav = board.lavoro(10)
+    assert lav is not None
+    assert lav.stato == "bloccato"
+    valori = nota(lav.nota)
+    assert valori.get("tentativi") == "3"
+
+
+def test_c5_commento_senza_comando_non_distribuisce(tmp_path: Path) -> None:
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+        Lavoro(numero=2, titolo="Compito 2", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+        Issue(numero=2, titolo="Compito 2", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "grazie", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+        percorso_evento=evento_file,
+    )
+
+    assert not any(r[0] == "prendi" for r in board.registro)
+
+
+
 
 
 
