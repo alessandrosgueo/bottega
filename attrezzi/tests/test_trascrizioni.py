@@ -332,3 +332,21 @@ def test_somma_pesata():
 
     assert somma_pesata({"a": 10, "c": 1000}, ("a", "b", "c"), cache_letta="c") == 110
     assert somma_pesata({"a": "10"}, ("a",), cache_letta="c") is None
+
+
+def test_c1_pi_segno_solo_nome(tmp_path: Path) -> None:
+    casa = tmp_path / "casa"
+    cartella = tmp_path / "lavoro"
+    cartella.mkdir(parents=True, exist_ok=True)
+
+    nome_file = "2026-11-08T10-00-00_test-sessione.jsonl"
+    sess_dir = casa / ".pi" / "agent" / "sessions" / "--qualsiasi--"
+    sess_dir.mkdir(parents=True, exist_ok=True)
+    file_pi = sess_dir / nome_file
+    file_pi.write_text("{}", encoding="utf-8")
+
+    env = {"HOME": str(casa)}
+    p = porta("pi")
+    assert p.trascrizione(env, cartella, sessione=nome_file) == file_pi
+    assert p.trascrizione(env, cartella, sessione="../x") is None
+

@@ -308,3 +308,131 @@ def test_comando_segno_codici(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, c
     assert res_fine_vuoto == 1
     err = capsys.readouterr().err
     assert "niente numero" in err
+
+
+def test_c1_fine_messaggi_ripresi_una_volta(tmp_path: Path) -> None:
+    import re
+
+    casa = tmp_path / "casa"
+    cartella = tmp_path / "lavoro"
+    cartella.mkdir(parents=True, exist_ok=True)
+
+    norm = re.sub(r"[^a-zA-Z0-9]", "-", str(cartella.resolve()))
+    dest_dir = casa / ".claude" / "projects" / norm
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    t_inizio = datetime(2026, 11, 8, 10, 0, 0, tzinfo=timezone.utc)
+    t_fine = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    rec = {
+        "type": "assistant",
+        "timestamp": "2026-11-08T11:00:00+00:00",
+        "message": {
+            "id": "msg-ripreso-1",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        },
+    }
+    (dest_dir / "sess-1.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    (dest_dir / "sess-2.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+
+    board = BoardFinta()
+    board.aggiungi(10, titolo="Compito 10")
+    inizio(board, 10, "claude-code", "sess-1", t_inizio)
+
+    env = {"HOME": str(casa)}
+    p = porta("claude-code")
+    aggiunti, _ = fine(board, 10, [(p, "sess-2")], cartella, env, t_fine)
+
+    assert aggiunti == 100
+    lav = board.lavoro(10)
+    assert lav is not None
+    assert lav.campi.get("Token di chi decide") == "100"
+
+
+def test_c1_fine_zero_messaggi_niente_numero(tmp_path: Path) -> None:
+    casa = tmp_path / "casa"
+    cartella = tmp_path / "lavoro"
+    cartella.mkdir(parents=True, exist_ok=True)
+
+    t_inizio = datetime(2026, 11, 8, 10, 0, 0, tzinfo=timezone.utc)
+    t_fine = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    _scrivi_trascrizione_claude(casa, cartella, "sess-1", 100, "2026-11-08T08:00:00+00:00")
+
+    board = BoardFinta()
+    board.aggiungi(10, titolo="Compito 10")
+    inizio(board, 10, "claude-code", "sess-1", t_inizio)
+
+    env = {"HOME": str(casa)}
+    p = porta("claude-code")
+    aggiunti, msg = fine(board, 10, [(p, "sess-1")], cartella, env, t_fine)
+
+    assert aggiunti is None
+    assert "niente numero" in msg
+    lav = board.lavoro(10)
+    assert lav is not None
+    assert "Token di chi decide" not in lav.campi
+    assert lav.campi.get("Segno") is not None
+
+
+def test_c1_fine_segno_chiuso_prima(tmp_path: Path) -> None:
+    from bottega.board import ErroreBoard
+
+    casa = tmp_path / "casa"
+    cartella = tmp_path / "lavoro"
+    cartella.mkdir(parents=True, exist_ok=True)
+
+    t_inizio = datetime(2026, 11, 8, 10, 0, 0, tzinfo=timezone.utc)
+    t_fine = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    _scrivi_trascrizione_claude(casa, cartella, "sess-1", 100, "2026-11-08T11:00:00+00:00")
+
+    board = BoardFinta()
+    board.aggiungi(10, titolo="Compito 10")
+    inizio(board, 10, "claude-code", "sess-1", t_inizio)
+
+    solleva = True
+    orig_campo = board.campo
+
+    def finto_campo(numero: int, nome: str, valore: str | None) -> None:
+        if solleva and nome == "Segno" and valore is None:
+            raise ErroreBoard("errore chiusura segno")
+        orig_campo(numero, nome, valore)
+
+    board.campo = finto_campo  # type: ignore[method-assign]
+
+    env = {"HOME": str(casa)}
+    aggiunti, _ = fine(board, 10, [], cartella, env, t_fine)
+
+    assert aggiunti is None
+    lav = board.lavoro(10)
+    assert lav is not None
+    assert "Token di chi decide" not in lav.campi
+
+    solleva = False
+    aggiunti2, _ = fine(board, 10, [], cartella, env, t_fine)
+    assert aggiunti2 == 100
+    lav_dopo = board.lavoro(10)
+    assert lav_dopo is not None
+    assert lav_dopo.campi.get("Token di chi decide") == "100"
+
+
+def test_c1_inizio_avvisa_segno_doppio() -> None:
+    board = BoardFinta()
+    board.aggiungi(10, titolo="Compito 10")
+    board.aggiungi(20, titolo="Compito 20")
+
+    t = datetime(2026, 11, 8, 10, 0, 0, tzinfo=timezone.utc)
+    avviso1 = inizio(board, 10, "claude-code", "sess-condivisa", t)
+    assert avviso1 is None
+
+    avviso2 = inizio(board, 20, "claude-code", "sess-condivisa", t)
+    assert avviso2 is not None
+    assert "#10" in avviso2
+
+

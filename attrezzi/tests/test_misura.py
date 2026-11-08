@@ -146,3 +146,16 @@ def test_misura_dove_sbagliato() -> None:
     )
     codice = comando_misura(args, board=board)
     assert codice == 2
+
+
+def test_c1_misura_negativo_e_porta() -> None:
+    board = BoardFinta([Lavoro(numero=1, titolo="Compito 1")])
+    parser = argparse.ArgumentParser()
+    argomenti_misura(parser)
+
+    args_neg = parser.parse_args(["1", "--giri", "-1"])
+    assert comando_misura(args_neg, board=board) == 2
+
+    args_porta = parser.parse_args(["1", "--porta", "inventata"])
+    assert comando_misura(args_porta, board=board) == 2
+

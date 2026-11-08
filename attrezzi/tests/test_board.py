@@ -845,4 +845,51 @@ def test_b5_lavoro_adattatore_con_campi() -> None:
     assert lav.campi["Porta"] == "pi"
 
 
+def test_c1_cento_valori_per_elemento() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        return json.dumps(_PROGETTO_GRAPHQL_OK)
+
+    board = BoardProject("proprietario", 1, repo="proprietario/repo", esegui=esegui_finto)
+    board.elenco()
+    assert any("fieldValues(first: 100)" in arg for c in chiamate for arg in c)
+
+
+def test_c1_adattatore_senza_elenco() -> None:
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        if argomenti[-1] == "elenco":
+            raise ErroreBoard("elenco non supportato")
+        if argomenti[-1] == "pronti":
+            return json.dumps([{"numero": 10, "titolo": "Compito", "stato": "pronto"}])
+        if argomenti[-1] == "in-corso":
+            return json.dumps([])
+        return json.dumps([])
+
+    bc = BoardComando(["adattatore"], esegui=esegui_finto)
+    lav = bc.lavoro(10)
+    assert lav is not None
+    assert lav.numero == 10
+
+
+def test_c1_null_dell_adattatore() -> None:
+    def esegui_cmd(argomenti: list[str], ingresso: str | None = None) -> str:
+        return json.dumps([
+            {
+                "numero": 10,
+                "titolo": "Compito",
+                "stato": "pronto",
+                "campi": {"Segno": None, "Giri": 2},
+            }
+        ])
+
+    bc = BoardComando(["adattatore"], esegui=esegui_cmd)
+    lav = bc.lavoro(10)
+    assert lav is not None
+    assert "Segno" not in lav.campi
+    assert lav.campi.get("Giri") == "2"
+
+
+
 

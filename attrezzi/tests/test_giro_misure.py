@@ -491,3 +491,65 @@ def test_consulti_contati(tmp_path: Path) -> None:
     assert lav.campi.get("Consulti") == "1"
     assert lav.campi.get("Token esecutore") == "400"
     assert lav.campi.get("Giri") == "1"
+
+
+def test_c1_piu_esecutori(tmp_path: Path) -> None:
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    cfg_candidati = dict(cfg.candidati)
+    cfg_candidati["altro"] = Candidato(
+        id="altro",
+        nome="Altro Esecutore",
+        bottega="principale",
+        porta="finta",
+        modello="finto-2",
+        funzioni=("eseguire",),
+        runner="linux-x64",
+    )
+    cfg = Configurazione(1, cfg.progetto, cfg.botteghe, cfg_candidati)
+
+    corpo = "Brief 1\n\n## Fatto quando\n```bash\ntest -f file.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[
+        Lavoro(numero=1, titolo="Compito Uno", stato="pronto", campi={"Esecutore": "Altro Esecutore"})
+    ])
+
+    def committa(cartella, prompt, **kwargs):
+        p = Path(cartella) / "file.txt"
+        p.write_text("ok\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "fatto"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto", contatori={"total_tokens": 100})
+
+    porta = PortaFinta(callback=committa)
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+    assert esito.esito == "consegnato"
+
+    lav = board.lavoro(1)
+    assert lav is not None
+    assert lav.campi.get("Esecutore") == "Altro Esecutore"
+    assert "più esecutori" in lav.campi.get("Misure parziali", "")
+
+    board.campo(1, "Esito del compito", "unito com'era")
+    lav_aggiornato = board.lavoro(1)
+    assert lav_aggiornato is not None
+    assert lav_aggiornato.campi.get("Token esecutore") is not None
+
+    import bottega.misure as misure
+
+    assert misure.risultati([lav_aggiornato], cfg) == {}
+    assert misure.costi_propri([lav_aggiornato], cfg) == {}
+
