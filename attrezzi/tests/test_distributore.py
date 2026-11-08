@@ -1147,3 +1147,29 @@ def test_c5_commento_senza_comando_non_distribuisce(tmp_path: Path) -> None:
 
 
 
+
+
+def test_c6_riprova_azzera_anche_le_quote(tmp_path: Path) -> None:
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="bloccato", etichette=["bottega: fuori"],
+               nota="ramo=bottega/1-x;quote=3;motivo=quota ripetuta"),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega riprova", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+    distribuisci(
+        configurazione=cfg, forgia=forgia, board=board, variabili={},
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=fuso), caso=random.Random(42), notte=False,
+        percorso_evento=evento_file,
+    )
+    lav = board.lavoro(1)
+    assert lav is not None and lav.stato == "pronto"
+    assert lav.nota == "ramo=bottega/1-x"

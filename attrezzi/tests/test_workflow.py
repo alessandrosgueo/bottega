@@ -260,3 +260,11 @@ def test_c5_workflow_tetti_e_comandi():
     assert "bottega-comando-" in testo_modello_dist
 
 
+
+
+def test_c6_commenti_solo_da_chi_ha_accesso():
+    """C6: un commento fa partire il job solo se contiene /bottega e viene da chi ha accesso al repo."""
+    testo = DISTRIBUTORE_MODELLO.read_text(encoding="utf-8")
+    assert "contains(github.event.comment.body, '/bottega')" in testo
+    assert "author_association" in testo
+    assert '"COLLABORATOR"' in testo

@@ -199,8 +199,14 @@ def _gestisci_evento_commento(
             # Riprova riparte da capo: tentativi, attese e motivo si azzerano, il ramo resta.
             lav_riprova = board.lavoro(num_issue)
             d_riprova = nota(lav_riprova.nota) if lav_riprova else {}
-            for chiave in ("tentativi", "attese", "motivo"):
+            for chiave in ("tentativi", "attese", "motivo", "quote"):
                 d_riprova.pop(chiave, None)
+            # C6: i comandi non sono in fila col distributore; si rilegge lo stato subito prima di scrivere.
+            if lav_riprova is not None and lav_riprova.stato == "in corso":
+                riga = f"lavoro {num_issue}: riprova ignorato perché già in corso"
+                righe.append(riga)
+                print(riga)
+                return False, righe
             board.stato(num_issue, "pronto", nota=scrivi_nota(d_riprova))
             msg = f"Lavoro #{num_issue} rimesso a «pronto» su comando di @{autore}."
             forgia.commenta(num_issue, msg, "distributore")

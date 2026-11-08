@@ -59,11 +59,16 @@ def _esegui(cmd: Sequence[str], **kw: Any) -> subprocess.CompletedProcess:
 
 # Parole che chiudono un'issue quando il commit arriva nel ramo principale (anche dopo un'unione).
 _CHIUDE_ISSUE = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+/[\w.-]+)?#\d+", re.IGNORECASE
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*"
+    r"(?:(?:[\w.-]+/[\w.-]+)?#\d+|GH-\d+|https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+)",
+    re.IGNORECASE,
 )
 
 # File che cambiano come girano le prove anche quando sono nuovi.
-_CONFIGURAZIONE_PROVE = {"conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "noxfile.py"}
+_CONFIGURAZIONE_PROVE = {
+    "conftest.py", "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg",
+    "pyproject.toml", "noxfile.py",
+}
 
 # Il ramo viene dalla nota, che un umano può modificare: solo nomi semplici sotto bottega/.
 _RAMO_VALIDO = re.compile(r"bottega/[A-Za-z0-9][A-Za-z0-9._/-]*")
@@ -403,10 +408,23 @@ def _verifica_e_consegna_bundle(
     ).stdout
 
     # 5. Controlli di sicurezza sui percorsi, sui modi e sui messaggi
+    if not unioni and _CHIUDE_ISSUE.search(messaggi):
+        # C6: un vizio innocuo dei modelli, non un attacco: un tentativo in più, e il commento (nel fascicolo del giro
+        # dopo) dice perché.
+        tentativi = int(d_nota.get("tentativi", 0)) + 1
+        d_nota["tentativi"] = str(tentativi)
+        d_nota["motivo"] = "messaggio di commit che chiude un'issue"
+        stato_dest = "bloccato" if tentativi >= 3 else "pronto"
+        forgia.commenta(
+            compito_numero,
+            "Consegna rifiutata: un messaggio di commit chiude un'issue (Closes, Fixes o Resolves seguiti da un "
+            "numero). Riscrivi i messaggi senza quelle parole davanti a un numero d'issue.",
+            ruolo="esecutore",
+        )
+        board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+        return False, []
     if unioni:
         motivo_violazione = "commit di unione vietati"
-    elif _CHIUDE_ISSUE.search(messaggi):
-        motivo_violazione = "messaggio di commit che chiude un'issue (Closes, Fixes, Resolves #N)"
     else:
         motivo_violazione = controlla_violazioni_diff(entries_storia + entries)
     if motivo_violazione:
@@ -441,6 +459,14 @@ def _verifica_e_consegna_bundle(
             capture_output=True,
         )
     return True, entries
+
+
+def _esito_del_rifiuto(d_nota: dict[str, str]) -> str:
+    """L'esito di una consegna rifiutata: `errore` (un tentativo) per i messaggi che chiudono un'issue sotto il terzo
+    tentativo, altrimenti `bloccato`."""
+    if d_nota.get("motivo") == "messaggio di commit che chiude un'issue" and int(d_nota.get("tentativi", 0)) < 3:
+        return "errore"
+    return "bloccato"
 
 
 def giro(
@@ -754,7 +780,8 @@ def _giro(
             f"Fatto quando:\n{cmd_fatto_quando}\n\n"
             "Istruzioni:\n"
             f"1. Lavora in questa cartella e committa nel ramo corrente ({nome_ramo}) un commit per compito.\n"
-            "2. Non toccare mai .github/ o .bottega/.\n"
+            "2. Non toccare mai .github/ o .bottega/. Nei messaggi di commit non scrivere Closes, Fixes o Resolves "
+            "davanti a un numero d'issue.\n"
             "3. Alla fine scrivi il rapporto come ultimo messaggio.\n"
             "4. Se sei bloccato o se una scelta contraddice il piano o tocca le quattro barriere, "
             "chiudi con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa.\n"
@@ -918,7 +945,7 @@ def _giro(
                 )
                 if not ok_salv:
                     _rilancia_distributore(forgia)
-                    return EsitoGiro("bloccato", motivo=d_nota.get("motivo", "modifica a .github vietata"))
+                    return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
                 pr_num = forgia.pr_del_ramo(nome_ramo)
                 if pr_num is None and entries_salv:
                     titolo_salv = iss_madre.titolo
@@ -1005,7 +1032,7 @@ def _giro(
         )
         if not ok_consegna:
             _rilancia_distributore(forgia)
-            return EsitoGiro("bloccato", motivo=d_nota.get("motivo", "consegna rifiutata"))
+            return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
 
         # RV4: Se il commit è vuoto (nessun file toccato nel diff)
         if not entries_diff:
@@ -1100,8 +1127,18 @@ def _giro(
             capture_output=True,
             text=True,
         ).stdout
-        # Una riga aggiunta con `gitleaks:allow` zittisce gitleaks: conta come segreto.
-        if any(r.startswith("+") and "gitleaks:allow" in r for r in diff_consegna.splitlines()):
+        # Una riga aggiunta con `gitleaks:allow` zittisce gitleaks: conta come segreto. C6: si guarda la patch di ogni
+        # commit (aggiunta e poi tolta, la riga resta nella storia spinta).
+        patch_storia = _esegui(
+            [
+                "git", *OPZIONI_GIT_RUNNER, "log", "-p", "--no-ext-diff", "--no-textconv", "--format=",
+                f"{base_commit}..refs/bottega/consegna",
+            ],
+            cwd=str(clone_progetto),
+            capture_output=True,
+            text=True,
+        ).stdout
+        if any(r.startswith("+") and "gitleaks:allow" in r for r in patch_storia.splitlines()):
             segreti_trovati = True
 
         if not segreti_trovati and shutil.which("gitleaks"):
@@ -1193,11 +1230,15 @@ def _giro(
         return EsitoGiro("bloccato" if tentativi >= 3 else "errore", motivo=str(exc))
 
     finally:
-        # Pulizia completa dello spazio del giro
-        if dir_giro.exists():
-            if prefisso:
-                _esegui([*prefisso, "rm", "-rf", str(dir_giro)], capture_output=True)
-            shutil.rmtree(dir_giro, ignore_errors=True)
+        # Pulizia completa dello spazio del giro. C6: un errore qui (un `rm` che supera il tetto) non deve sostituire
+        # l'esito già scritto sulla board.
+        try:
+            if dir_giro.exists():
+                if prefisso:
+                    _esegui([*prefisso, "rm", "-rf", "--", str(dir_giro)], capture_output=True)
+                shutil.rmtree(dir_giro, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def argomenti_giro(parser: argparse.ArgumentParser) -> None:

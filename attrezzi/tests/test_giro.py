@@ -3128,7 +3128,12 @@ def test_c5_closes_nel_messaggio_rifiutato(tmp_path: Path):
         adesso=adesso,
         caso=caso,
     )
-    assert esito.esito == "bloccato"
+    # C6: un tentativo, non un blocco; il commento dice perché; niente spinta.
+    assert esito.esito == "errore"
+    lav = board.lavoro(1)
+    assert lav is not None and lav.stato == "pronto"
+    assert "tentativi=1" in lav.nota
+    assert any("chiude un'issue" in c.corpo for c in forgia.commenti(1))
     res_rami = subprocess.run(
         ["git", "--git-dir", str(origin), "branch", "--list", "bottega/*"],
         capture_output=True,
@@ -3434,3 +3439,146 @@ def test_c5_avviso_della_porta_recintato(tmp_path: Path):
 
 
 
+
+
+def test_c6_chiude_issue_forme_url_e_gh():
+    """C6: le forme che GitHub riconosce, e non quelle innocue."""
+    from bottega.giro import _CHIUDE_ISSUE
+
+    for testo in ("Fixes #3", "closes: #3", "Resolves o/r#3", "Closes GH-5", "fix https://github.com/o/r/issues/5"):
+        assert _CHIUDE_ISSUE.search(testo), testo
+    for testo in ("Fix the bug in #3 handler", "Prefix #3", "risolve #3", "Fixes nothing"):
+        assert not _CHIUDE_ISSUE.search(testo), testo
+
+
+def test_c6_gitleaks_allow_aggiunto_e_tolto(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito C6", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n", autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito C6", stato="pronto")])
+
+    def committa(cartella, prompt, **kwargs):
+        c = Path(cartella)
+
+        def git(*a):
+            subprocess.run(["git", *a], cwd=str(c), check=True, capture_output=True)
+
+        (c / "k.py").write_text("x = 1  # gitleaks:allow\n", encoding="utf-8")
+        git("add", "k.py")
+        git("commit", "-m", "aggiunge k")
+        git("rm", "-q", "k.py")
+        git("commit", "-m", "toglie k")
+        (c / "docs").mkdir(exist_ok=True)
+        (c / "docs" / "b.md").write_text("b\n", encoding="utf-8")
+        git("add", "docs/b.md")
+        git("commit", "-m", "aggiunge b")
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa)
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+    assert esito.esito == "consegnato"
+    pr = next(iter(forgia._pr.values()))
+    assert "bottega: segreti" in pr.get("etichette", [])
+
+
+def test_c6_pytest_ini_nascosto_accende_prove_cambiate(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito C6", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n", autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito C6", stato="pronto")])
+
+    def committa(cartella, prompt, **kwargs):
+        c = Path(cartella)
+
+        def git(*a):
+            subprocess.run(["git", *a], cwd=str(c), check=True, capture_output=True)
+
+        (c / ".pytest.ini").write_text("[pytest]\naddopts = -k 'not rotta'\n", encoding="utf-8")
+        git("add", ".pytest.ini")
+        git("commit", "-m", "configura")
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa)
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+    assert esito.esito == "consegnato"
+    pr = next(iter(forgia._pr.values()))
+    assert "bottega: prove cambiate" in pr.get("etichette", [])
+
+
+def test_c6_pulizia_che_cade_non_cambia_l_esito(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito C6", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n", autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito C6", stato="pronto")])
+
+    def committa(cartella, prompt, **kwargs):
+        c = Path(cartella)
+
+        def git(*a):
+            subprocess.run(["git", *a], cwd=str(c), check=True, capture_output=True)
+
+        (c / "docs").mkdir(exist_ok=True)
+        (c / "docs" / "c.md").write_text("c\n", encoding="utf-8")
+        git("add", "docs/c.md")
+        git("commit", "-m", "aggiunge c")
+        import bottega.giro as modulo_giro
+        vero_rmtree = modulo_giro.shutil.rmtree
+
+        def rmtree_che_cade(percorso, *a, **k):
+            if str(percorso).startswith(str(tmp_path / "spazio")) and Path(percorso).parent == tmp_path / "spazio":
+                raise RuntimeError("pulizia rotta")
+            return vero_rmtree(percorso, *a, **k)
+
+        monkeypatch.setattr(modulo_giro.shutil, "rmtree", rmtree_che_cade)
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa)
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+    assert esito.esito == "consegnato"
+    lav = board.lavoro(1)
+    assert lav is not None and lav.stato == "consegnato"
