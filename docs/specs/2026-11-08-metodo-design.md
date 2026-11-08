@@ -1,204 +1,189 @@
-# La bottega a più botteghe: design del metodo
+# La bottega: design del metodo
 
-Stato: design, da approvare. Scritto l'8 novembre 2026 da un brainstorming con l'utente che ha fondato il metodo.
+Stato: design, da approvare. Scritto l'8 novembre 2026 da un brainstorming con l'utente che ha fondato il metodo,
+riletto da un costruttore (Gemini 4 Argon) e rifatto dopo le sue domande.
 
 ## Perché
 
-Chi lavora con le CLI di programmazione ha più abbonamenti e più modelli, e una risorsa sola davvero scarsa: la quota
-del modello più forte, quello che decide. La bottega nasce per spendere quella quota solo dove serve. Il maestro prende
-tutte le decisioni prima, per iscritto, nel piano e nel brief; a chi esegue resta il *come*, non il *cosa*. Così
-l'esecuzione può andare a modelli più economici.
+Chi lavora con le CLI di programmazione ha più abbonamenti, più modelli e una risorsa sola davvero scarsa: la quota del
+modello che decide. La bottega spende quella quota solo dove serve. Chi decide prende le decisioni prima, per iscritto,
+nel piano e nel brief; a chi esegue resta il *come*, non il *cosa*. Così l'esecuzione va a modelli più economici o a
+quote più abbondanti, anche di altri fornitori.
 
-Il metodo esiste già in una versione a una bottega (maestro, capobottega e garzoni dello stesso fornitore). Questo
-design lo allarga in tre direzioni:
+Tre richieste dell'utente danno la forma a tutto:
 
-1. **Più botteghe.** Una bottega è un abbonamento con la sua quota (un fornitore e un accesso). Una quota abbondante
-   di un altro abbonamento diventa una bottega «di fronte», con un suo maestro e un suo lavorante, che esegue tutto ciò
-   che può aspettare una revisione.
-2. **Un metodo da regalare.** Una cartella (un repo pubblico) che si passa a un amico: lui la dà alla sua CLI, scrive
-   «installa la bottega», e la CLI fa tutto da sola.
-3. **Un metodo che impara.** Le lezioni sui modelli, i precedenti e le misure crescono col lavoro vero.
+1. **Dinamica, non legata a un assetto.** Il metodo non conosce modelli, fornitori né ruoli fissi: conosce funzioni e
+   botteghe, e sceglie a ogni compito chi lo fa.
+2. **Legata a GitHub.** Lavoro, consegne, consulti, misure, lezioni e regia vivono su GitHub e si muovono coi suoi
+   eventi. Niente cartelle né script per sincronizzare.
+3. **Da regalare.** Un repo pubblico che si installa come plugin in più CLI: lo si dà a un amico, la sua CLI lo
+   installa e lui è pronto.
 
-Questa versione non è compatibile all'indietro con quella a una bottega: è un nuovo inizio.
+Questa versione non è compatibile all'indietro con quella a una bottega sola: è un nuovo inizio.
 
 ## Obiettivi
 
-- Spendere la quota del maestro solo per decisioni e revisioni.
-- Usare le quote abbondanti di altri fornitori senza che un esecutore confuso possa fare danni.
-- Installare tutto con una frase alla propria CLI, nel modo più automatico possibile.
-- Imparare dal lavoro: lezioni per modello, casistica, misure di tutto.
+- Spendere la quota scarsa solo per decidere e rivedere.
+- Usare le quote abbondanti di ogni abbonamento senza che un esecutore confuso possa fare danni.
+- Adattarsi da sola agli abbonamenti, ai modelli e alle CLI che l'utente ha, oggi e domani.
+- Imparare dal lavoro: lezioni per modello, casistica, misure di tutto, che guidano le scelte.
 
 ## Non obiettivi
 
-- Windows senza WSL e macOS: questa versione gira su **Linux e su Windows con WSL**.
-- Non è un framework né un servizio: sono una skill, dei modelli di documento e pochi attrezzi da riga di comando.
-- Non sostituisce le skill di processo che la CLI ha già (brainstorming, piani, prove): ci si appoggia.
+- Windows senza WSL e macOS: questa versione gira su Linux e su Windows con WSL.
+- Un orchestratore proprio: la regia è GitHub Actions.
+- Sostituire le skill di processo che la CLI ha già (brainstorming, piani, prove): la bottega ci si appoggia.
 
 ## Anti-obiettivi
 
 Il metodo è fallito, anche se funziona, se:
 - diventa un recinto di regole: le barriere stanno solo dove un errore farebbe un danno vero (segreti, dati veri,
   cancellazioni, azioni irreversibili o verso l'esterno), il resto è giudizio di chi lavora, controllato dal diff;
-- un esecutore esterno può unire nel ramo principale, chiudere lavoro, toccare segreti, dati veri o produzione;
-- rivedere il lavoro di un esecutore costa al maestro più di quanto gli risparmia;
+- la skill nomina un modello, un fornitore o un assetto particolare;
+- qualcosa si sincronizza fuori da git e da GitHub;
+- un esecutore esterno può unire nel ramo principale, chiudere lavoro o mandare in produzione;
+- rivedere il lavoro di un esecutore costa più di quanto risparmia;
 - nel repo pubblico finisce qualcosa di personale o di un progetto.
 
 ## I concetti
 
-**Bottega:** un abbonamento con la sua quota, cioè un fornitore e un accesso (per esempio Anthropic, Google AI Pro,
-GitHub Copilot). La bottega **di casa** è quella del maestro; le altre sono **di fronte**. È nella bottega che si
-spende e si misura.
+**Bottega:** un abbonamento con la sua quota, cioè un fornitore e un accesso. Le botteghe sono quante ne ha l'utente.
+Ognuna dichiara nella configurazione i suoi modelli, com'è la sua quota (scarsa, normale, abbondante) e da quali porte
+ci si entra.
 
-**Porta:** la CLI con cui si entra in una bottega. Una CLI può aprire più botteghe (Pi con un accesso Anthropic e uno
-Copilot, che a sua volta offre modelli di più fornitori); una bottega può avere più porte (l'abbonamento Anthropic da
-Claude Code su una macchina e da Pi su un'altra). I ruoli si legano a «bottega e modello»; su ogni macchina
-l'installazione sceglie la porta che c'è e che sa lavorare senza mani.
+**Porta:** la CLI con cui si entra in una bottega. Una CLI può aprirne più d'una (Pi con un accesso Anthropic e uno
+Copilot); una bottega può avere più porte (Anthropic da Claude Code su una macchina, da Pi su un'altra). Le porte della
+prima versione: Claude Code, Antigravity, Pi, GitHub Copilot CLI.
 
-**I ruoli.** Un ruolo si nomina col titolo e col nome del modello che lo ricopre («Lavorante Gemini 3.8», «Maestro
-Argon»): quando il fornitore cambia modello, cambia solo il nome.
+**Funzioni, non ruoli fissi.** Il metodo conosce quattro funzioni:
 
-| Ruolo | Dove | Fa |
-|---|---|---|
-| Maestro | casa | brainstorming con l'utente, design, piano, brief, revisione, unione, rilascio |
-| Capobottega | casa | i compiti di giudizio che non si possono scrivere prima; revisione finale dei rami piccoli |
-| Garzone | casa | i compiti in sessione, da un brief su file, in TDD |
-| Revisore | casa | revisione finale dei rami grandi o delicati, a contesto fresco |
-| Maestro esterno | di fronte | consulente del maestro, arbitro, controlli su tutto il repo, capo del lavorante |
-| Lavorante | di fronte | esegue tutto ciò che può aspettare una PR, anche da solo di notte |
+| Funzione | Che cosa fa |
+|---|---|
+| decidere | brainstorming con l'utente, design, piano, brief, revisione finale, unione, rilascio |
+| eseguire | un compito da un brief, in TDD, in sessione o fuori come PR |
+| rivedere | la rilettura a mente fresca di un ramo o di una PR |
+| consigliare | critiche a design e piani, arbitrati, controlli su tutto il repo, consulti di chi esegue |
 
-**Due modi di eseguire un compito:**
-- **in casa:** un garzone (o il capobottega) nel worktree del maestro; il consulto è immediato; il commit è del
-  maestro, ed è il suo sigillo;
-- **fuori:** il lavorante nel suo clone, coi suoi commit, su un ramo suo, consegnato come PR in bozza; il sigillo del
-  maestro è l'unione `--no-ff` dopo la revisione.
+Per ogni funzione la configurazione elenca i **candidati** (un modello di una bottega, da una porta). Il nome di un
+candidato è un titolo più il nome del modello, scelto dall'utente all'installazione («Maestro Opus», «Lavorante
+Gemini 3.8»): il metodo non ne conosce nessuno.
 
-**Il predefinito:** va fuori tutto ciò che può aspettare una PR. In casa resta ciò che serve al maestro durante la
-sessione. Il compito va al capobottega solo se il suo giudizio non si può scrivere nel piano.
+**La scelta viva.** Per ogni compito chi decide sceglie chi esegue fra i candidati guardando:
+- la quota del momento: un candidato senza quota passa il turno al successivo;
+- i risultati misurati dello stesso genere di compito (esito delle revisioni, giri, costo per chi decide);
+- il genere di compito, cioè se serve subito in sessione o può aspettare una PR.
 
-**Il consulto.** In casa, il garzone bloccato chiede al maestro, che risponde allo stesso agente. Fuori, il lavorante
-chiede prima al maestro esterno; se il maestro esterno non basta, non ha quota o la risposta cambierebbe il piano, la
-domanda resta nella PR per il maestro e il lavorante passa ad altro.
+Di serie va **fuori**, come PR, tutto ciò che può aspettare una revisione; **in sessione** resta ciò che serve subito.
+Lo stesso vale per i consulti: il primo consigliere con quota risponde.
 
-## Il ciclo
+**Due modi di eseguire:**
+- **in sessione:** un sotto-agente nel worktree di chi decide; il consulto è immediato; il commit è di chi decide;
+- **fuori:** un esecutore lanciato da GitHub Actions nel suo clone, con commit suoi e una PR in bozza; il sigillo di
+  chi decide è l'unione `--no-ff` dopo la revisione.
 
-Resta quello della bottega a una bottega, con tre cambi.
+## GitHub come spina dorsale
 
-1. **Prima del codice:** brainstorming, design, piano coi Ruling, la costituzione del progetto. Il maestro esterno
-   critica design e piani importanti prima che arrivino all'utente; il maestro risponde punto per punto nel documento.
-2. **Per ogni compito:** il piano dice chi lo esegue e dove (in casa o fuori). Un compito fuori è un lavoro sulla
-   board del progetto, con la riga «Esegue: Lavorante <modello>», il suo piano o brief e il suo «fatto quando»
-   (l'oracolo).
-3. **Chiusura:** la revisione finale del maestro (o del revisore) resta; per le PR del lavorante il maestro esterno
-   può rileggere prima, ma il suo «visto» è un aiuto, non un permesso.
+| Cosa | Dove vive |
+|---|---|
+| il lavoro da fare | issue del progetto, nel suo Project |
+| chi lo esegue e il suo stato | campi del Project |
+| la consegna | una PR in bozza con la riga `Lavoro: #N` |
+| un consulto e la sua risposta | commenti sulla PR o sull'issue |
+| design e piani da criticare | PR in bozza, con commenti di revisione del consigliere |
+| il resoconto della notte | commenti sui lavori toccati, letti da chi decide |
+| le misure | campi del Project, uno per misura |
+| lezioni per modello e casistica | file del repo `bottega`, cambiati solo con PR |
+| la skill e i suoi aggiornamenti | il repo `bottega`, installato come plugin |
 
-## Il maestro esterno
+Niente cartelle condivise, niente copie, niente script di sincronia: ciò che serve a più macchine passa da git o da
+GitHub.
 
-- **Compiti, in ordine di valore**, perché la sua quota finisce presto: consulente del maestro su design e piani;
-  arbitro quando il maestro ha un dubbio o non è d'accordo col lavorante; controlli su tutto il repo in una passata
-  (ogni segnalazione con file, riga e testo citato, che uno script verifica prima che il maestro la legga); capo del
-  lavorante (spezza i lavori grandi in compiti e rilegge le PR prima del maestro).
-- **Senza quota si va avanti senza di lui:** il lavorante continua, il maestro rivede come prima.
-- **I disaccordi** li decide il maestro, scritti col perché; quelli che cambiano cosa si costruisce vanno all'utente.
+## La regia: GitHub Actions
 
-## Il lavorante
+I workflow della bottega stanno nel progetto e girano su **runner self-hosted**, cioè sulle macchine dove la porta ha
+fatto l'accesso al suo abbonamento.
+
+- **Eventi:** un lavoro etichettato o assegnato all'esecuzione fuori fa partire un esecutore; un comando in un
+  commento chiede un consulto o una nuova passata; un orario fa partire la notte, fuori dalla finestra di manutenzione
+  del progetto.
+- **Un lavoro alla volta** per esecutore: `concurrency` di Actions, al posto di ogni lucchetto.
+- **Chi può comandare:** solo i commenti e le etichette di chi ha il ruolo di proprietario o collaboratore del repo;
+  il resto è testo.
+- **Un workflow sceglie il candidato** coi criteri della scelta viva; a quota esaurita (riconosciuta dai messaggi
+  d'errore della porta) il lavoro prende un'etichetta e il giro dopo riprova o passa al candidato seguente.
+- **Il consulto di un esecutore bloccato:** l'esecutore chiude il turno con un commento di consulto; il workflow
+  chiama il primo consigliere con quota, che risponde nello stesso filo, e riprende l'esecutore nella sua
+  conversazione.
+- **Fermi automatici:** tre tentativi per lavoro a giro; un lavoro che fallisce un giro intero diventa «bloccato» e
+  passa a chi decide; ramo principale rosso = niente lavori nuovi.
+- **Interruttore:** `bottega ferma` disattiva i workflow della bottega (`gh workflow disable`), `bottega riparti` li
+  riattiva.
+- **Senza runner sempre acceso** (per esempio un PC di lavoro spento la sera) non c'è la notte: l'esecutore fuori
+  parte solo quando lo si chiama, sul runner di quella macchina, mentre è accesa.
+
+## L'esecutore fuori: libertà e confini
 
 - **Fiducia larga da subito**, anche sul codice delicato quando il piano dà firme e valori.
-- **Cosa fa:** prima i lavori che il maestro gli assegna; finiti quelli, sceglie lui fra i debiti e i bug della board
-  che hanno un oracolo, e lo annuncia sulla board prima di cominciare. Non sceglie mai da solo: decisioni dell'utente,
-  design e specifiche, lavori che aspettano l'utente o già presi da altri, ciò che tocca segreti, dati veri,
-  cancellazioni o azioni irreversibili o verso l'esterno; più ciò che la costituzione del progetto aggiunge.
-- **Le sue PR restano vive:** risolve i conflitti col ramo principale e corregge ciò che il maestro chiede nei commenti.
-- **La notte**, solo dove c'è la gabbia (una macchina sempre accesa, per esempio un server): un timer lo lancia da
-  solo, un lavoro alla volta, fuori dalla finestra di manutenzione del progetto. Un lavoro che fallisce in una notte
-  (tre tentativi) diventa «bloccato» e passa al maestro. Se il ramo principale è rosso non prende lavori nuovi. A quota
-  esaurita aspetta il rinnovo e lo annota.
-- **Di giorno** lavora solo se lo chiamano l'utente o il maestro. Su una macchina senza gabbia (per esempio un PC di
-  lavoro, spento di notte) lavora solo così, nella sessione dell'utente, con le guardie e il controllo sul rilascio.
-- **Come si parlano i ruoli:** li collega il comando `bottega`, non il modello. Il maestro chiede un consulto al
-  maestro esterno con `bottega consulta`, che porta con sé i file (anche bozze mai spinte). Il lavorante bloccato chiude
-  il turno con una riga di consulto; lo script interroga il maestro esterno e fa ripartire il lavorante nella stessa
-  conversazione. Il lavorante può usare sotto-agenti solo col suo modello, mai con quello del maestro esterno, la cui
-  quota è scarsa. Un lucchetto tiene separati l'uso di giorno e il turno di notte.
-- **Il resoconto** va solo al maestro, sulla board; il maestro fa da filtro e dice all'utente ciò che serve.
-
-## L'isolamento del lavorante (Linux e WSL)
-
-- **Un utente Unix suo**, con la sua cartella chiusa: non vede la cartella dell'utente, i segreti del progetto, le
-  chiavi ssh, gli archivi di password, la memoria delle altre CLI.
-- **Le credenziali che servono, e basta:** l'accesso alla CLI del suo fornitore e un `gh` con l'account dell'utente.
-  La rete la decide la costituzione del progetto (di serie libera).
-- **Un'identità git sua:** i commit del lavorante portano un nome e un indirizzo suoi. Un progetto che rilascia da solo
-  dal ramo principale non rilascia un ramo principale la cui punta non è un'unione del maestro o dell'utente, e avvisa:
-  un push sbagliato resta rosso invece di andare in produzione.
-- **`sudo` solo per i comandi** che la costituzione del progetto elenca (per esempio quelli che lanciano le prove in
-  una gabbia).
-- **Tre guardie locali:** un `gh` che rifiuta di unire e di chiudere PR e issue; un controllo di git che rifiuta il
-  push sui rami protetti (il principale e quello di produzione); un controllo di git che rifiuta il push di un ramo che
-  tocca `.github/` (una pipeline lo eseguirebbe prima della revisione). Un lavorante confuso si ferma; il confine vero
-  resta la revisione.
-- **Un interruttore:** `bottega ferma` ferma timer e lavorante in corso, `bottega riparti` li riaccende.
+- **Che cosa fa:** prima i lavori che chi decide gli assegna; finiti quelli, sceglie fra i debiti e i bug che hanno un
+  oracolo, e lo annuncia sul lavoro prima di cominciare. Non sceglie mai da solo: decisioni dell'utente, design e
+  specifiche, lavori che aspettano l'utente o già presi, ciò che tocca segreti, dati veri, cancellazioni o azioni
+  irreversibili o verso l'esterno, più ciò che la costituzione del progetto aggiunge.
+- **Tiene vive le sue PR:** risolve i conflitti col ramo principale e corregge ciò che chi decide chiede nei commenti.
+- **I sotto-agenti** solo col suo modello, mai con quello di un consigliere, la cui quota è di solito scarsa.
+- **Dove gira:** un utente Unix suo, con la sua cartella chiusa, il runner, la sua porta col suo accesso e un `gh`
+  coll'account dell'utente; non vede segreti del progetto, chiavi, archivi di password, memorie di altre CLI. La rete
+  la decide la costituzione del progetto (di serie libera).
+- **Tre guardie locali:** un `gh` che rifiuta di unire e chiudere PR e issue; un controllo di git che rifiuta il push
+  sui rami protetti; un controllo di git che rifiuta il push di un ramo che tocca `.github/`. Sono freni contro gli
+  errori, non confini.
+- **Il confine vero sul rilascio:** l'esecutore committa con un'identità git sua; un progetto che rilascia da solo dal
+  ramo principale non rilascia una punta che non è un'unione di chi decide o dell'utente, e avvisa.
 
 ## Come impara
 
-- **Una skill sola**, generica, nel repo: la leggono tutte le CLI supportate. Le differenze fra le CLI stanno in una
-  pagina per CLI.
-- **I quaderni, uno per modello:** le lezioni sul modello (per esempio «indebolisce le prove per farle passare»),
-  ognuna come regola breve con la PR da cui viene. Le scrive il maestro durante la revisione. Quando il fornitore
-  cambia modello, il quaderno si rilegge. Le lezioni sul progetto vanno nella costituzione del progetto.
-- **La casistica:** riparte da zero con questa versione. Raccoglie precedenti, mai regole: vince sempre la skill. Ogni
-  caso ha scenario, domanda, le opzioni, la **scelta** presa (una delle opzioni, così uno script confronta senza
-  modello), la prosa del perché e l'esito. Cresce col lavoro vero.
-- **Due strati, per quaderni e casistica:** quello del repo, curato dal proprietario del repo e condiviso; uno locale
-  della macchina, fuori dal clone, mai spinto. La skill legge tutti e due. Una voce locale passa al repo solo dopo il
-  controllo su segreti, nomi e percorsi personali. Un caso che parla di un progetto resta nel progetto.
-- **Il banco di prova:** quando la skill cambia, il maestro esterno risponde a 100-200 casi a caso (tutti, finché sono
-  meno) con la skill nuova e senza le risposte; uno script confronta le scelte; il maestro guarda solo le divergenze.
-  Senza quota del maestro esterno lo fa il lavorante.
-- **Le misure: tutto.** Per ogni compito: chi l'ha fatto, dove, con che modello; la quota del maestro spesa per brief e
-  revisione (il numero che decide: i token che le trascrizioni della porta del maestro registrano fra l'inizio e la
-  fine di brief e revisione); le quote delle altre botteghe e le durate, se la porta le dà; giri, consulti; l'esito
-  della revisione (unito com'era, corretto, rifiutato); i rilievi gravi e da dove venivano. Per il maestro esterno, i
-  consigli accolti, respinti e, col tempo, giusti o sbagliati. Il maestro dice all'utente solo ciò che cambia la strada.
+- **Una skill sola**, generica, nel plugin; le differenze fra le porte in una pagina per porta.
+- **I quaderni, uno per modello:** le lezioni sul modello, ognuna come regola breve con la PR da cui viene. Le scrive
+  chi decide durante la revisione, con una PR al repo `bottega`. Quando il fornitore cambia modello, il quaderno si
+  rilegge. Le lezioni sul progetto vanno nella costituzione del progetto, nel suo repo.
+- **La casistica:** riparte da zero. Ogni caso ha scenario, domanda, opzioni, la **scelta** presa (così uno script
+  confronta senza modello), il perché e l'esito. Cresce con PR al repo `bottega`; un caso che parla di un progetto
+  resta nel progetto.
+- **Il banco di prova:** quando la skill cambia, un consigliere risponde a 100-200 casi (tutti, finché sono meno) con
+  la skill nuova e senza le risposte; un workflow confronta le scelte; chi decide guarda solo le divergenze.
+- **Le misure: tutto, nei campi del Project.** Per ogni lavoro: chi l'ha eseguito, con che modello, da che porta, in
+  sessione o fuori; la quota spesa da chi decide per brief e revisione (il numero che decide, dai token delle
+  trascrizioni della sua porta); le quote altrui e le durate, se la porta le dà; giri e consulti; l'esito della
+  revisione (unito com'era, corretto, rifiutato); i rilievi gravi e da dove venivano. Per i consiglieri, i consigli
+  accolti, respinti e, col tempo, giusti o sbagliati. Le misure alimentano la scelta viva; chi decide dice all'utente
+  solo ciò che cambia la strada.
 
-## Il repo e l'installazione
+## Il repo, il plugin e l'installazione
 
-- **Il repo `bottega`**, pubblico, licenza MIT, in italiano. Dentro: `LEGGIMI.md` per le persone (come si regala e
-  come si installa, in poche righe), `INSTALLA.md` per la CLI (installare, aggiornare, disinstallare; ogni passo
-  rifacibile senza danni), la skill con le pagine per CLI e per sistema, i quaderni, la casistica, i modelli di brief,
-  costituzione e registro, gli attrezzi.
-- **Le porte della prima versione:** Claude Code, Antigravity, Pi, GitHub Copilot CLI, sia per i ruoli in sessione
-  sia per il lavorante senza mani. Come ognuna legge le skill e lavora senza mani si verifica prima di scriverne
-  l'adattatore.
-- **L'installazione fa da sola tutto ciò che può:** riconosce porte e sistema; collega (o copia, dove i collegamenti
-  non funzionano) la skill nel posto che ogni porta legge; scopre gli abbonamenti e i modelli disponibili e propone i
-  ruoli; chiede solo ciò che non può sapere: come l'utente vuole essere chiamato, il progetto, quali abbonamenti si
-  possono usare su quel progetto (un progetto di lavoro può avere regole su dove va il codice), se vuole il lavorante
-  di notte, se vuole la board.
-- **Le skill compagne:** `bottega` installa e aggiorna anche le skill su cui si appoggia, dove servono, compresa la
-  cartella del lavorante nella gabbia.
-- **La board:** di serie issue ed etichette con `gh`; un progetto che ha già la sua board la collega con un adattatore
-  (un comando suo che sa leggere i lavori, cambiarne lo stato e scrivere una consegna). Senza board, i lavori stanno in
-  un file del progetto.
-- **«Quota esaurita»** si riconosce dai messaggi d'errore di ogni porta, scritti nel suo adattatore.
-  Poi scrive: la configurazione dei ruoli fuori dal progetto, la prima costituzione del progetto (guardando il suo
-  repo, da rivedere con l'utente) e un `AGENTS.md` alla radice che rimanda alla costituzione; se richiesti, la gabbia
-  del lavorante con le guardie e il timer (chiede `sudo` una volta) e una board su GitHub.
-- **Il comando `bottega`:** `stato`, `ferma`, `riparti`, `aggiorna` (dopo un `git pull` ricollega o ricopia), più gli
-  attrezzi del lavorante.
-- **Il repo è pubblico:** prima di ogni push un controllo cerca segreti, nomi e percorsi personali.
+- **Il repo `bottega`**, pubblico, licenza MIT, in italiano: il plugin (skill, pagine per porta, modelli di brief e di
+  costituzione), i workflow modello, i quaderni, la casistica, la guida per le persone (`LEGGIMI.md`) e quella per la
+  CLI (`INSTALLA.md`).
+- **Il plugin** si installa e si aggiorna col sistema di plugin di ogni porta, dal repo GitHub, come le altre raccolte
+  di skill che supportano più CLI; le skill compagne sono sue dipendenze. Come ogni porta installa un plugin da GitHub
+  si verifica prima di scriverne la pagina.
+- **L'installazione** (la CLI segue `INSTALLA.md`) fa da sola tutto ciò che può: riconosce porte e sistema, installa
+  il plugin in ogni porta, scopre abbonamenti e modelli, propone funzioni e candidati, e chiede solo ciò che non può
+  sapere: come l'utente vuole essere chiamato, il progetto, quali abbonamenti si possono usare su quel progetto (un
+  progetto di lavoro può avere regole su dove va il codice), se vuole l'esecutore fuori e la notte. Poi scrive nel
+  progetto, con una PR: la costituzione, un `AGENTS.md` alla radice che rimanda a lei, la configurazione delle botteghe
+  e dei candidati, i workflow; prepara i campi del Project. Sulla macchina, se richiesto: l'utente dell'esecutore, il
+  runner, le guardie (chiede `sudo` una volta).
+- **Il repo è pubblico:** un workflow controlla ogni PR del repo `bottega` cercando segreti, nomi e percorsi personali.
 
 ## Lasciato al costruttore
 
-Il linguaggio degli attrezzi e del comando `bottega`; la disposizione esatta dei file; i nomi delle opzioni; come si
-leggono i modelli di ogni CLI; il formato del registro; i campi della board oltre a Status, «Esegue» e al legame fra
-PR e lavoro; come lo script della notte sceglie fra più lavori pronti.
+La disposizione dei file del plugin e dei workflow; il formato della configurazione; i nomi dei campi del Project e
+delle etichette; i comandi di consulto nei commenti; come ogni porta lavora senza mani e come se ne leggono modelli,
+token ed errori di quota; il peso dei criteri della scelta viva.
 
-## Le scelte del maestro
+## Le scelte di chi ha scritto il design
 
-Fatte durante il brainstorming o dopo la revisione del costruttore (il Maestro Argon), non dall'utente, e quindi
-rivedibili: la licenza MIT; il controllo prima del push del repo pubblico; l'ordine di valore dei compiti del maestro
-esterno; «senza quota si va avanti»; la regola che una lezione sul progetto va nella costituzione e non nel quaderno;
-i tre tentativi per notte; il rinvio a `AGENTS.md`; il comando `bottega` come regista dei ruoli e dei consulti, con la
-ripresa della conversazione e il lucchetto giorno-notte; i sotto-agenti del lavorante solo col suo modello; la board
-con adattatore e il ripiego su file; la misura della quota del maestro dalle trascrizioni; la «scelta» codificata nei
-casi; i due strati di quaderni e casistica; le skill compagne.
+Fatte durante il brainstorming o dopo la revisione del costruttore, non dall'utente, e quindi rivedibili: la licenza
+MIT; il controllo delle PR del repo pubblico; «senza quota si passa al candidato seguente»; le lezioni sul progetto
+nella costituzione e non nel quaderno; i tre tentativi a giro; il rinvio a `AGENTS.md`; i sotto-agenti solo col
+modello dell'esecutore; la «scelta» codificata nei casi; la quota di chi decide misurata dalle trascrizioni; chi può
+comandare dai commenti.
