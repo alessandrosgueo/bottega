@@ -820,3 +820,131 @@ def test_c1_lingua_italiana(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     _committa_firmato(repo, chiave, "commit firmato", email=email)
     esito = verifica(clone=repo, punta="HEAD", primo=True)
     assert esito.buona is True
+
+
+# --- B4.C2: la seconda rilettura (Sonnet): replace, grafts, stato, prepara -------------------------------------------
+
+
+def _git_prova(repo: Path, *argomenti: str) -> str:
+    res = subprocess.run(["git", *argomenti], cwd=repo, check=True, capture_output=True, text=True)
+    return res.stdout.strip()
+
+
+def _repo_con_rilascio(tmp_path: Path) -> tuple[Path, Path, str]:
+    """Un repo con l'elenco della chiave di a@x e un rilascio firmato: (repo, chiave, sha del rilascio)."""
+    repo = _crea_repo(tmp_path, email="a@x")
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'a@x namespaces="git" {pub}\n', encoding="utf-8")
+    rilascio = _committa_firmato(repo, chiave, "rilascio", email="a@x")
+    return repo, chiave, rilascio
+
+
+def test_c2_replace_sulla_punta(tmp_path: Path) -> None:
+    """Un passo di prima mette `git replace <cattivo> <buono>`: la punta cattiva non firmata non passa."""
+    repo, chiave, rilascio = _repo_con_rilascio(tmp_path)
+    buono = _committa_firmato(repo, chiave, "buono", nome_file="b.txt", email="a@x")
+    _git_prova(repo, "reset", "-q", "--hard", rilascio)
+    (repo / "c.txt").write_text("cattivo\n", encoding="utf-8")
+    _git_prova(repo, "add", "c.txt")
+    _git_prova(repo, "commit", "-q", "-m", "cattivo")
+    cattivo = _git_prova(repo, "rev-parse", "HEAD")
+    _git_prova(repo, "replace", "-f", cattivo, buono)
+
+    esito = verifica(repo, punta=cattivo, rilascio=rilascio)
+    assert esito.buona is False
+
+
+def test_c2_replace_sul_rilascio(tmp_path: Path) -> None:
+    """Un passo di prima sostituisce il rilascio con un commit il cui elenco ammette la chiave dell'attacco."""
+    repo, _, rilascio = _repo_con_rilascio(tmp_path)
+    chiave_x, pub_x = _crea_chiave(tmp_path, "attacco")
+    _git_prova(repo, "checkout", "-q", "--orphan", "forgia")
+    (repo / ".github" / "bottega" / "firme-ammesse").write_text(f'x@x namespaces="git" {pub_x}\n', encoding="utf-8")
+    _git_prova(repo, "add", "-A")
+    _git_prova(repo, "commit", "-q", "-m", "elenco forgiato")
+    forgiato = _git_prova(repo, "rev-parse", "HEAD")
+    _git_prova(repo, "checkout", "-q", "-f", "main")
+    punta = _committa_firmato(repo, chiave_x, "punta dell'attacco", nome_file="x.txt", email="x@x")
+    _git_prova(repo, "replace", "-f", rilascio, forgiato)
+
+    esito = verifica(repo, punta=punta, rilascio=rilascio)
+    assert esito.buona is False
+
+
+def test_c2_graft_finge_la_discendenza(tmp_path: Path) -> None:
+    """Un `.git/info/grafts` che dà al commit orfano firmato il rilascio come genitore: non discende davvero."""
+    repo, chiave, rilascio = _repo_con_rilascio(tmp_path)
+    _git_prova(repo, "checkout", "-q", "--orphan", "orfano")
+    orfano = _committa_firmato(repo, chiave, "orfano firmato", nome_file="o.txt", email="a@x")
+    _git_prova(repo, "checkout", "-q", "-f", "main")
+    (repo / ".git" / "info").mkdir(parents=True, exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{orfano} {rilascio}\n", encoding="utf-8")
+
+    esito = verifica(repo, punta=orfano, rilascio=rilascio)
+    assert esito.buona is False
+    assert esito.motivo == "punta non discende dal rilascio"
+
+
+def test_c2_stato_non_segue_un_link(tmp_path: Path) -> None:
+    """Un link messo prima al posto del file temporaneo dello stato non si segue: la vittima resta com'era."""
+    repo, chiave, rilascio = _repo_con_rilascio(tmp_path)
+    _committa_firmato(repo, chiave, "secondo", nome_file="s.txt", email="a@x")
+    cartella_stato = tmp_path / "stato"
+    cartella_stato.mkdir()
+    stato = cartella_stato / "rilascio"
+    stato.write_text(rilascio + "\n", encoding="utf-8")
+    vittima = tmp_path / "vittima.txt"
+    vittima.write_text("intatta\n", encoding="utf-8")
+    (cartella_stato / "rilascio.nuovo").symlink_to(vittima)
+
+    parser = argparse.ArgumentParser()
+    argomenti_firma(parser)
+    codice = comando_firma(parser.parse_args(["verifica", "--stato", str(stato), "--cartella", str(repo)]))
+    assert codice == 0
+    assert vittima.read_text(encoding="utf-8") == "intatta\n"
+    assert stato.read_text(encoding="utf-8").strip() == _git_prova(repo, "rev-parse", "HEAD")
+
+
+def test_c2_esito_porta_lo_sha_intero(tmp_path: Path) -> None:
+    """Lo stato scrive lo SHA che la verifica ha controllato, non un riferimento risolto di nuovo."""
+    repo, chiave, rilascio = _repo_con_rilascio(tmp_path)
+    punta = _committa_firmato(repo, chiave, "secondo", nome_file="s.txt", email="a@x")
+    esito = verifica(repo, punta="HEAD", rilascio=rilascio)
+    assert esito.buona is True
+    assert esito.sha_intero == punta
+
+
+def test_c2_prepara_fuori_da_un_repo_non_crea_la_chiave(tmp_path: Path) -> None:
+    fuori = tmp_path / "fuori"
+    fuori.mkdir()
+    chiave = tmp_path / "chiavi" / "bottega_firma"
+    with pytest.raises(ErroreFirma):
+        prepara(cartella=fuori, chiave=chiave, globale=False)
+    assert not chiave.exists()
+    assert not chiave.parent.exists()
+
+
+def test_c2_prepara_senza_email_non_crea_la_chiave(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path, email="")
+    chiave = tmp_path / "chiavi" / "bottega_firma"
+    with pytest.raises(ErroreFirma):
+        prepara(cartella=repo, chiave=chiave, globale=False)
+    assert not chiave.exists()
+
+
+def test_c2_prepara_riga_commentata_non_conta(tmp_path: Path) -> None:
+    """Una riga commentata con la stessa chiave non la rende già ammessa: prepara aggiunge la riga attiva."""
+    repo = _crea_repo(tmp_path, email="decisore@example.com")
+    chiave = tmp_path / "chiavi" / "bottega_firma"
+    chiave.parent.mkdir(parents=True)
+    subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "c", "-f", str(chiave)], check=True, capture_output=True)
+    tipo, corpo, _ = Path(str(chiave) + ".pub").read_text(encoding="utf-8").split(" ", 2)
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True)
+    firme.write_text(f"# revocata: decisore@example.com {tipo} {corpo}\n", encoding="utf-8")
+
+    prepara(cartella=repo, chiave=chiave, globale=False)
+    righe = firme.read_text(encoding="utf-8").splitlines()
+    assert f'decisore@example.com namespaces="git" {tipo} {corpo}' in righe

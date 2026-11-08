@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,15 +31,19 @@ class EsitoFirma:
     motivo: str
     principale: str | None = None
     sha: str | None = None
+    sha_intero: str | None = None
 
 
 # Il percorso dei programmi della verifica: fisso, mai quello dell'ambiente (un passo di prima può averlo cambiato).
-PATH_FIDATO = "/usr/local/bin:/usr/bin:/bin"
+PATH_FIDATO = "/usr/bin:/bin"
 
 # Chiavi della configurazione git che la verifica fissa da riga di comando (vincono su quella del clone, che un passo
 # di prima può aver scritto): i programmi di firma, l'elenco, gli hook, fsmonitor.
 _OPZIONI_GIT_FIDATE: tuple[str, ...] = (
-    "-c", "gpg.ssh.program=ssh-keygen",
+    # Gli oggetti come sono: niente refs/replace né grafts, che un passo di prima può aver scritto nel clone.
+    "--no-replace-objects",
+    "-c", "core.useReplaceRefs=false",
+    "-c", "core.commitGraph=false",
     "-c", "gpg.program=false",
     "-c", "gpg.openpgp.program=false",
     "-c", "gpg.x509.program=false",
@@ -53,6 +58,8 @@ def _ambiente_fidato() -> dict[str, str]:
     """Ambiente minimo per git e ssh-keygen: PATH fisso, niente configurazione globale o di sistema, messaggi in C."""
     env = {
         "PATH": PATH_FIDATO,
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_GRAFT_FILE": "/dev/null",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
         "LC_ALL": "C",
@@ -63,9 +70,17 @@ def _ambiente_fidato() -> dict[str, str]:
     return env
 
 
+def _ssh_keygen_fidato() -> str:
+    """ssh-keygen dal PATH fisso, col percorso assoluto."""
+    return shutil.which("ssh-keygen", path=PATH_FIDATO) or "/usr/bin/ssh-keygen"
+
+
 def _git(clone: Path, *argomenti: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *_OPZIONI_GIT_FIDATE, "-C", str(clone), *argomenti],
+        [
+            "git", *_OPZIONI_GIT_FIDATE, "-c", f"gpg.ssh.program={_ssh_keygen_fidato()}",
+            "-C", str(clone), *argomenti,
+        ],
         capture_output=True,
         text=True,
         errors="replace",
@@ -96,6 +111,8 @@ def _verifica(clone: Path, punta: str, rilascio: str | None, primo: bool) -> Esi
     # 1. Risolve la punta
     res_punta = _git(clone, "rev-parse", "--verify", "--end-of-options", f"{punta}^{{commit}}")
     if res_punta.returncode != 0:
+        if "dubious ownership" in res_punta.stderr:
+            return EsitoFirma(buona=False, motivo="clone di un altro utente: git lo rifiuta (safe.directory)")
         return EsitoFirma(buona=False, motivo=f"riferimento sconosciuto: {punta}")
     punta_commit = res_punta.stdout.strip()
     sha_corto = punta_commit[:7]
@@ -148,7 +165,9 @@ def _verifica(clone: Path, punta: str, rilascio: str | None, primo: bool) -> Esi
         uscita = (res_v.stdout or "") + "\n" + (res_v.stderr or "")
         match = re.search(r'Good "git" signature for (\S+)', uscita)
         if res_v.returncode == 0 and match:
-            return EsitoFirma(buona=True, motivo="", principale=match.group(1), sha=sha_corto)
+            return EsitoFirma(
+                buona=True, motivo="", principale=match.group(1), sha=sha_corto, sha_intero=punta_commit
+            )
         return EsitoFirma(buona=False, motivo="firma di una chiave non ammessa", sha=sha_corto)
     finally:
         percorso_elenco.unlink(missing_ok=True)
@@ -157,6 +176,24 @@ def _verifica(clone: Path, punta: str, rilascio: str | None, primo: bool) -> Esi
 def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
     """Prepara la chiave SSH di firma, configura git e registra la chiave ammessa."""
     chiave_pub = Path(str(chiave) + ".pub")
+
+    # La radice del repo, anche se si lancia da una sottocartella: l'elenco sta sempre lì.
+    res_radice = subprocess.run(
+        ["git", "-C", str(cartella), "rev-parse", "--show-toplevel"], capture_output=True, text=True
+    )
+    if res_radice.returncode != 0 or not res_radice.stdout.strip():
+        raise ErroreFirma(f"non è un repo git: {cartella}")
+    cartella = Path(res_radice.stdout.strip())
+
+    # Ricava l'email utente da git
+    res_email = subprocess.run(
+        ["git", "-C", str(cartella), "config", "user.email"],
+        capture_output=True,
+        text=True,
+    )
+    email = res_email.stdout.strip()
+    if res_email.returncode != 0 or not email:
+        raise ErroreFirma("configurazione git priva di user.email")
 
     if chiave.is_file() and not chiave_pub.is_file():
         raise ErroreFirma(f"chiave privata presente senza pubblica: {chiave_pub}")
@@ -179,23 +216,6 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
 
     pub_line = chiave_pub.read_text(encoding="utf-8").strip()
 
-    # La radice del repo, anche se si lancia da una sottocartella: l'elenco sta sempre lì.
-    res_radice = subprocess.run(
-        ["git", "-C", str(cartella), "rev-parse", "--show-toplevel"], capture_output=True, text=True
-    )
-    if res_radice.returncode != 0 or not res_radice.stdout.strip():
-        raise ErroreFirma(f"non è un repo git: {cartella}")
-    cartella = Path(res_radice.stdout.strip())
-
-    # Ricava l'email utente da git
-    res_email = subprocess.run(
-        ["git", "-C", str(cartella), "config", "user.email"],
-        capture_output=True,
-        text=True,
-    )
-    email = res_email.stdout.strip()
-    if res_email.returncode != 0 or not email:
-        raise ErroreFirma("configurazione git priva di user.email")
 
     # Configura git
     base_cmd = ["git"]
@@ -223,7 +243,16 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
     parti_pub = pub_line.split()
     corpo_chiave = f"{parti_pub[0]} {parti_pub[1]}" if len(parti_pub) >= 2 else pub_line
     testo_attuale = firme_file.read_text(encoding="utf-8") if firme_file.is_file() else ""
-    gia_presente = any(corpo_chiave in r for r in testo_attuale.splitlines())
+    # Presente solo se una riga attiva (non commentata) ha lo stesso tipo e la stessa chiave, come campi.
+    tipo_e_chiave = corpo_chiave.split()
+    gia_presente = False
+    for riga in testo_attuale.splitlines():
+        if not riga.strip() or riga.strip().startswith("#"):
+            continue
+        campi = riga.split()
+        if any(campi[k : k + 2] == tipo_e_chiave for k in range(len(campi) - 1)):
+            gia_presente = True
+            break
 
     if not gia_presente:
         # Solo tipo e chiave: il commento della pubblica (anche di una chiave fatta prima) resta fuori dal repo.
@@ -279,6 +308,27 @@ def argomenti_firma(parser: argparse.ArgumentParser) -> None:
     p_verifica.add_argument("--cartella", type=Path, default=Path("."), help=argparse.SUPPRESS)
 
 
+def _scrivi_stato(stato: Path, sha: str) -> None:
+    """Scrive lo SHA verificato nel file di stato: file temporaneo nuovo nella stessa cartella, fsync, os.replace.
+
+    Il temporaneo lo crea mkstemp (O_EXCL: un link messo lì prima non si segue), e un crollo a metà non lascia uno
+    stato vuoto.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
+        raise OSError(f"SHA non valido: {sha!r}")
+    stato.parent.mkdir(parents=True, exist_ok=True)
+    fd, nome = tempfile.mkstemp(dir=stato.parent, prefix=f".{stato.name}.", suffix=".nuovo")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(sha + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(nome, stato)
+    except BaseException:
+        Path(nome).unlink(missing_ok=True)
+        raise
+
+
 def comando_firma(args: argparse.Namespace, forgia: Forgia | None = None) -> int:
     """Esegue l'azione del sottocomando firma (prepara o verifica)."""
     azione = getattr(args, "azione", None)
@@ -309,17 +359,19 @@ def comando_firma(args: argparse.Namespace, forgia: Forgia | None = None) -> int
                 if args.primo:
                     print(f"errore: {stato} c'è già: --primo vale solo per il primo rilascio", file=sys.stderr)
                     return 2
-                rilascio = stato.read_text(encoding="utf-8").strip()
+                try:
+                    rilascio = stato.read_text(encoding="utf-8").strip()
+                except (OSError, UnicodeDecodeError) as e:
+                    rilascio = f"(stato illeggibile: {e})"
             elif not args.primo:
                 print(f"errore: {stato} non c'è: il primo rilascio si verifica con --primo", file=sys.stderr)
                 return 2
         esito = verifica(clone=cartella, punta=args.punta, rilascio=rilascio, primo=args.primo)
         if esito.buona and stato is not None:
-            punta_intera = _git(cartella, "rev-parse", "--verify", "--end-of-options", f"{args.punta}^{{commit}}")
-            stato.parent.mkdir(parents=True, exist_ok=True)
-            temporaneo = stato.with_name(stato.name + ".nuovo")
-            temporaneo.write_text(punta_intera.stdout.strip() + "\n", encoding="utf-8")
-            os.replace(temporaneo, stato)
+            try:
+                _scrivi_stato(stato, esito.sha_intero or "")
+            except OSError as e:
+                esito = EsitoFirma(buona=False, motivo=f"stato non scritto: {e}", sha=esito.sha)
         if getattr(args, "avvisa", False):
             if forgia is None:
                 repo = os.environ.get("GITHUB_REPOSITORY", "")
