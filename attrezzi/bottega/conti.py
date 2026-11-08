@@ -18,6 +18,7 @@ import shlex
 import sys
 from typing import Any
 
+import bottega.misure as misure
 from bottega.board import Board, BoardComando, BoardProject, Lavoro
 from bottega.configurazione import PERCORSO_PREDEFINITO, ErroreConfigurazione, leggi_configurazione
 from bottega.forgia import ForgiaGh
@@ -105,6 +106,8 @@ def conti(lavori: Sequence[Lavoro]) -> dict[str, Any]:
 
     per_candidato: dict[str, list[Lavoro]] = defaultdict(list)
     for l in lavori_misurati:
+        if misure.PIU_ESECUTORI in [v.strip() for v in (l.campi.get("Misure parziali") or "").split(",")]:
+            continue
         esec = l.campi.get("Esecutore") or l.esecutore
         if esec and esec.strip():
             per_candidato[esec.strip()].append(l)

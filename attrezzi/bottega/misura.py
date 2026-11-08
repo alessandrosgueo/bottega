@@ -26,6 +26,7 @@ OPZIONI_MISURA: tuple[str, ...] = (
     "durata",
     "giri",
     "token_esecutore",
+    "token_decisore",
     "rilievi_piano",
     "rilievi_brief",
     "rilievi_esecuzione",
@@ -97,6 +98,11 @@ def argomenti_misura(parser: argparse.ArgumentParser) -> None:
         "--token-esecutore",
         type=int,
         help="token spesi dall'esecutore",
+    )
+    parser.add_argument(
+        "--token-decisore",
+        type=int,
+        help="token di chi decide (per un numero che `segno fine` ha letto ma non ha potuto scrivere)",
     )
     parser.add_argument(
         "--configurazione",
@@ -183,6 +189,7 @@ def comando_misura(args: argparse.Namespace, board: Board | None = None) -> int:
         ("durata", "Durata"),
         ("giri", "Giri"),
         ("token_esecutore", "Token esecutore"),
+        ("token_decisore", "Token di chi decide"),
         ("rilievi_piano", "Rilievi del piano"),
         ("rilievi_brief", "Rilievi del brief"),
         ("rilievi_esecuzione", "Rilievi dell'esecuzione"),

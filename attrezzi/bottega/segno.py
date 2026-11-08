@@ -63,18 +63,21 @@ def inizio(
     if adesso.tzinfo is None:
         adesso = adesso.replace(tzinfo=timezone.utc)
 
-    lav = board.lavoro(numero)
+    # Una lettura sola: l'elenco serve anche all'avviso dei segni doppi; senza elenco, il solo lavoro.
+    try:
+        tutti = board.elenco()
+        lav = next((x for x in tutti if x.numero == numero), None)
+    except Exception:  # noqa: BLE001 - l'avviso dei segni doppi è un di più
+        tutti = []
+        lav = board.lavoro(numero)
     avviso = None
     if lav is not None and lav.campi.get("Segno"):
         avviso = f"avviso: segno già aperto sul #{numero}: sostituito"
-    try:
-        altri = [
-            altro.numero
-            for altro in board.elenco()
-            if altro.numero != numero and nota(altro.campi.get("Segno", "")).get("sessione") == sessione
-        ]
-    except Exception:  # noqa: BLE001 - l'avviso è un di più
-        altri = []
+    altri = [
+        altro.numero
+        for altro in tutti
+        if altro.numero != numero and nota(altro.campi.get("Segno", "")).get("sessione") == sessione
+    ]
     if altri:
         elenco_altri = ", ".join(f"#{n}" for n in altri)
         avviso = (avviso + "; " if avviso else "avviso: ") + (
@@ -169,7 +172,7 @@ def fine(
     # Nessun messaggio nell'intervallo: quasi sempre la trascrizione sbagliata. Niente numero, e il segno resta aperto
     # per riprovare con --sessione.
     if totale_messaggi == 0:
-        return None, f"nessun messaggio fra l'inizio e adesso nella trascrizione: niente numero (segno ancora aperto)"
+        return None, "nessun messaggio fra l'inizio e adesso nella trascrizione: niente numero (segno ancora aperto)"
 
     # Prima si chiude il segno: se poi la somma non riesce il numero si perde, ma non si conta mai due volte.
     try:
@@ -178,14 +181,22 @@ def fine(
         return None, f"segno non chiuso ({e}): niente numero, riprova"
     ok = misure.somma(board, numero, "Token di chi decide", totale_token)
     if not ok:
-        return None, "segno chiuso ma la somma non è riuscita sulla board: niente numero"
+        return None, (
+            f"segno chiuso ma la somma di {totale_token} token non è riuscita sulla board: per scriverli a mano "
+            f"`bottega misura {numero} --token-decisore {totale_token}`"
+        )
 
     if ha_parziale:
         attuali = lav.campi.get("Misure parziali", "")
         voci = [v.strip() for v in attuali.split(",") if v.strip()]
         if "Token di chi decide" not in voci:
             voci.append("Token di chi decide")
-            board.campo(numero, "Misure parziali", ", ".join(voci))
+            try:
+                board.campo(numero, "Misure parziali", ", ".join(voci))
+            except Exception as e:  # noqa: BLE001 - il numero è già scritto
+                return totale_token, (
+                    f"chiuso: aggiunti {totale_token} token, ma «Misure parziali» non è stato aggiornato ({e})"
+                )
 
     return totale_token, f"chiuso: aggiunti {totale_token} token a Token di chi decide"
 

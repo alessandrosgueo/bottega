@@ -512,7 +512,12 @@ def test_c1_piu_esecutori(tmp_path: Path) -> None:
     iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
     forgia = ForgiaFinta(issues=[iss])
     board = BoardFinta(lavori=[
-        Lavoro(numero=1, titolo="Compito Uno", stato="pronto", campi={"Esecutore": "Altro Esecutore"})
+        Lavoro(
+            numero=1,
+            titolo="Compito Uno",
+            stato="pronto",
+            campi={"Esecutore": "Altro Esecutore", "Misurato da": "altro"},
+        )
     ])
 
     def committa(cartella, prompt, **kwargs):
@@ -553,3 +558,53 @@ def test_c1_piu_esecutori(tmp_path: Path) -> None:
     assert misure.risultati([lav_aggiornato], cfg) == {}
     assert misure.costi_propri([lav_aggiornato], cfg) == {}
 
+
+
+def test_c2_piu_esecutori_col_prendi_in_mezzo(tmp_path: Path) -> None:
+    """La rilettura: `prendi` riscrive Esecutore prima del giro; «più esecutori» deve scattare lo stesso."""
+    import bottega.misure as misure
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    cfg_candidati = dict(cfg.candidati)
+    primo = next(iter(cfg_candidati.values()))
+    cfg_candidati["altro"] = Candidato(
+        id="altro", nome="Altro Esecutore", bottega=primo.bottega, porta=primo.porta, modello="finto-2",
+        funzioni=("eseguire",), runner=primo.runner,
+    )
+    cfg = Configurazione(1, cfg.progetto, cfg.botteghe, cfg_candidati)
+    corpo = "Brief 1\n\n## Fatto quando\n```bash\ntest -f file.txt\n```\n"
+    forgia = ForgiaFinta(issues=[Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    def quota(cartella, prompt, **kwargs):
+        return Lancio(esito="quota", testo="limite", contatori={"input_tokens": 10, "output_tokens": 10})
+
+    def committa(cartella, prompt, **kwargs):
+        (Path(cartella) / "file.txt").write_text("ok\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "fatto"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto", contatori={"input_tokens": 100})
+
+    def un_giro(candidato, callback):
+        # Come fa il distributore: prendi scrive Esecutore, poi il giro.
+        board.stato(1, "pronto")
+        assert board.prendi(1, candidato.nome, nota="")
+        return giro(
+            lavoro=1, bottega=candidato.bottega, configurazione=cfg, forgia=forgia, board=board,
+            porte={candidato.porta: PortaFinta(callback=callback)}, clone_progetto=clone,
+            spazio=tmp_path / "spazio", prefisso=(), adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+            caso=random.Random(42),
+        )
+
+    un_giro(primo, quota)
+    assert board.lavoro(1).campi.get("Misurato da") == primo.id
+    un_giro(cfg_candidati["altro"], committa)
+
+    lav = board.lavoro(1)
+    assert "più esecutori" in lav.campi.get("Misure parziali", "")
+    assert lav.campi.get("Misurato da") == primo.id
+    board.campo(1, "Esito del compito", "unito com'era")
+    lav = board.lavoro(1)
+    assert misure.risultati([lav], cfg) == {}
+    assert misure.costi_propri([lav], cfg) == {}

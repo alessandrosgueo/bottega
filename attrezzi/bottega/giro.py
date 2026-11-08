@@ -265,9 +265,15 @@ def _scrivi_misure(
         print(f"misure: errore verifica/aggiunta compito #{compito_numero}: {exc}", file=sys.stderr)
 
     # Un compito già misurato per un altro candidato (cambio dopo una quota): le misure si sommano, ma il compito si
-    # segna «più esecutori» e non entra né nei risultati né nei costi di un candidato.
-    precedente = (lav.campi.get("Esecutore") or "").strip() if lav is not None else ""
-    if precedente and precedente.lower() not in (candidato.nome.lower(), candidato.id.lower()):
+    # segna «più esecutori» e non entra né nei risultati né nei costi di un candidato. Chi ha misurato per primo sta in
+    # `Misurato da` (l'id del candidato), che scrive solo il giro: `Esecutore` lo riscrive `prendi` prima del giro.
+    precedente = (lav.campi.get("Misurato da") or "").strip() if lav is not None else ""
+    if not precedente:
+        try:
+            board.campo(compito_numero, "Misurato da", candidato.id)
+        except Exception as exc:
+            print(f"misure: errore scrittura Misurato da per #{compito_numero}: {exc}", file=sys.stderr)
+    if precedente and precedente.lower() != candidato.id.lower():
         voci = [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
         if misure.PIU_ESECUTORI not in voci:
             voci.append(misure.PIU_ESECUTORI)
@@ -275,6 +281,7 @@ def _scrivi_misure(
                 board.campo(compito_numero, "Misure parziali", ", ".join(voci))
             except Exception as exc:
                 print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
+        # Esecutore resta com'è (lo usa `prendi` per il lavoro in corso): il compito è fuori dalle statistiche.
         da_scrivere: tuple[tuple[str, str], ...] = ()
     else:
         da_scrivere = (("Esecutore", candidato.nome), ("Porta", candidato.porta), ("Dove", "fuori"))

@@ -25,6 +25,7 @@ CAMPI: dict[str, str] = {
     "Token di chi decide": "NUMBER",
     "Segno": "TEXT",
     "Misure parziali": "TEXT",
+    "Misurato da": "TEXT",
     "Esito del compito": "SINGLE_SELECT",
     "Rilievi del piano": "NUMBER",
     "Rilievi del brief": "NUMBER",

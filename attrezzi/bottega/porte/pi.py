@@ -143,7 +143,7 @@ class Pi:
                 return sessions_dir / sess
             # Un nome di file senza cartella (quello che il segno scrive): si cerca nelle cartelle delle sessioni.
             if "/" not in sess and "\\" not in sess and not sess.startswith(".") and sessions_dir.is_dir():
-                trovati = sorted(f for f in sessions_dir.glob(f"*/{sess}") if f.is_file())
+                trovati = sorted(d / sess for d in sessions_dir.iterdir() if d.is_dir() and (d / sess).is_file())
                 if trovati:
                     return trovati[0]
 

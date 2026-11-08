@@ -615,8 +615,13 @@ class BoardComando:
         # adattatore di prima di B5, senza `elenco`, cerca ancora fra in corso e pronti.
         try:
             tutti = self.elenco()
-        except ErroreBoard:
-            tutti = [*self.in_corso(), *self.pronti()]
+        except ErroreBoard as errore_elenco:
+            # Ripiego per un adattatore senza `elenco`; se il lavoro non c'è, l'errore vero (anche di rete) torna
+            # fuori, invece di un «non trovato» che farebbe perdere le misure in silenzio.
+            for lav in [*self.in_corso(), *self.pronti()]:
+                if lav.numero == numero:
+                    return lav
+            raise errore_elenco
         for lav in tutti:
             if lav.numero == numero:
                 return lav
