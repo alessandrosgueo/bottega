@@ -76,3 +76,6 @@ Comando `claude`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricogni
 
 - Elenco dei modelli da comando, senza sessione interattiva: non trovato.
 - `claude auth status`: non si sa se tocca la rete. Va provato che non spenda quota.
+- Con molte skill installate, l'elenco che la sessione riceve può mostrare `bottega:bottega` senza la sua
+  descrizione (visto il 2026-11-08): la skill si carica lo stesso, ma il modello può non pensare di usarla da solo.
+  Da capire se `AGENTS.md` o `CLAUDE.md` del progetto devono nominarla.
