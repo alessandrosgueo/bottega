@@ -12,8 +12,9 @@ l'esecuzione può andare a modelli più economici.
 Il metodo esiste già in una versione a una bottega (maestro, capobottega e garzoni dello stesso fornitore). Questo
 design lo allarga in tre direzioni:
 
-1. **Più botteghe.** Una bottega è una CLI con la sua quota. Una quota abbondante di un altro fornitore diventa una
-   bottega «di fronte», con un suo maestro e un suo lavorante, che esegue tutto ciò che può aspettare una revisione.
+1. **Più botteghe.** Una bottega è un abbonamento con la sua quota (un fornitore e un accesso). Una quota abbondante
+   di un altro abbonamento diventa una bottega «di fronte», con un suo maestro e un suo lavorante, che esegue tutto ciò
+   che può aspettare una revisione.
 2. **Un metodo da regalare.** Una cartella (un repo pubblico) che si passa a un amico: lui la dà alla sua CLI, scrive
    «installa la bottega», e la CLI fa tutto da sola.
 3. **Un metodo che impara.** Le lezioni sui modelli, i precedenti e le misure crescono col lavoro vero.
@@ -44,7 +45,14 @@ Il metodo è fallito, anche se funziona, se:
 
 ## I concetti
 
-**Bottega:** una CLI con la sua quota. La bottega **di casa** è quella del maestro; le altre sono **di fronte**.
+**Bottega:** un abbonamento con la sua quota, cioè un fornitore e un accesso (per esempio Anthropic, Google AI Pro,
+GitHub Copilot). La bottega **di casa** è quella del maestro; le altre sono **di fronte**. È nella bottega che si
+spende e si misura.
+
+**Porta:** la CLI con cui si entra in una bottega. Una CLI può aprire più botteghe (Pi con un accesso Anthropic e uno
+Copilot, che a sua volta offre modelli di più fornitori); una bottega può avere più porte (l'abbonamento Anthropic da
+Claude Code su una macchina e da Pi su un'altra). I ruoli si legano a «bottega e modello»; su ogni macchina
+l'installazione sceglie la porta che c'è e che sa lavorare senza mani.
 
 **I ruoli.** Un ruolo si nomina col titolo e col nome del modello che lo ricopre («Lavorante Gemini 3.8», «Maestro
 Argon»): quando il fornitore cambia modello, cambia solo il nome.
@@ -100,10 +108,17 @@ Resta quello della bottega a una bottega, con tre cambi.
   design e specifiche, lavori che aspettano l'utente o già presi da altri, ciò che tocca segreti, dati veri,
   cancellazioni o azioni irreversibili o verso l'esterno; più ciò che la costituzione del progetto aggiunge.
 - **Le sue PR restano vive:** risolve i conflitti col ramo principale e corregge ciò che il maestro chiede nei commenti.
-- **La notte:** un timer lo lancia da solo, un lavoro alla volta, fuori dalla finestra di manutenzione del progetto.
-  Un lavoro che fallisce in una notte (tre tentativi) diventa «bloccato» e passa al maestro. Se il ramo principale è
-  rosso non prende lavori nuovi. A quota esaurita aspetta il rinnovo e lo annota.
-- **Di giorno** lavora solo se lo chiamano l'utente o il maestro.
+- **La notte**, solo dove c'è la gabbia (una macchina sempre accesa, per esempio un server): un timer lo lancia da
+  solo, un lavoro alla volta, fuori dalla finestra di manutenzione del progetto. Un lavoro che fallisce in una notte
+  (tre tentativi) diventa «bloccato» e passa al maestro. Se il ramo principale è rosso non prende lavori nuovi. A quota
+  esaurita aspetta il rinnovo e lo annota.
+- **Di giorno** lavora solo se lo chiamano l'utente o il maestro. Su una macchina senza gabbia (per esempio un PC di
+  lavoro, spento di notte) lavora solo così, nella sessione dell'utente, con le guardie e il controllo sul rilascio.
+- **Come si parlano i ruoli:** li collega il comando `bottega`, non il modello. Il maestro chiede un consulto al
+  maestro esterno con `bottega consulta`, che porta con sé i file (anche bozze mai spinte). Il lavorante bloccato chiude
+  il turno con una riga di consulto; lo script interroga il maestro esterno e fa ripartire il lavorante nella stessa
+  conversazione. Il lavorante può usare sotto-agenti solo col suo modello, mai con quello del maestro esterno, la cui
+  quota è scarsa. Un lucchetto tiene separati l'uso di giorno e il turno di notte.
 - **Il resoconto** va solo al maestro, sulla board; il maestro fa da filtro e dice all'utente ciò che serve.
 
 ## L'isolamento del lavorante (Linux e WSL)
@@ -111,7 +126,10 @@ Resta quello della bottega a una bottega, con tre cambi.
 - **Un utente Unix suo**, con la sua cartella chiusa: non vede la cartella dell'utente, i segreti del progetto, le
   chiavi ssh, gli archivi di password, la memoria delle altre CLI.
 - **Le credenziali che servono, e basta:** l'accesso alla CLI del suo fornitore e un `gh` con l'account dell'utente.
-  La rete è libera.
+  La rete la decide la costituzione del progetto (di serie libera).
+- **Un'identità git sua:** i commit del lavorante portano un nome e un indirizzo suoi. Un progetto che rilascia da solo
+  dal ramo principale non rilascia un ramo principale la cui punta non è un'unione del maestro o dell'utente, e avvisa:
+  un push sbagliato resta rosso invece di andare in produzione.
 - **`sudo` solo per i comandi** che la costituzione del progetto elenca (per esempio quelli che lanciano le prove in
   una gabbia).
 - **Tre guardie locali:** un `gh` che rifiuta di unire e di chiudere PR e issue; un controllo di git che rifiuta il
@@ -127,12 +145,18 @@ Resta quello della bottega a una bottega, con tre cambi.
 - **I quaderni, uno per modello:** le lezioni sul modello (per esempio «indebolisce le prove per farle passare»),
   ognuna come regola breve con la PR da cui viene. Le scrive il maestro durante la revisione. Quando il fornitore
   cambia modello, il quaderno si rilegge. Le lezioni sul progetto vanno nella costituzione del progetto.
-- **La casistica:** riparte da zero con questa versione. Raccoglie precedenti (scenario, domanda, risposta presa,
-  esito), mai regole: vince sempre la skill. Cresce col lavoro vero.
-- **Il banco di prova:** quando la skill cambia, il maestro esterno risponde a 100-200 casi a caso con la skill nuova e
-  senza le risposte; uno script confronta; il maestro guarda solo le divergenze.
+- **La casistica:** riparte da zero con questa versione. Raccoglie precedenti, mai regole: vince sempre la skill. Ogni
+  caso ha scenario, domanda, le opzioni, la **scelta** presa (una delle opzioni, così uno script confronta senza
+  modello), la prosa del perché e l'esito. Cresce col lavoro vero.
+- **Due strati, per quaderni e casistica:** quello del repo, curato dal proprietario del repo e condiviso; uno locale
+  della macchina, fuori dal clone, mai spinto. La skill legge tutti e due. Una voce locale passa al repo solo dopo il
+  controllo su segreti, nomi e percorsi personali. Un caso che parla di un progetto resta nel progetto.
+- **Il banco di prova:** quando la skill cambia, il maestro esterno risponde a 100-200 casi a caso (tutti, finché sono
+  meno) con la skill nuova e senza le risposte; uno script confronta le scelte; il maestro guarda solo le divergenze.
+  Senza quota del maestro esterno lo fa il lavorante.
 - **Le misure: tutto.** Per ogni compito: chi l'ha fatto, dove, con che modello; la quota del maestro spesa per brief e
-  revisione (il numero che decide); le quote delle altre CLI e le durate, se la CLI le dà; giri, consulti; l'esito
+  revisione (il numero che decide: i token che le trascrizioni della porta del maestro registrano fra l'inizio e la
+  fine di brief e revisione); le quote delle altre botteghe e le durate, se la porta le dà; giri, consulti; l'esito
   della revisione (unito com'era, corretto, rifiutato); i rilievi gravi e da dove venivano. Per il maestro esterno, i
   consigli accolti, respinti e, col tempo, giusti o sbagliati. Il maestro dice all'utente solo ciò che cambia la strada.
 
@@ -142,11 +166,20 @@ Resta quello della bottega a una bottega, con tre cambi.
   come si installa, in poche righe), `INSTALLA.md` per la CLI (installare, aggiornare, disinstallare; ogni passo
   rifacibile senza danni), la skill con le pagine per CLI e per sistema, i quaderni, la casistica, i modelli di brief,
   costituzione e registro, gli attrezzi.
-- **Le CLI:** Claude Code, Antigravity, GitHub Copilot CLI. Una CLI con più famiglie di modelli (come Copilot) può
-  coprire più ruoli dentro una sola bottega.
-- **L'installazione fa da sola tutto ciò che può:** riconosce CLI e sistema; collega (o copia, dove i collegamenti non
-  funzionano) la skill nel posto che la CLI legge; legge i modelli disponibili e propone i ruoli; chiede solo ciò che
-  non può sapere: come l'utente vuole essere chiamato, il progetto, se vuole il lavorante di notte, se vuole la board.
+- **Le porte della prima versione:** Claude Code, Antigravity, Pi, GitHub Copilot CLI, sia per i ruoli in sessione
+  sia per il lavorante senza mani. Come ognuna legge le skill e lavora senza mani si verifica prima di scriverne
+  l'adattatore.
+- **L'installazione fa da sola tutto ciò che può:** riconosce porte e sistema; collega (o copia, dove i collegamenti
+  non funzionano) la skill nel posto che ogni porta legge; scopre gli abbonamenti e i modelli disponibili e propone i
+  ruoli; chiede solo ciò che non può sapere: come l'utente vuole essere chiamato, il progetto, quali abbonamenti si
+  possono usare su quel progetto (un progetto di lavoro può avere regole su dove va il codice), se vuole il lavorante
+  di notte, se vuole la board.
+- **Le skill compagne:** `bottega` installa e aggiorna anche le skill su cui si appoggia, dove servono, compresa la
+  cartella del lavorante nella gabbia.
+- **La board:** di serie issue ed etichette con `gh`; un progetto che ha già la sua board la collega con un adattatore
+  (un comando suo che sa leggere i lavori, cambiarne lo stato e scrivere una consegna). Senza board, i lavori stanno in
+  un file del progetto.
+- **«Quota esaurita»** si riconosce dai messaggi d'errore di ogni porta, scritti nel suo adattatore.
   Poi scrive: la configurazione dei ruoli fuori dal progetto, la prima costituzione del progetto (guardando il suo
   repo, da rivedere con l'utente) e un `AGENTS.md` alla radice che rimanda alla costituzione; se richiesti, la gabbia
   del lavorante con le guardie e il timer (chiede `sudo` una volta) e una board su GitHub.
@@ -162,6 +195,10 @@ PR e lavoro; come lo script della notte sceglie fra più lavori pronti.
 
 ## Le scelte del maestro
 
-Fatte durante il brainstorming, non dall'utente, e quindi rivedibili: la licenza MIT; il controllo prima del push del
-repo pubblico; l'ordine di valore dei compiti del maestro esterno; «senza quota si va avanti»; la regola che una
-lezione sul progetto va nella costituzione e non nel quaderno; i tre tentativi per notte; il rinvio a `AGENTS.md`.
+Fatte durante il brainstorming o dopo la revisione del costruttore (il Maestro Argon), non dall'utente, e quindi
+rivedibili: la licenza MIT; il controllo prima del push del repo pubblico; l'ordine di valore dei compiti del maestro
+esterno; «senza quota si va avanti»; la regola che una lezione sul progetto va nella costituzione e non nel quaderno;
+i tre tentativi per notte; il rinvio a `AGENTS.md`; il comando `bottega` come regista dei ruoli e dei consulti, con la
+ripresa della conversazione e il lucchetto giorno-notte; i sotto-agenti del lavorante solo col suo modello; la board
+con adattatore e il ripiego su file; la misura della quota del maestro dalle trascrizioni; la «scelta» codificata nei
+casi; i due strati di quaderni e casistica; le skill compagne.
