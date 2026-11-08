@@ -12,6 +12,7 @@ import sys
 
 from bottega.board import Board, Lavoro
 from bottega.configurazione import Configurazione
+from bottega.porte import somma_pesata
 from bottega.scelta import Risultati
 
 CAMPI: dict[str, str] = {
@@ -154,43 +155,29 @@ def costi_propri(lavori: Sequence[Lavoro], configurazione: Configurazione) -> di
     }
 
 
-def token_dei_contatori(porta: str, contatori: Mapping[str, int]) -> int:
-    """Calcola il totale dei token dai contatori dell'uscita della porta (B5-R6)."""
-    if porta == "claude-code":
-        return int(
-            contatori.get("input_tokens", 0)
-            + contatori.get("output_tokens", 0)
-            + contatori.get("cache_creation_input_tokens", 0)
-            + contatori.get("cache_read_input_tokens", 0)
-        )
-    if porta == "antigravity":
-        if "total_tokens" in contatori:
-            return int(contatori["total_tokens"])
-        return int(
-            contatori.get("input_tokens", 0)
-            + contatori.get("output_tokens", 0)
-            + contatori.get("thinking_tokens", 0)
-            + contatori.get("cache_read_tokens", 0)
-        )
-    if porta == "pi":
-        if "totalTokens" in contatori:
-            return int(contatori["totalTokens"])
-        return int(
-            contatori.get("input", 0)
-            + contatori.get("output", 0)
-            + contatori.get("cacheRead", 0)
-            + contatori.get("cacheWrite", 0)
-        )
-    if porta == "copilot-cli":
-        return int(
-            contatori.get("inputTokens", 0)
-            + contatori.get("outputTokens", 0)
-            + contatori.get("cacheReadTokens", 0)
-            + contatori.get("cacheWriteTokens", 0)
-        )
-    if "total_tokens" in contatori:
-        return int(contatori["total_tokens"])
-    if "totalTokens" in contatori:
-        return int(contatori["totalTokens"])
-    return int(sum(v for v in contatori.values() if isinstance(v, (int, float))))
+# Le chiavi dei contatori di ogni porta (l'uscita del lancio) e quella della lettura dalla cache, che pesa un decimo.
+_CHIAVI_CONTATORI: dict[str, tuple[tuple[str, ...], str]] = {
+    "claude-code": (
+        ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"),
+        "cache_read_input_tokens",
+    ),
+    "antigravity": (("input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens"), "cache_read_tokens"),
+    "pi": (("input", "output", "cacheRead", "cacheWrite"), "cacheRead"),
+    "copilot-cli": (("inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"), "cacheReadTokens"),
+}
 
+
+def token_dei_contatori(porta: str, contatori: Mapping[str, int]) -> int:
+    """I token pesati dei contatori dell'uscita di una porta (B5-R5 e R6): una lettura dalla cache vale un decimo.
+
+    Si sommano le parti, non il totale della porta (che conterebbe le letture dalla cache per intero); solo se le parti
+    mancano si prende il totale. Un contatore che non è un intero vale 0.
+    """
+    puliti = {k: v for k, v in contatori.items() if isinstance(v, int) and not isinstance(v, bool)}
+    chiavi, cache_letta = _CHIAVI_CONTATORI.get(porta, ((), ""))
+    if any(k in puliti for k in chiavi):
+        return somma_pesata(puliti, chiavi, cache_letta=cache_letta) or 0
+    for totale in ("total_tokens", "totalTokens"):
+        if totale in puliti:
+            return puliti[totale]
+    return 0
