@@ -118,8 +118,8 @@ if "--version" in sys.argv:
 sys.exit(1)
 """,
     )
-    monkeypatch.setenv("GH_TOKEN", "segreto_gh_12345")
-    monkeypatch.setenv("BOTTEGA_TOKEN", "segreto_bottega_abcde")
+    monkeypatch.setenv("GH_TOKEN", "finto")
+    monkeypatch.setenv("BOTTEGA_TOKEN", "finto")
     p = porta("claude-code", eseguibile=str(script))
     c = p.controlla()
     assert c.ok is True
