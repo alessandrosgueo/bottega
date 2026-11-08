@@ -39,12 +39,12 @@ def test_ruolo_riconosce_segno_all_inizio():
     assert ruolo(corpo) == "esecutore"
 
 
-def test_ruolo_riconosce_segno_in_mezzo_o_alla_fine():
+def test_ruolo_rifiuta_segno_non_in_prima_riga():
     corpo_mezzo = "Prima riga\n<!-- bottega:consigliere -->\nSeconda riga"
-    assert ruolo(corpo_mezzo) == "consigliere"
+    assert ruolo(corpo_mezzo) is None
 
     corpo_fine = "Nota di chiusura <!-- bottega:avviso -->"
-    assert ruolo(corpo_fine) == "avviso"
+    assert ruolo(corpo_fine) is None
 
 
 def test_ruolo_con_spazi_nel_commento():
@@ -85,18 +85,26 @@ def test_comando_salta_righe_vuote_in_testa():
     assert comando(corpo, "alice", ["alice"]) == Comando("riprova", "")
 
 
-def test_comando_con_segno_non_e_mai_un_comando():
-    # Segno all'inizio
+def test_comando_con_segno_all_inizio_non_e_mai_un_comando():
+    # Segno all'inizio (ruolo valido)
     corpo_inizio = "<!-- bottega:esecutore -->\n/bottega riprova"
     assert comando(corpo_inizio, "alice", ["alice"]) is None
 
-    # Segno in mezzo
-    corpo_mezzo = "/bottega riprova\n<!-- bottega:avviso -->"
-    assert comando(corpo_mezzo, "alice", ["alice"]) is None
-
-    # Segno sconosciuto
+    # Segno all'inizio con ruolo sconosciuto
     corpo_sconosciuto = "<!-- bottega:alieno -->\n/bottega riprova"
     assert comando(corpo_sconosciuto, "alice", ["alice"]) is None
+
+
+def test_comando_con_segno_citato_piu_sotto_resta_comando():
+    # Segno citato sotto il comando: resta un comando valido (RV10)
+    corpo_mezzo = "/bottega riprova\n<!-- bottega:avviso -->"
+    assert comando(corpo_mezzo, "alice", ["alice"]) == Comando("riprova", "<!-- bottega:avviso -->")
+
+    # Domanda di consulto che cita un commento della bottega
+    corpo_citato = "/bottega consulta Come procedere?\n> <!-- bottega:esecutore -->\n> Errore riscontrato"
+    assert comando(corpo_citato, "alice", ["alice"]) == Comando(
+        "consulta", "Come procedere?\n> <!-- bottega:esecutore -->\n> Errore riscontrato"
+    )
 
 
 def test_comando_manca_prefisso_bottega():

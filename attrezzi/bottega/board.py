@@ -3,7 +3,7 @@
 import json
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Protocol
 
 
@@ -26,7 +26,7 @@ class ErroreBoard(Exception):
 
 
 class Board(Protocol):
-    """Interfaccia verso la board del progetto (le cinque operazioni di B3-R7)."""
+    """Interfaccia verso la board del progetto (le cinque operazioni di B3-R7 più aggiungi di RV11)."""
 
     def pronti(self) -> list[Lavoro]: ...
 
@@ -41,9 +41,11 @@ class Board(Protocol):
 
     def campo(self, numero: int, nome: str, valore: str) -> None: ...
 
+    def aggiungi(self, numero: int) -> None: ...
 
-_QUERY_PROJECT = """
-query($owner: String!, $number: Int!) {
+
+_QUERY_PROJECT_USER = """
+query($owner: String!, $number: Int!, $cursor: String) {
   user(login: $owner) {
     projectV2(number: $number) {
       id
@@ -63,7 +65,11 @@ query($owner: String!, $number: Int!) {
           }
         }
       }
-      items(first: 100) {
+      items(first: 100, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         nodes {
           id
           content {
@@ -114,6 +120,111 @@ query($owner: String!, $number: Int!) {
 }
 """
 
+_QUERY_PROJECT_ORG = """
+query($owner: String!, $number: Int!, $cursor: String) {
+  organization(login: $owner) {
+    projectV2(number: $number) {
+      id
+      title
+      fields(first: 50) {
+        nodes {
+          ... on ProjectV2FieldCommon {
+            id
+            name
+            dataType
+          }
+          ... on ProjectV2SingleSelectField {
+            options {
+              id
+              name
+            }
+          }
+        }
+      }
+      items(first: 100, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          id
+          content {
+            ... on Issue {
+              number
+              title
+              url
+              repository {
+                nameWithOwner
+              }
+              labels(first: 20) {
+                nodes { name }
+              }
+            }
+            ... on PullRequest {
+              number
+              title
+              url
+              repository {
+                nameWithOwner
+              }
+              labels(first: 20) {
+                nodes { name }
+              }
+            }
+          }
+          fieldValues(first: 20) {
+            nodes {
+              ... on ProjectV2ItemFieldTextValue {
+                text
+                field { ... on ProjectV2FieldCommon { name } }
+              }
+              ... on ProjectV2ItemFieldNumberValue {
+                number
+                field { ... on ProjectV2FieldCommon { name } }
+              }
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                optionId
+                field { ... on ProjectV2FieldCommon { name } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+_MUTATION_UPDATE = """
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: $value
+    }
+  ) {
+    projectV2Item { id }
+  }
+}
+"""
+
+_MUTATION_CLEAR = """
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
+  clearProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+    }
+  ) {
+    projectV2Item { id }
+  }
+}
+"""
+
 
 class BoardProject:
     """Implementazione diretta su GitHub Projects (v2) tramite query GraphQL e comandi `gh`."""
@@ -129,6 +240,7 @@ class BoardProject:
         self.numero = numero
         self.repo = repo
         self._esegui = esegui or self._esegui_di_serie
+        self._tipo_proprietario: str | None = None
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
         risultato = subprocess.run(
@@ -142,26 +254,74 @@ class BoardProject:
         return risultato.stdout
 
     def _leggi_progetto(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[int, tuple[str, Lavoro]]]:
-        out = self._esegui([
-            "api", "graphql",
-            "-F", f"owner={self.proprietario}",
-            "-F", f"number={self.numero}",
-            "-f", f"query={_QUERY_PROJECT}",
-        ])
-        data = json.loads(out)
-        proj = data.get("data", {}).get("user", {}).get("projectV2")
-        if not proj:
-            raise ErroreBoard(f"Project {self.numero} non trovato per {self.proprietario}")
+        cursor: str | None = None
+        tutti_items_nodes: list[dict[str, Any]] = []
+        proj_info: dict[str, Any] | None = None
+        campi: dict[str, dict[str, Any]] | None = None
 
-        fields_nodes = proj.get("fields", {}).get("nodes", [])
-        campi = {f.get("name"): f for f in fields_nodes if isinstance(f, dict) and "name" in f}
-        for obbligatorio in ("Bottega", "Esito", "Esecutore", "Nota del giro"):
-            if obbligatorio not in campi:
-                raise ErroreBoard(f"Campo mancante nel Project: {obbligatorio}")
+        while True:
+            cmd = [
+                "api", "graphql",
+                "-f", f"owner={self.proprietario}",
+                "-F", f"number={self.numero}",  # intero per GraphQL: -F (è un numero nostro, non un testo)
+            ]
+            if cursor:
+                cmd.extend(["-f", f"cursor={cursor}"])
 
-        items_nodes = proj.get("items", {}).get("nodes", [])
+            if self._tipo_proprietario == "organization":
+                cmd.extend(["-f", f"query={_QUERY_PROJECT_ORG}"])
+                out = self._esegui(cmd)
+                data = json.loads(out)
+                proj = data.get("data", {}).get("organization", {}).get("projectV2") if data.get("data") else None
+            elif self._tipo_proprietario == "user":
+                cmd.extend(["-f", f"query={_QUERY_PROJECT_USER}"])
+                out = self._esegui(cmd)
+                data = json.loads(out)
+                proj = data.get("data", {}).get("user", {}).get("projectV2") if data.get("data") else None
+            else:
+                # Prova prima user
+                cmd_user = [*cmd, "-f", f"query={_QUERY_PROJECT_USER}"]
+                out = self._esegui(cmd_user)
+                data = json.loads(out)
+                user_obj = data.get("data", {}).get("user") if data.get("data") else None
+                proj = user_obj.get("projectV2") if isinstance(user_obj, dict) else None
+                if proj:
+                    self._tipo_proprietario = "user"
+                else:
+                    cmd_org = [*cmd, "-f", f"query={_QUERY_PROJECT_ORG}"]
+                    out = self._esegui(cmd_org)
+                    data = json.loads(out)
+                    org_obj = data.get("data", {}).get("organization") if data.get("data") else None
+                    proj = org_obj.get("projectV2") if isinstance(org_obj, dict) else None
+                    if proj:
+                        self._tipo_proprietario = "organization"
+
+            if not proj:
+                raise ErroreBoard(f"Project {self.numero} non trovato per {self.proprietario}")
+
+            if proj_info is None:
+                proj_info = proj
+                fields_nodes = proj.get("fields", {}).get("nodes", [])
+                campi = {f.get("name"): f for f in fields_nodes if isinstance(f, dict) and "name" in f}
+                for obbligatorio in ("Bottega", "Esito", "Esecutore", "Nota del giro"):
+                    if obbligatorio not in campi:
+                        raise ErroreBoard(f"Campo mancante nel Project: {obbligatorio}")
+
+            items_obj = proj.get("items", {})
+            nodes = items_obj.get("nodes", [])
+            tutti_items_nodes.extend(nodes)
+
+            page_info = items_obj.get("pageInfo")
+            if isinstance(page_info, dict) and page_info.get("hasNextPage") and page_info.get("endCursor"):
+                cursor = page_info["endCursor"]
+            else:
+                break
+
+        assert campi is not None
+        assert proj_info is not None
+
         items: dict[int, tuple[str, Lavoro]] = {}
-        for it in items_nodes:
+        for it in tutti_items_nodes:
             item_id = it.get("id")
             content = it.get("content") or {}
             num = content.get("number")
@@ -200,7 +360,7 @@ class BoardProject:
             )
             items[num] = (item_id, lav)
 
-        return proj, campi, items
+        return proj_info, campi, items
 
     def pronti(self) -> list[Lavoro]:
         _, _, items = self._leggi_progetto()
@@ -229,6 +389,7 @@ class BoardProject:
             return False
 
         self.campo(numero, "Bottega", "in corso")
+        self.campo(numero, "Esito", None)
         self.campo(numero, "Esecutore", esecutore)
         if nota:
             self.campo(numero, "Nota del giro", nota)
@@ -242,24 +403,72 @@ class BoardProject:
     def consegna(self, numero: int, pr: int) -> None:
         self.campo(numero, "Bottega", "consegnato")
 
-    def campo(self, numero: int, nome: str, valore: str) -> None:
-        _, campi, items = self._leggi_progetto()
+    def campo(self, numero: int, nome: str, valore: str | None) -> None:
+        proj, campi, items = self._leggi_progetto()
         if nome not in campi:
             raise ErroreBoard(f"Campo mancante nel Project: {nome}")
         if numero not in items:
             raise ErroreBoard(f"Lavoro {numero} non trovato nel Project")
 
+        project_id = proj["id"]
         item_id, _ = items[numero]
         field_info = campi[nome]
+        field_id = field_info["id"]
+
+        if valore is None:
+            self._esegui([
+                "api", "graphql",
+                "-f", f"query={_MUTATION_CLEAR}",
+                "-f", f"projectId={project_id}",
+                "-f", f"itemId={item_id}",
+                "-f", f"fieldId={field_id}",
+            ])
+            return
+
         is_select = field_info.get("dataType") == "SINGLE_SELECT" or "options" in field_info
-        val_flag = "--value" if is_select else "--text"
+        if is_select:
+            options = field_info.get("options", [])
+            opt = next((o for o in options if isinstance(o, dict) and o.get("name") == valore), None)
+            if not opt or "id" not in opt:
+                raise ErroreBoard(f"Opzione {valore!r} non trovata per il campo {nome}")
+            opt_id = opt["id"]
+            self._esegui([
+                "api", "graphql",
+                "-f", f"query={_MUTATION_UPDATE}",
+                "-f", f"projectId={project_id}",
+                "-f", f"itemId={item_id}",
+                "-f", f"fieldId={field_id}",
+                "-f", f"value[singleSelectOptionId]={opt_id}",
+            ])
+        else:
+            self._esegui([
+                "api", "graphql",
+                "-f", f"query={_MUTATION_UPDATE}",
+                "-f", f"projectId={project_id}",
+                "-f", f"itemId={item_id}",
+                "-f", f"fieldId={field_id}",
+                "-f", f"value[text]={valore}",
+            ])
+
+    def aggiungi(self, numero: int) -> None:
+        url = (
+            f"https://github.com/{self.repo}/issues/{numero}"
+            if self.repo
+            else f"https://github.com/{self.proprietario}/issues/{numero}"
+        )
         self._esegui([
-            "project", "item-edit", str(self.numero),
+            "project", "item-add", str(self.numero),
             "--owner", self.proprietario,
-            "--id", item_id,
-            "--field", nome,
-            val_flag, valore,
+            "--url", url,
         ])
+
+
+_CAMPI_LAVORO = {f.name for f in fields(Lavoro)}
+
+
+def _dati_a_lavoro(d: dict[str, Any]) -> Lavoro:
+    d_filtrato = {k: v for k, v in d.items() if k in _CAMPI_LAVORO}
+    return Lavoro(**d_filtrato)
 
 
 class BoardComando:
@@ -292,12 +501,12 @@ class BoardComando:
     def pronti(self) -> list[Lavoro]:
         out = self._esegui([*self._cmd, "pronti"])
         dati = json.loads(out)
-        return [Lavoro(**d) for d in dati]
+        return [_dati_a_lavoro(d) for d in dati]
 
     def in_corso(self) -> list[Lavoro]:
         out = self._esegui([*self._cmd, "in-corso"])
         dati = json.loads(out)
-        return [Lavoro(**d) for d in dati]
+        return [_dati_a_lavoro(d) for d in dati]
 
     def lavoro(self, numero: int) -> Lavoro | None:
         # Il lavoro del giro di regola è già «in corso» (l'ha preso il distributore): si cerca in tutti e due gli elenchi.
@@ -332,3 +541,6 @@ class BoardComando:
 
     def campo(self, numero: int, nome: str, valore: str) -> None:
         self._esegui([*self._cmd, "campo", str(numero), nome, valore])
+
+    def aggiungi(self, numero: int) -> None:
+        self._esegui([*self._cmd, "aggiungi", str(numero)])

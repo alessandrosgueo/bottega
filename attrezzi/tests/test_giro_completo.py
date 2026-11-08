@@ -219,7 +219,7 @@ def test_giro_completo_ciclo_e_segno(tmp_path: Path) -> None:
     assert any("lavoro 4: bottega «b_abbondante» occupata, salto" in r for r in righe1)
     wf_esec = [w for w in forgia._workflow_avviati if w[0] == "bottega-esecutore-b_abbondante.yml"]
     assert len(wf_esec) == 1
-    assert wf_esec[-1][1] == {"lavoro": 1}
+    assert wf_esec[-1][1] == {"lavoro": "1"}
     assert board.lavoro(1).stato == "in corso"
 
     # Passo 2: primo giro -> esegue sotto-issue 2, apre PR in bozza per la madre, chiude sotto-issue 2
@@ -269,7 +269,7 @@ def test_giro_completo_ciclo_e_segno(tmp_path: Path) -> None:
     assert any("lavoro 4: bottega «b_abbondante» occupata, salto" in r for r in righe2)
     wf_esec2 = [w for w in forgia._workflow_avviati if w[0] == "bottega-esecutore-b_abbondante.yml"]
     assert len(wf_esec2) == 2
-    assert wf_esec2[-1][1] == {"lavoro": 1}
+    assert wf_esec2[-1][1] == {"lavoro": "1"}
 
     # Passo 4: secondo giro -> sullo STESSO ramo e STESSA PR, chiude sotto-issue 3 e consegna la madre
     compito_in_corso = 3
@@ -308,7 +308,7 @@ def test_giro_completo_ciclo_e_segno(tmp_path: Path) -> None:
     assert board.lavoro(4).stato == "in corso"
     wf_esec3 = [w for w in forgia._workflow_avviati if w[0] == "bottega-esecutore-b_abbondante.yml"]
     assert len(wf_esec3) == 3
-    assert wf_esec3[-1][1] == {"lavoro": 4}
+    assert wf_esec3[-1][1] == {"lavoro": "4"}
 
     # Passo 6: verifica del segno e assenza di comandi nei commenti dei giri (B3-R1, B3-R2, B3-R3)
     for num_iss, comms in forgia._commenti.items():
@@ -412,7 +412,7 @@ def test_giro_completo_review_focus_2_due_distribuisci_consecutivi(tmp_path: Pat
 
     wf = [w for w in forgia._workflow_avviati if w[0] == "bottega-esecutore-b_abbondante.yml"]
     assert len(wf) == 1
-    assert wf[0][1] == {"lavoro": 20}
+    assert wf[0][1] == {"lavoro": "20"}
     assert board.lavoro(20).stato == "in corso"
 
 

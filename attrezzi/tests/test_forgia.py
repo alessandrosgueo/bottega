@@ -85,12 +85,13 @@ def test_issue_e_sotto_issue() -> None:
                     {"number": 12, "title": "Compito 2", "state": "CLOSED"},
                 ]
             })
+        n = int(argomenti[2])
         return json.dumps({
-            "number": 10,
-            "title": "Tappa",
-            "body": "Brief della tappa",
-            "state": "OPEN",
-            "labels": [{"name": "bottega: fuori"}, {"name": "tappa"}],
+            "number": n,
+            "title": "Tappa" if n == 10 else f"Compito {n - 10}",
+            "body": "Brief della tappa" if n == 10 else f"Corpo {n}",
+            "state": "OPEN" if n != 12 else "CLOSED",
+            "labels": [{"name": "bottega: fuori"}, {"name": "tappa"}] if n == 10 else [],
         })
 
     forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
@@ -105,8 +106,10 @@ def test_issue_e_sotto_issue() -> None:
     assert len(sotto) == 2
     assert sotto[0].numero == 11
     assert sotto[0].titolo == "Compito 1"
+    assert sotto[0].corpo == "Corpo 11"
     assert sotto[0].aperta is True
     assert sotto[1].numero == 12
+    assert sotto[1].corpo == "Corpo 12"
     assert sotto[1].aperta is False
 
 
@@ -121,8 +124,9 @@ def test_etichetta_aggiungi_e_rimuovi() -> None:
     forgia.etichetta(42, "bottega: fuori", aggiungi=True)
     forgia.etichetta(42, "bottega: in corso", aggiungi=False)
 
-    assert chiamate[0] == ["issue", "edit", "42", "--repo", "proprietario/repo", "--add-label", "bottega: fuori"]
-    assert chiamate[1] == ["issue", "edit", "42", "--repo", "proprietario/repo", "--remove-label", "bottega: in corso"]
+    assert chiamate[0] == ["label", "create", "bottega: fuori", "--force", "--repo", "proprietario/repo"]
+    assert chiamate[1] == ["issue", "edit", "42", "--repo", "proprietario/repo", "--add-label", "bottega: fuori"]
+    assert chiamate[2] == ["issue", "edit", "42", "--repo", "proprietario/repo", "--remove-label", "bottega: in corso"]
 
 
 def test_pr_del_ramo() -> None:
@@ -160,7 +164,7 @@ def test_avvia_workflow() -> None:
     args, stdin = chiamate[0]
     assert args == ["workflow", "run", "distributore.yml", "--repo", "proprietario/repo", "--json"]
     assert stdin is not None
-    assert json.loads(stdin) == {"lavoro": 42}
+    assert json.loads(stdin) == {"lavoro": "42"}
 
 
 def test_stato_ci() -> None:
@@ -307,3 +311,150 @@ def test_forgia_finta_in_memoria() -> None:
     assert "imposta_variabile" in azioni
     assert "avvia_workflow" in azioni
     assert "avviso" in azioni
+
+
+# Prove per RV12: fedeltà a gh 2.100.0 e requisiti della revisione
+
+
+def test_rv12_sotto_issue_legge_corpo_con_issue() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        if "subIssues" in argomenti:
+            # gh vero risponde a --json subIssues SENZA body
+            return json.dumps({
+                "subIssues": [
+                    {"number": 21, "title": "Primo compito", "state": "OPEN"},
+                    {"number": 22, "title": "Secondo compito", "state": "CLOSED"},
+                ]
+            })
+        if "view" in argomenti:
+            n = int(argomenti[2])
+            return json.dumps({
+                "number": n,
+                "title": f"Compito {n}",
+                "body": f"Fatto quando del compito {n}",
+                "state": "OPEN" if n == 21 else "CLOSED",
+                "labels": [],
+            })
+        return "{}"
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    sotto = forgia.sotto_issue(20)
+
+    assert len(sotto) == 2
+    assert sotto[0].numero == 21
+    assert sotto[0].corpo == "Fatto quando del compito 21"
+    assert sotto[1].numero == 22
+    assert sotto[1].corpo == "Fatto quando del compito 22"
+
+
+def test_rv12_pr_del_ramo_solo_aperte() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        if "--state" in argomenti:
+            stato = argomenti[argomenti.index("--state") + 1]
+            if stato == "open":
+                return json.dumps([{"number": 77}])
+            if stato == "all":
+                # Rifiutiamo o segnaliamo stato non conforme a RV12
+                return json.dumps([{"number": 999}])
+        return json.dumps([])
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    res = forgia.pr_del_ramo("bottega/1-test")
+    assert res == 77
+    assert chiamate[0][chiamate[0].index("--state") + 1] == "open"
+
+
+def test_rv12_variabile_distingue_mancante_da_errore_generico() -> None:
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        var = argomenti[2]
+        if var == "MANCA":
+            raise ErroreForgia("gh ha fallito (1): variable MANCA was not found")
+        if var == "RETE_ROTTA":
+            raise ErroreForgia("gh ha fallito (1): connection refused")
+        return "valore"
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    assert forgia.variabile("MANCA") is None
+    with pytest.raises(ErroreForgia, match="connection refused"):
+        forgia.variabile("RETE_ROTTA")
+
+
+def test_rv12_avviso_confronta_con_ultimo_commento_con_segno_avviso() -> None:
+    commenti_view: list[dict] = [
+        {"author": {"login": "bottega"}, "body": "<!-- bottega:avviso -->\nMotivo iniziale"},
+        {"author": {"login": "comandante"}, "body": "Commento di un comandante senza segno"},
+    ]
+    chiamate_comment: list[str] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        cmd = argomenti[0]
+        sub = argomenti[1] if len(argomenti) > 1 else ""
+        if cmd == "issue" and sub == "list":
+            return json.dumps([{"number": 5, "title": "Avviso prova", "body": "<!-- bottega:avviso -->\nMotivo iniziale"}])
+        if cmd == "issue" and sub == "view":
+            return json.dumps({"comments": commenti_view})
+        if cmd == "issue" and sub == "comment":
+            chiamate_comment.append(ingresso or "")
+            return ""
+        return ""
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    # Stesso motivo iniziale: l'ultimo commento è dell'utente ma l'ultimo con segno avviso è identico
+    forgia.avviso("k", "Avviso prova", "Motivo iniziale")
+    assert len(chiamate_comment) == 0
+
+    # Motivo mutato: deve commentare
+    forgia.avviso("k", "Avviso prova", "Nuovo motivo")
+    assert len(chiamate_comment) == 1
+    assert "Nuovo motivo" in chiamate_comment[0]
+
+
+def test_rv12_avvia_workflow_converte_input_in_stringhe() -> None:
+    chiamate: list[tuple[list[str], str | None]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append((argomenti, ingresso))
+        return ""
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    forgia.avvia_workflow("esecutore.yml", {"lavoro": 42, "attivo": True, "nome": "antigravity"})
+
+    _, stdin = chiamate[0]
+    assert stdin is not None
+    dati = json.loads(stdin)
+    assert dati == {"lavoro": "42", "attivo": "True", "nome": "antigravity"}
+
+
+def test_rv12_etichette_create_una_sola_volta() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        if argomenti[0] == "issue" and argomenti[1] == "list":
+            return json.dumps([])
+        if argomenti[0] == "issue" and argomenti[1] == "create":
+            return "https://github.com/proprietario/repo/issues/1\n"
+        return ""
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    # 1. Aggiungi etichetta: crea label con --force e poi issue edit
+    forgia.etichetta(1, "bottega: fuori", aggiungi=True)
+    # 2. Aggiungi stessa etichetta su altra issue: non deve ricrearla
+    forgia.etichetta(2, "bottega: fuori", aggiungi=True)
+    # 3. Rimuovi etichetta: non crea nulla
+    forgia.etichetta(1, "bottega: fuori", aggiungi=False)
+    # 4. Avviso crea etichetta "bottega: avviso" una sola volta
+    forgia.avviso("k", "Avviso", "motivo")
+    forgia.avviso("k2", "Avviso 2", "motivo")
+
+    label_create = [c for c in chiamate if c[:2] == ["label", "create"]]
+    assert len(label_create) == 2
+    assert label_create[0] == ["label", "create", "bottega: fuori", "--force", "--repo", "proprietario/repo"]
+    assert label_create[1] == ["label", "create", "bottega: avviso", "--force", "--repo", "proprietario/repo"]
+

@@ -547,7 +547,7 @@ def test_tappa_con_sotto_issue() -> None:
     assert prendi[0][1] == 10
     # Workflow lanciato per la madre 10
     assert len(forgia._workflow_avviati) == 1
-    assert forgia._workflow_avviati[0][1] == {"lavoro": 10}
+    assert forgia._workflow_avviati[0][1] == {"lavoro": "10"}
     # Commento sul lavoro 10 con il ruolo distributore
     comm = forgia.commenti(10)
     assert len(comm) == 1

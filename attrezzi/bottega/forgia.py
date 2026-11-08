@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from bottega.segni import RUOLI, segna
+from bottega.segni import RUOLI, ruolo, segna
 
 _REGEX_SEGNO = re.compile(r"^<!--\s*bottega:[a-z]+\s*-->\s*", re.IGNORECASE)
 
@@ -90,6 +90,12 @@ class ForgiaGh:
     ) -> None:
         self.repo = repo
         self._esegui = esegui or self._esegui_di_serie
+        self._etichette_create: set[str] = set()
+
+    def _assicura_etichetta(self, nome: str) -> None:
+        if nome not in self._etichette_create:
+            self._esegui(["label", "create", nome, "--force", "--repo", self.repo])
+            self._etichette_create.add(nome)
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
         risultato = subprocess.run(
@@ -126,15 +132,7 @@ class ForgiaGh:
         ])
         d = json.loads(out)
         sotto = d.get("subIssues", [])
-        return [
-            Issue(
-                numero=s["number"],
-                titolo=s.get("title", ""),
-                corpo=s.get("body", "") or "",
-                stato=s.get("state", "OPEN"),
-            )
-            for s in sotto
-        ]
+        return [self.issue(s["number"]) for s in sotto if "number" in s]
 
     def commenti(self, n: int) -> list[Commento]:
         out = self._esegui([
@@ -158,6 +156,8 @@ class ForgiaGh:
         )
 
     def etichetta(self, n: int, nome: str, aggiungi: bool = True) -> None:
+        if aggiungi:
+            self._assicura_etichetta(nome)
         flag = "--add-label" if aggiungi else "--remove-label"
         self._esegui(["issue", "edit", str(n), "--repo", self.repo, flag, nome])
 
@@ -166,7 +166,7 @@ class ForgiaGh:
             "pr", "list",
             "--repo", self.repo,
             "--head", ramo,
-            "--state", "all",
+            "--state", "open",
             "--json", "number",
             "--limit", "1",
         ])
@@ -186,8 +186,10 @@ class ForgiaGh:
         try:
             out = self._esegui(["variable", "get", nome, "--repo", self.repo])
             return out.strip()
-        except ErroreForgia:
-            return None
+        except ErroreForgia as e:
+            if "not found" in str(e).lower():
+                return None
+            raise
 
     def imposta_variabile(self, nome: str, valore: str) -> None:
         self._esegui(["variable", "set", nome, "--repo", self.repo], ingresso=valore)
@@ -196,7 +198,8 @@ class ForgiaGh:
         cmd = ["workflow", "run", file, "--repo", self.repo]
         if input:
             cmd.append("--json")
-            self._esegui(cmd, ingresso=json.dumps(input))
+            input_str = {k: str(v) for k, v in input.items()}
+            self._esegui(cmd, ingresso=json.dumps(input_str))
         else:
             self._esegui(cmd)
 
@@ -252,6 +255,7 @@ class ForgiaGh:
             return
 
         if aperta is None:
+            self._assicura_etichetta("bottega: avviso")
             corpo = segna(motivo, "avviso")
             cmd = [
                 "issue", "create",
@@ -267,8 +271,15 @@ class ForgiaGh:
         comm_out = self._esegui(["issue", "view", str(n), "--repo", self.repo, "--json", "comments"])
         comm_data = json.loads(comm_out)
         comments = comm_data.get("comments", [])
-        ultimo_testo = comments[-1].get("body", "") if comments else aperta.get("body", "")
-        ultimo_motivo = _spoglia_segno(ultimo_testo)
+        commenti_avviso = [
+            c.get("body", "")
+            for c in comments
+            if isinstance(c, dict) and ruolo(c.get("body", "")) == "avviso"
+        ]
+        if commenti_avviso:
+            ultimo_motivo = _spoglia_segno(commenti_avviso[-1])
+        else:
+            ultimo_motivo = _spoglia_segno(aperta.get("body", ""))
         if motivo != ultimo_motivo:
             self.commenta(n, motivo, "avviso")
 

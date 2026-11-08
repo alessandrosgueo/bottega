@@ -5,6 +5,7 @@ from typing import Any
 
 from bottega.board import ErroreBoard, Lavoro
 from bottega.forgia import Commento, ErroreForgia, Issue, _spoglia_segno, segna
+from bottega.segni import ruolo
 
 
 class ForgiaFinta:
@@ -111,8 +112,9 @@ class ForgiaFinta:
         self.registro.append(("imposta_variabile", nome, valore))
 
     def avvia_workflow(self, file: str, input: dict[str, Any]) -> None:
-        self._workflow_avviati.append((file, input))
-        self.registro.append(("avvia_workflow", file, input))
+        input_str = {k: str(v) for k, v in input.items()}
+        self._workflow_avviati.append((file, input_str))
+        self.registro.append(("avvia_workflow", file, input_str))
 
     def stato_ci(self, ramo: str) -> str:
         return self._stato_ci.get(ramo, "ignoto")
@@ -177,7 +179,7 @@ class ForgiaFinta:
             self.registro.append(("avviso", chiave, titolo, motivo))
             return
 
-        comms = self._commenti.get(aperta_num, [])
+        comms = [c for c in self._commenti.get(aperta_num, []) if ruolo(c.corpo) == "avviso"]
         ultimo_testo = comms[-1].corpo if comms else self._issues[aperta_num].corpo
         ultimo_motivo = _spoglia_segno(ultimo_testo)
         if motivo != ultimo_motivo:
@@ -205,9 +207,9 @@ class BoardFinta:
 
         if lavori:
             for lav in lavori:
-                self.aggiungi(lav)
+                self._carica_lavoro(lav)
 
-    def aggiungi(self, lavoro: Lavoro) -> None:
+    def _carica_lavoro(self, lavoro: Lavoro) -> None:
         chiave = (lavoro.repo, lavoro.numero)
         self._lavori[chiave] = {
             "numero": lavoro.numero,
@@ -220,6 +222,26 @@ class BoardFinta:
             "repo": lavoro.repo,
             "campi": {},
         }
+
+    def aggiungi(self, lavoro: int | Lavoro, titolo: str = "", stato: str = "pronto") -> None:
+        if isinstance(lavoro, Lavoro):
+            self._carica_lavoro(lavoro)
+            self.registro.append(("aggiungi", lavoro.numero))
+        else:
+            numero = lavoro
+            chiave = (self.repo, numero)
+            self._lavori[chiave] = {
+                "numero": numero,
+                "titolo": titolo or f"Issue {numero}",
+                "etichette": [],
+                "stato": stato,
+                "esito": None,
+                "esecutore": None,
+                "nota": "",
+                "repo": self.repo,
+                "campi": {},
+            }
+            self.registro.append(("aggiungi", numero))
 
     def _trova_lavoro(self, numero: int) -> dict[str, Any] | None:
         if self.repo is not None:
@@ -273,6 +295,7 @@ class BoardFinta:
         d["stato"] = "in corso"
         d["esecutore"] = esecutore
         d["nota"] = nota
+        d["esito"] = None
         self.registro.append(("prendi", numero, esecutore, nota))
         return True
 
@@ -292,18 +315,30 @@ class BoardFinta:
         d["stato"] = "consegnato"
         self.registro.append(("consegna", numero, pr))
 
-    def campo(self, numero: int, nome: str, valore: str) -> None:
+    def campo(self, numero: int, nome: str, valore: str | None) -> None:
         d = self._trova_lavoro(numero)
         if d is None:
             raise ErroreBoard(f"Lavoro {numero} non trovato")
-        if nome == "Bottega":
-            d["stato"] = valore
-        elif nome == "Esito":
-            d["esito"] = valore
-        elif nome == "Esecutore":
-            d["esecutore"] = valore
-        elif nome == "Nota del giro":
-            d["nota"] = valore
+        if valore is None:
+            if nome == "Bottega":
+                d["stato"] = ""
+            elif nome == "Esito":
+                d["esito"] = None
+            elif nome == "Esecutore":
+                d["esecutore"] = None
+            elif nome == "Nota del giro":
+                d["nota"] = ""
+            else:
+                d.setdefault("campi", {}).pop(nome, None)
         else:
-            d.setdefault("campi", {})[nome] = valore
+            if nome == "Bottega":
+                d["stato"] = valore
+            elif nome == "Esito":
+                d["esito"] = valore
+            elif nome == "Esecutore":
+                d["esecutore"] = valore
+            elif nome == "Nota del giro":
+                d["nota"] = valore
+            else:
+                d.setdefault("campi", {})[nome] = valore
         self.registro.append(("campo", numero, nome, valore))

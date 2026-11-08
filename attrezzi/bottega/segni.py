@@ -30,8 +30,15 @@ def segna(testo: str, ruolo: str) -> str:
 
 
 def ruolo(testo: str) -> str | None:
-    """Il ruolo estratto dal segno nel testo; None se manca o se il ruolo non è fra quelli ammessi."""
-    for m in _SEGNO_RUOLO.finditer(testo):
+    """Il ruolo estratto dal segno nella prima riga del testo; None se manca o non valido."""
+    if not testo:
+        return None
+    righe = testo.splitlines()
+    if not righe:
+        return None
+    prima = righe[0].strip()
+    m = _SEGNO_RUOLO.fullmatch(prima)
+    if m:
         r = m.group(1)
         if r in RUOLI:
             return r
@@ -39,16 +46,13 @@ def ruolo(testo: str) -> str | None:
 
 
 def comando(corpo: str, autore: str, comandanti: Sequence[str]) -> Comando | None:
-    """Estrae il comando dal corpo di un commento se l'autore è fra i comandanti e non vi sono segni.
+    """Estrae il comando dal corpo di un commento se l'autore è fra i comandanti.
 
-    Restituisce None se il testo porta un segno, se l'autore non è un comandante (confronto
+    Restituisce None se la prima riga porta un segno, se l'autore non è un comandante (confronto
     senza badare alle maiuscole), se manca `/bottega`, se il comando non è valido o se
-    un comando `consulta` è privo di domanda.
+    un comando `consulta` è privo di domanda. Un segno citato sotto non annulla il comando (RV10).
     """
-    if _SEGNO_GENERICO.search(corpo):
-        return None
-
-    if not autore:
+    if not corpo or not autore:
         return None
 
     comandanti_normalizzati = {c.strip().lower() for c in comandanti}
@@ -63,6 +67,10 @@ def comando(corpo: str, autore: str, comandanti: Sequence[str]) -> Comando | Non
             break
 
     if indice_prima_riga is None:
+        return None
+
+    # Se la prima riga non vuota è un segno della bottega, non è un comando
+    if _SEGNO_GENERICO.fullmatch(righe[indice_prima_riga].strip()):
         return None
 
     prima_riga = righe[indice_prima_riga].strip()
