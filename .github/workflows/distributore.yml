@@ -1,0 +1,67 @@
+# Workflow riusabile della bottega: distributore.
+# Sceglie il lavoro pronto e il candidato dal Project e lancia il workflow dell'esecutore.
+# Gira solo su chiamata (on: workflow_call) da un workflow chiamante del progetto.
+name: distributore
+
+on:
+  workflow_call:
+    inputs:
+      bottega_repo:
+        description: 'Repository della bottega (es. proprietario/bottega)'
+        required: true
+        type: string
+      bottega_ref:
+        description: 'Riferimento git della bottega (tag o commit)'
+        required: true
+        type: string
+      runner:
+        description: 'Etichette runner in formato JSON per runs-on'
+        required: true
+        type: string
+      notte:
+        description: 'Se vero, esegue il giro notturno'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      BOTTEGA_TOKEN:
+        description: 'Token con permessi di scrittura su GitHub per il runner'
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  distributore:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    steps:
+      - name: Scarica il progetto
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scarica la bottega
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.bottega_repo }}
+          ref: ${{ inputs.bottega_ref }}
+          token: ${{ secrets.BOTTEGA_TOKEN }}
+          path: .bottega
+          persist-credentials: false
+
+      - name: Esegui il distributore
+        env:
+          GH_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}
+          BOTTEGA_VARIABILI: ${{ toJSON(vars) }}
+          PYTHONPATH: ${{ github.workspace }}/.bottega/attrezzi
+          NOTTE: ${{ inputs.notte }}
+        run: |
+          opzioni=()
+          if [ "$NOTTE" = "true" ]; then
+            opzioni+=(--notte)
+          fi
+          python3 -m bottega distribuisci "${opzioni[@]}"

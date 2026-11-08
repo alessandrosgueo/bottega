@@ -1,0 +1,40 @@
+# Modello di workflow per il distributore della bottega.
+# Viene copiato nel progetto come `.github/workflows/bottega-distributore.yml`.
+# Sostituisci i segnaposto fra parentesi angolari (<...>) con i valori del progetto.
+name: bottega-distributore
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  schedule:
+    # Segnaposto: ora del giro di notte in UTC (es. '0 2 * * *')
+    - cron: '0 2 * * *' # <ora in UTC>
+  workflow_dispatch:
+    inputs:
+      notte:
+        description: 'Se vero, esegue il giro notturno'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: bottega-distributore
+  cancel-in-progress: false
+
+jobs:
+  distributore:
+    # I giri scrivono col token dell'utente: i loro commenti (col segno) e le etichette che non sono comandi non devono
+    # far partire un altro giro.
+    if: >-
+      (github.event_name != 'issue_comment' || !contains(github.event.comment.body, '<!-- bottega:')) &&
+      (github.event_name != 'issues' || github.event.label.name == 'bottega: fuori' ||
+      startsWith(github.event.label.name, 'esegue:'))
+    uses: <proprietario>/bottega/.github/workflows/distributore.yml@<tag>
+    with:
+      bottega_repo: <proprietario>/bottega
+      bottega_ref: <tag>
+      runner: '["<etichetta del runner>"]'
+      notte: ${{ github.event_name == 'schedule' || inputs.notte == true }}
+    secrets: inherit
