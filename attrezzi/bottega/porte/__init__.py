@@ -38,6 +38,31 @@ class Lancio:
     contatori: dict[str, int] = field(default_factory=dict)
 
 
+# I token «pesati» (B5-R5): una lettura dalla cache vale un decimo, come nei prezzi dei fornitori; senza peso le
+# letture, che ripetono tutto il contesto a ogni chiamata, schiaccerebbero ogni altro numero.
+PESO_CACHE_LETTA = 0.1
+
+
+def somma_pesata(valori: Mapping[str, object], chiavi: Sequence[str], cache_letta: str) -> int | None:
+    """La somma dei contatori presenti, con la lettura dalla cache pesata; None se uno non è un intero."""
+    totale = 0.0
+    for k in chiavi:
+        if k in valori:
+            v = valori[k]
+            if isinstance(v, bool) or not isinstance(v, int):
+                return None
+            totale += v * (PESO_CACHE_LETTA if k == cache_letta else 1)
+    return round(totale)
+
+
+@dataclass(frozen=True)
+class Token:
+    """Totale dei token di una trascrizione e indicazione se la misura è parziale."""
+
+    totale: int
+    parziale: bool
+
+
 class Porta(Protocol):
     """Interfaccia comune a tutte le porte della bottega."""
 
@@ -60,6 +85,24 @@ class Porta(Protocol):
         tempo: int | float = 3600,
     ) -> Lancio:
         """Lancia il modello senza mani nella cartella di lavoro con i parametri indicati."""
+        ...
+
+    def trascrizione(
+        self,
+        env: Mapping[str, str],
+        cartella: Path,
+        sessione: str | None = None,
+    ) -> Path | None:
+        """Individua il percorso del file di trascrizione della sessione o l'ultima per cartella."""
+        ...
+
+    def token(
+        self,
+        percorso: Path,
+        dopo: datetime,
+        fino: datetime,
+    ) -> Token:
+        """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
         ...
 
 

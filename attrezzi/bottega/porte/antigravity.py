@@ -5,12 +5,13 @@ la modalità sola lettura (`--mode plan`), l'approvazione permessi e il rilevame
 Solo libreria standard.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 
-from bottega.porte import Controllo, Lancio, controlla_eseguibile, esegui_porta
+from bottega.porte import Controllo, Lancio, Token, controlla_eseguibile, esegui_porta, somma_pesata
 
 
 @dataclass
@@ -118,3 +119,78 @@ class Antigravity:
             rinnovo=None,
             contatori=contatori,
         )
+
+    def trascrizione(
+        self,
+        env: Mapping[str, str],
+        cartella: Path,
+        sessione: str | None = None,
+    ) -> Path | None:
+        """Individua il file transcript.jsonl di Antigravity per la conversazione o l'ultima modificata."""
+        casa = Path(env.get("HOME", "/"))
+        app_dir = (
+            Path(env["ANTIGRAVITY_APP_DATA_DIR"])
+            if "ANTIGRAVITY_APP_DATA_DIR" in env
+            else (casa / ".gemini" / "antigravity-cli")
+        )
+        brain_dir = app_dir / "brain"
+        if not brain_dir.is_dir():
+            return None
+
+        conv_id = sessione or env.get("ANTIGRAVITY_CONVERSATION_ID")
+        if conv_id:
+            candidato = brain_dir / conv_id / ".system_generated" / "logs" / "transcript.jsonl"
+            return candidato if candidato.is_file() else None
+
+        candidati = [f for f in brain_dir.glob("*/.system_generated/logs/transcript.jsonl") if f.is_file()]
+        if not candidati:
+            return None
+        return max(candidati, key=lambda f: f.stat().st_mtime)
+
+    def token(
+        self,
+        percorso: Path,
+        dopo: datetime,
+        fino: datetime,
+    ) -> Token:
+        """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
+        if dopo.tzinfo is None:
+            dopo = dopo.replace(tzinfo=timezone.utc)
+        if fino.tzinfo is None:
+            fino = fino.replace(tzinfo=timezone.utc)
+
+        totale = 0
+        with percorso.open("r", encoding="utf-8") as f:
+            for riga in f:
+                riga = riga.strip()
+                if not riga:
+                    continue
+                try:
+                    rec = json.loads(riga)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                if rec.get("source") != "MODEL" or rec.get("type", "PLANNER_RESPONSE") != "PLANNER_RESPONSE":
+                    continue
+
+                ts_raw = rec.get("created_at")
+                if not ts_raw or not isinstance(ts_raw, str):
+                    continue
+                try:
+                    dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if not (dopo <= dt <= fino):
+                    continue
+
+                subtot = somma_pesata(
+                    rec, ("input_tokens", "output_tokens", "cache_read_tokens"), cache_letta="cache_read_tokens"
+                )
+                if subtot is None:
+                    continue
+                totale += subtot
+
+        return Token(totale=totale, parziale=True)

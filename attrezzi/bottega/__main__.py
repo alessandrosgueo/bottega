@@ -15,6 +15,7 @@ from bottega.forgia import ErroreForgia
 from bottega.giro import argomenti_giro, comando_giro
 from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
 from bottega.scelta import argomenti_scegli, comando_scegli
+from bottega.segno import argomenti_segno, comando_segno
 
 # Nome del sottocomando -> funzione che riceve gli argomenti letti e restituisce l'esito (0 = tutto bene).
 COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
@@ -26,6 +27,7 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "distribuisci": comando_distribuisci,
     "dividi": comando_dividi,
     "firma": comando_firma,
+    "segno": comando_segno,
 }
 # Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
@@ -37,6 +39,7 @@ ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "distribuisci": argomenti_distribuisci,
     "dividi": argomenti_dividi,
     "firma": argomenti_firma,
+    "segno": argomenti_segno,
 }
 
 

@@ -5,14 +5,14 @@ la modalità di sola lettura e il riconoscimento dei limiti di quota e di spesa 
 Solo libreria standard.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
 import re
 
-from bottega.porte import Controllo, Lancio, controlla_eseguibile, esegui_porta
+from bottega.porte import Controllo, Lancio, Token, controlla_eseguibile, esegui_porta, somma_pesata
 
 _REGEX_RINNOVO = re.compile(
     r"resets\s+(?:([A-Za-z]+)\s+)?(\d{1,2}):(\d{2})\s*(am|pm)",
@@ -179,3 +179,98 @@ class ClaudeCode:
             rinnovo=rinnovo,
             contatori=contatori,
         )
+
+    def trascrizione(
+        self,
+        env: Mapping[str, str],
+        cartella: Path,
+        sessione: str | None = None,
+    ) -> Path | None:
+        """Individua il file di trascrizione per Claude Code (.jsonl)."""
+        casa = Path(env.get("HOME", "/"))
+        config_dir = Path(env["CLAUDE_CONFIG_DIR"]) if "CLAUDE_CONFIG_DIR" in env else (casa / ".claude")
+        projects_dir = config_dir / "projects"
+        if not projects_dir.is_dir():
+            return None
+
+        # Con la sessione si cerca in tutti i progetti: la cartella corrente può non essere quella in cui la sessione è
+        # partita (chi decide passa da un worktree all'altro).
+        sid = sessione or env.get("CLAUDE_CODE_SESSION_ID")
+        if sid:
+            nome_file = sid if sid.endswith(".jsonl") else f"{sid}.jsonl"
+            if "/" in nome_file or nome_file.startswith("."):
+                return None
+            trovati = sorted(f for f in projects_dir.glob(f"*/{nome_file}") if f.is_file())
+            return trovati[0] if trovati else None
+
+        # Nome del progetto: percorso normalizzato con caratteri non alfanumerici -> '-'
+        progetto_norm = re.sub(r"[^a-zA-Z0-9]", "-", str(cartella.resolve()))
+        proj_dir = projects_dir / progetto_norm
+        if not proj_dir.is_dir():
+            progetto_norm_raw = re.sub(r"[^a-zA-Z0-9]", "-", str(cartella))
+            proj_dir = projects_dir / progetto_norm_raw
+            if not proj_dir.is_dir():
+                return None
+
+        # Di riserva: il file .jsonl modificato più di recente
+        candidati = [f for f in proj_dir.glob("*.jsonl") if f.is_file()]
+        if not candidati:
+            return None
+        return max(candidati, key=lambda f: f.stat().st_mtime)
+
+    def token(
+        self,
+        percorso: Path,
+        dopo: datetime,
+        fino: datetime,
+    ) -> Token:
+        """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
+        if dopo.tzinfo is None:
+            dopo = dopo.replace(tzinfo=timezone.utc)
+        if fino.tzinfo is None:
+            fino = fino.replace(tzinfo=timezone.utc)
+
+        # Claude Code scrive un record per ogni blocco di un messaggio (pensiero, testo, strumento), tutti con lo stesso
+        # `usage`: si conta un `usage` per messaggio (`message.id`, o `requestId`), l'ultimo visto.
+        per_messaggio: dict[str, int] = {}
+        with percorso.open("r", encoding="utf-8") as f:
+            for n_riga, riga in enumerate(f):
+                riga = riga.strip()
+                if not riga:
+                    continue
+                try:
+                    rec = json.loads(riga)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
+                    continue
+                ts_raw = rec.get("timestamp")
+                if not ts_raw or not isinstance(ts_raw, str):
+                    continue
+                try:
+                    dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if not (dopo <= dt <= fino):
+                    continue
+
+                msg = rec.get("message")
+                if not isinstance(msg, dict):
+                    continue
+                usage = msg.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+
+                subtot = somma_pesata(
+                    usage,
+                    ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"),
+                    cache_letta="cache_read_input_tokens",
+                )
+                if subtot is None:
+                    continue
+                chiave = msg.get("id") or rec.get("requestId") or f"riga-{n_riga}"
+                per_messaggio[str(chiave)] = subtot
+
+        return Token(totale=sum(per_messaggio.values()), parziale=False)
