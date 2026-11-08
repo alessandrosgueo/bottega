@@ -108,6 +108,11 @@ fa, per il massimo risultato al minimo costo. La scelta viva lo serve, non lo so
 | un consulto e la sua risposta | commenti sulla PR o sull'issue |
 | design e piani da criticare | PR in bozza, con commenti di revisione del consigliere |
 | il resoconto della notte | commenti sui lavori toccati, letti da chi decide |
+| lo stato della quota di ogni bottega | variabili di GitHub Actions del repo |
+
+Un progetto che ha già un suo comando per la board lo collega come **adattatore**: i workflow non scrivono sul Project
+da soli ma passano da lui, con cinque operazioni (leggere i lavori pronti, prenderne uno, cambiarne lo stato, scrivere
+una consegna, scrivere un campo). Senza adattatore i workflow usano `gh` direttamente.
 | le misure | campi del Project, uno per misura |
 | lezioni per modello e casistica | file del repo `bottega`, cambiati solo con PR |
 | la skill e i suoi aggiornamenti | il repo `bottega`, installato come plugin |
@@ -125,19 +130,23 @@ fatto l'accesso al suo abbonamento.
   del progetto.
 - **La concorrenza.** `concurrency` di Actions non è una coda: tiene un giro in corso e uno solo in attesa, e cancella
   l'attesa più vecchia quando ne arriva una nuova. Quindi:
-  - **il raccoglitore:** un giro non riceve un lavoro, lo prende; ogni giro sceglie dal Project il prossimo lavoro
-    pronto e, finito quello, il seguente, finché ce ne sono. Un giro cancellato non perde niente, perché lo stato sta
-    su GitHub; un orario fa da rete di sicurezza;
-  - **uno per bottega:** un gruppo di concorrenza per bottega, così due esecutori della stessa quota non girano
-    insieme, mentre esecutori di botteghe diverse possono;
+  - **il distributore:** un solo job, in fila con se stesso (un gruppo di concorrenza unico), sceglie dal Project il
+    prossimo lavoro pronto e il candidato (scelta viva), scrive l'assegnazione sul lavoro e lancia l'esecutore di
+    quella bottega. Siccome è uno solo, due esecutori non prendono mai lo stesso lavoro. Riparte alla fine di ogni
+    giro e a orario; un giro cancellato non perde niente, perché lo stato sta su GitHub. Se il runner di una bottega è
+    spento (un PC di lavoro la sera), il giro di quella bottega aspetta in coda finché il runner torna;
+  - **uno per bottega:** l'esecutore di ogni bottega ha il suo gruppo di concorrenza fisso (un workflow per bottega,
+    scritto dall'installazione), così due esecutori della stessa quota non girano insieme, mentre esecutori di
+    botteghe diverse possono;
   - **mai due giri sullo stesso lavoro:** un commento che arriva mentre un esecutore ci lavora lo legge il giro dopo,
     che parte appena il primo finisce; un giro in corso non si interrompe mai;
   - **il consulto nello stesso giro:** esecutore, consigliere e ripresa stanno nello stesso job, così un solo runner
     non si blocca aspettando se stesso;
   - **le scritture su GitHub** di un giro (campi, commenti, etichette) restano sotto i limiti di GitHub: i giri lunghi
     le raccolgono e le scrivono a fine lavoro.
-- **Chi può comandare:** solo i commenti e le etichette dell'utente e di chi decide, cioè senza il segno degli
-  esecutori; il resto è testo.
+- **Chi può comandare:** gli account elencati nella configurazione (di serie il proprietario del repo), coi commenti
+  senza segno e con le etichette-comando. I workflow non mettono mai un'etichetta-comando: le etichette che scrivono
+  (stato, quota, allarmi) non fanno partire niente, quindi niente anelli.
 - **Un workflow sceglie il candidato** coi criteri della scelta viva; a quota esaurita (riconosciuta dai messaggi
   d'errore della porta) il lavoro prende un'etichetta e il giro dopo riprova o passa al candidato seguente.
 - **Il consulto di un esecutore bloccato:** l'esecutore chiude il turno con un commento di consulto; il workflow
@@ -178,9 +187,9 @@ fatto l'accesso al suo abbonamento.
 - **Più progetti sulla stessa bottega:** un runner appartiene a un repo e `concurrency` vale dentro un repo, quindi
   due progetti possono far lavorare insieme due esecutori della stessa quota; li reggono la scelta viva e la «quota
   esaurita».
-- **L'oracolo lo esegue il workflow, non il modello.** Il «fatto quando» del brief è un comando; il workflow lo lancia
-  dopo il modello e scrive lui l'esito sulla PR. Ciò che il modello dice delle sue prove non conta. In un progetto con
-  la sua CI, la CI fa da oracolo.
+- **L'oracolo lo esegue il workflow, non il modello.** Il «fatto quando» del brief è un comando, in un campo
+  strutturato del lavoro; il workflow lo lancia dopo il modello e scrive lui l'esito sulla PR. Ciò che il modello dice
+  delle sue prove non conta. In un progetto con la sua CI valgono tutte e due: la CI e il comando del brief, se c'è.
 - **Ciò che salta all'occhio lo segna il workflow:** una PR che cambia prove già esistenti, o che fa scattare il
   controllo dei segreti, prende un'etichetta, e la revisione la guarda per prima.
 - **Le issue senza brief** (scritte di getto dall'utente) l'esecutore non le prende: chi decide le trasforma in
@@ -197,32 +206,43 @@ fatto l'accesso al suo abbonamento.
 ## L'esecutore fuori: libertà e confini
 
 - **Fiducia larga da subito**, anche sul codice delicato quando il piano dà firme e valori.
-- **Che cosa fa:** prima i lavori che chi decide gli assegna; finiti quelli, sceglie fra i debiti e i bug che hanno un
-  oracolo, e lo annuncia sul lavoro prima di cominciare. Non sceglie mai da solo: decisioni dell'utente, design e
+- **Che cosa fa:** prima i lavori che chi decide gli assegna; finiti quelli, il distributore gli dà i debiti e i bug che
+  hanno un «fatto quando» strutturato (il consigliere può aggiungerlo a quelli che lo meritano), e lo annuncia sul
+  lavoro prima di cominciare. Non sceglie mai da solo: decisioni dell'utente, design e
   specifiche, lavori che aspettano l'utente o già presi, ciò che tocca segreti, dati veri, cancellazioni o azioni
   irreversibili o verso l'esterno, più ciò che la costituzione del progetto aggiunge.
 - **Tiene vive le sue PR:** risolve i conflitti col ramo principale e corregge ciò che chi decide chiede nei commenti.
 - **I sotto-agenti** solo col suo modello, mai con quello di un consigliere, la cui quota è di solito scarsa.
-- **Dove gira:** un utente Unix suo, con la sua cartella chiusa, il runner e la sua porta col suo accesso; non vede
+- **Dove gira:** un utente Unix suo, con la sua cartella chiusa e la sua porta col suo accesso; non vede
   segreti del progetto, chiavi, archivi di password, memorie di altre CLI. La rete la decide la costituzione del
   progetto (di serie libera).
-- **Le chiavi le tiene il workflow, non il modello.** Ogni giro ha tre passi: prima il workflow, col token di GitHub,
-  prepara il fascicolo del lavoro (issue, piano, commenti, stato della PR) e il ramo; poi il modello lavora **senza
-  nessuna chiave di GitHub** (il repo, la sua porta, le prove), committa in locale e scrive su file il testo della PR,
-  dei commenti e delle consegne; infine il workflow controlla e consegna. I controlli sono quelli che prima erano
-  guardie, ma inaggirabili perché il modello non ha con cui spingere: ramo dell'esecutore, mai i rami protetti, niente
-  file sotto `.github/`; poi spinta, PR in bozza, commenti, campi del Project. Una pagina malevola letta durante una
-  ricerca non arriva a nessun repo.
+- **Le chiavi le tiene il workflow, non il modello, e non sono nemmeno lo stesso utente.** Sulla macchina ci sono due
+  utenti: quello del runner, che ha il token di GitHub, e quello dell'esecutore, che ha solo la sua porta. Ogni giro
+  ha tre passi: prima il runner prepara il fascicolo del lavoro (issue, piano, commenti, stato della PR) e una copia
+  del ramo per l'esecutore; poi il modello lavora come utente dell'esecutore, **senza nessuna chiave di GitHub** e
+  senza accesso al runner, committa nella sua copia e consegna **una patch** più i testi della PR, dei commenti e
+  delle consegne; infine il runner applica la patch su un clone pulito suo (così nessun hook o programma lasciato dal
+  modello scatta col token) e controlla: ramo dell'esecutore, mai i rami protetti, niente file sotto `.github/`. Solo
+  allora spinge, apre la PR in bozza, scrive commenti e campi. Una pagina malevola letta durante una ricerca non arriva
+  a nessun repo.
+- **Il token del runner** viene da un accesso `gh` suo, fatto dall'installazione (si apre il browser una volta): non
+  dipende dalla sessione `gh` della macchina dell'utente.
+- **Le prove che vogliono permessi** (per esempio una gabbia per le prove) passano da un solo comando di root, stretto,
+  che la costituzione del progetto definisce: l'esecutore non riceve altri `sudo`.
 - **Si chiama da GitHub**, di giorno come di notte: un'etichetta o un'assegnazione sul lavoro. Una sessione aperta a
   mano con la porta dell'esecutore serve per esplorare, non per consegnare.
 - **Un solo account GitHub**, quello dell'utente, per tutti: niente account in più da creare. Il workflow mette un
-  segno nascosto su ogni commento e PR che scrive per un esecutore o un consigliere; i workflow ignorano i commenti col
-  segno (niente anelli) e prendono comandi solo da quelli senza. Le revisioni sono di solo commento (le uniche ammesse
-  sulla propria PR); l'esito («pronta per l'unione», «correzioni», «rifiutata») è un campo del Project.
-- **Il sigillo è una firma:** chi decide firma le sue unioni nel ramo principale con una chiave SSH che esiste solo
-  sulla sua macchina; il repo tiene l'elenco delle chiavi ammesse sotto `.github/` (dove l'esecutore non può spingere).
-  Un progetto che rilascia da solo dal ramo principale rilascia solo una punta che è un'unione firmata con una chiave
-  ammessa, altrimenti si ferma e avvisa: un push sbagliato, anche con `--no-verify`, resta rosso.
+  segno nascosto su ogni commento e PR che scrive, e il segno dice chi scrive (esecutore, revisore, consigliere). Un
+  commento col segno non è mai un comando, ma entra nel fascicolo come dato: così le correzioni chieste da un sostituto
+  arrivano all'esecutore. A muovere il lavoro sono i campi del Project, non i commenti: le revisioni sono di solo
+  commento (le uniche ammesse sulla propria PR) e l'esito («pronta per l'unione», «correzioni», «rifiutata») è un campo;
+  il distributore riprende i lavori con esito «correzioni», e il sostituto rivede solo quelli «da rivedere».
+- **Il sigillo è una firma:** chi decide firma ciò che mette nel ramo principale (unioni e, se capita, commit diretti)
+  con una chiave SSH che esiste solo sulla sua macchina. Il repo tiene l'elenco delle chiavi ammesse sotto `.github/`
+  (dove l'esecutore non consegna); un attrezzo di rilascio che scrive da sé sul ramo principale (per esempio un ritorno
+  indietro automatico) ha la sua chiave, ammessa anch'essa. Un progetto che rilascia da solo rilascia solo una punta
+  firmata con una chiave ammessa, e l'elenco lo legge dall'ultimo rilascio, non dalla punta nuova: un push estraneo non
+  può autorizzare la propria chiave. Altrimenti si ferma e avvisa: un push sbagliato resta rosso.
 
 ## Come impara
 
@@ -233,18 +253,27 @@ fatto l'accesso al suo abbonamento.
 - **La casistica:** riparte da zero. Ogni caso ha scenario, domanda, opzioni, la **scelta** presa (così uno script
   confronta senza modello), il perché e l'esito. Cresce con PR al repo `bottega`; un caso che parla di un progetto
   resta nel progetto.
+- **Le lezioni di chi installa:** un amico che usa la bottega tiene le sue lezioni e i suoi casi nel repo del suo
+  progetto (versionati, su GitHub), e il fascicolo li legge insieme a quelli del repo `bottega`; mandarceli con una PR
+  è facoltativo.
 - **Il banco di prova:** quando la skill cambia, un consigliere risponde a 100-200 casi (tutti, finché sono meno) con
-  la skill nuova e senza le risposte; un workflow confronta le scelte; chi decide guarda solo le divergenze.
+  la skill nuova e senza le risposte; uno script confronta le scelte; chi decide guarda solo le divergenze. Gira dalla
+  macchina di chi decide (il repo pubblico non ha runner coi suoi abbonamenti), e l'esito va come commento sulla PR del
+  repo `bottega`. Senza quota del consigliere lo fa l'esecutore.
 - **Le misure: tutto, nei campi del Project**, sul lavoro di ogni compito (al più 50 campi per Project):
-  - chi l'ha eseguito (titolo e modello), da che porta, in sessione o fuori; durata, giri, consulti; la quota
-    dell'esecutore se la porta la dà: li scrive il workflow, o chi decide in sessione;
+  - l'esecutore (un campo a scelta coi nomi dei candidati, le cui opzioni si aggiungono senza perdere i valori), da che
+    porta, in sessione o fuori; durata, giri, consulti; la quota dell'esecutore se la porta la dà: li scrive il
+    workflow, o chi decide in sessione;
   - **la quota spesa da chi decide** per brief e revisione, il numero che decide: chi decide mette un segno d'inizio e
     uno di fine quando scrive un brief o rivede; un comando legge i contatori della trascrizione della sua porta e
-    scrive il campo. Un segno dimenticato lascia il compito senza numero, mai con uno inventato;
+    scrive il campo. Un segno dimenticato lascia il compito senza numero, mai con uno inventato. Una porta che non dà
+    tutti i contatori (Copilot registra per turno solo i token in uscita) scrive ciò che ha, segnato «parziale». Il
+    costo di un lavoro fatto per tutta una tappa (una revisione finale, i brief scritti insieme) sta sulla tappa; la
+    scelta viva lo divide fra i compiti dichiarandolo stima;
   - **l'esito della revisione** (unito com'era, corretto, rifiutato) **per compito** quando si può: ogni commento di
     correzione indica il commit del compito; i compiti senza commenti sono «uniti com'erano»; se non si può dire,
     l'esito vale per tutta la tappa;
-  - i rilievi gravi e da dove venivano (piano, brief, esecuzione); per i consiglieri, i consigli accolti e respinti,
+  - i rilievi gravi, un numero per origine (piano, brief, esecuzione); per i consiglieri, i consigli accolti e respinti,
     e quelli che col tempo si rivelano giusti o sbagliati, quando chi decide lo vede.
 - **La lettura.** La scelta viva legge da sola esiti e costi per candidato ed etichetta. Chi decide legge i conti con un
   comando che interroga il Project; tiene d'occhio la spia del metodo (rivedere il lavoro dell'esecutore fuori costa
@@ -257,9 +286,11 @@ fatto l'accesso al suo abbonamento.
 - **Il repo `bottega`**, pubblico, licenza MIT, in italiano: il plugin (skill, pagine per porta, modelli di brief e di
   costituzione), i workflow modello, i quaderni, la casistica, la guida per le persone (`LEGGIMI.md`) e quella per la
   CLI (`INSTALLA.md`).
-- **Il plugin** si installa e si aggiorna col sistema di plugin di ogni porta, dal repo GitHub, come le altre raccolte
-  di skill che supportano più CLI; le skill compagne sono sue dipendenze. Come ogni porta installa un plugin da GitHub
-  si verifica prima di scriverne la pagina.
+- **Il plugin** si installa dal repo GitHub dove la porta lo sa fare da sé (Claude Code, coi marketplace); dove no
+  (Antigravity accetta solo una cartella locale o un marketplace già collegato, senza dipendenze) da un clone git del
+  repo sulla macchina, aggiornato con `git pull`: l'unico mezzo di sincronia resta git. Il modello dell'esecutore non
+  tocca GitHub, quindi non gli servono skill di board; le skill di stile (Python, Rust) restano facoltative, dalle loro
+  fonti.
 - **L'installazione** (la CLI segue `INSTALLA.md`) fa da sola tutto ciò che può: riconosce porte e sistema, installa
   il plugin in ogni porta, scopre abbonamenti e modelli, propone funzioni e candidati, e chiede solo ciò che non può
   sapere: come l'utente vuole essere chiamato, il progetto, quali abbonamenti si possono usare su quel progetto (un
@@ -268,7 +299,9 @@ fatto l'accesso al suo abbonamento.
   e dei candidati, i workflow; prepara i campi del Project (se manca il permesso lancia `gh auth refresh -s project`,
   che apre il browser una volta; se manca il Project, lo crea). Crea la chiave di firma di chi decide e configura git
   per firmare. Mette fra i segreti del repo il token dell'accesso che `gh` ha già (`gh secret set`), senza far creare
-  token a mano. Sulla macchina, se richiesto: l'utente dell'esecutore e il runner (chiede `sudo` una volta).
+  token a mano (il token è quello dell'accesso `gh` del runner, fatto dall'installazione). Sulla macchina, se
+  richiesto: l'utente dell'esecutore, l'utente del runner col runner, e il solo `sudo` che serve al runner per lanciare
+  la porta come utente dell'esecutore (chiede `sudo` una volta).
   Se il repo non ammette runner self-hosted (succede nei repo aziendali) o l'utente non li vuole, la bottega lavora
   solo in sessione e lo dice in una riga.
 - **Il repo è pubblico:** un workflow controlla ogni PR del repo `bottega` cercando segreti, nomi e percorsi personali.
