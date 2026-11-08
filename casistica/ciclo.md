@@ -157,3 +157,34 @@ perché il design non la chiede. Quella sezione l'aveva voluta l'utente.
 consiglio. Solo i disaccordi grossi vanno all'utente.
 **Esito:** respinti due rilievi su quindici, accolti gli altri.
 **Fonte:** dal vivo 2026-11-08
+
+### CICLO-12. La revisione dopo le correzioni
+
+**Scenario:** la revisione finale di una tappa delicata ha trovato quindici rilievi gravi; i Lavoranti li hanno
+corretti, ognuno con la sua prova vista rossa, e le prove sono verdi. Le correzioni hanno cambiato mezzo giro.
+**Domanda:** si unisce?
+**Opzioni:**
+- A) sì: ogni rilievo ha la sua prova
+- B) prima un'altra revisione finale a mente fresca, sul codice corretto
+- C) si rilancia solo la stessa revisione di prima, per vedere se i rilievi sono chiusi
+**Scelta:** B
+**Perché:** le prove dicono che i rilievi vecchi sono chiusi, non che le correzioni non ne abbiano aperti di nuovi; e
+chi ha rivisto la prima volta tende a ritrovare ciò che cercava.
+**Esito:** la seconda revisione (un revisore nuovo) ha trovato quattro gravi nuovi, uno introdotto proprio dalla
+correzione della consegna (il checkout del ramo del modello nel clone del runner).
+**Fonte:** dal vivo 2026-11-08
+
+### CICLO-13. Il revisore che si ferma a metà
+
+**Scenario:** la revisione finale va a due revisori di due botteghe; uno dei due si ferma dopo cinque minuti perché i
+crediti della sua bottega sono finiti, senza rapporto.
+**Domanda:** che cosa fa chi decide?
+**Opzioni:**
+- A) aspetta il rinnovo dei crediti e rilancia
+- B) tiene la revisione dell'altro revisore, se copre il ramo, e segna la mancata nelle misure
+- C) fa la revisione da sé
+**Scelta:** B
+**Perché:** una revisione a mente fresca basta se copre il ramo; la seconda era una riserva. Aspettare ferma la tappa
+senza un motivo, e la revisione di chi ha scritto le correzioni non è a mente fresca.
+**Esito:** tenuta la revisione Opus; la porta Antigravity ha imparato i crediti finiti (PORTE-2).
+**Fonte:** dal vivo 2026-11-08
