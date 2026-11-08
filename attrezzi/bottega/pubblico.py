@@ -50,8 +50,8 @@ _EMAIL = re.compile(r"([A-Za-z0-9._%+-]+)@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![
 _DOMINI_DI_ESEMPIO = {"example.com", "example.org"}
 
 # IPv4 con quattro ottetti, fuori da numeri più lunghi. Le reti private e riservate sono scritte in esadecimale, così il
-# controllo non trova se stesso nel suo sorgente: RFC 1918 (10/8, 172.16/12, 192.168/16), RFC 6598 (100.64/10, usata anche
-# dalle VPN a maglia), RFC 3927 (169.254/16, link-local).
+# controllo non trova se stesso nel suo sorgente: RFC 1918 (10/8, 172.16/12, 192.168/16), RFC 6598 (100.64/10,
+# usata anche dalle VPN a maglia), RFC 3927 (169.254/16, link-local).
 _IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?!\d|\.\d)")
 _RETI_PRIVATE = (
     ipaddress.ip_network((0x0A000000, 8)),

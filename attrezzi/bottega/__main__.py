@@ -6,17 +6,23 @@ from collections.abc import Callable
 
 from bottega import VERSIONE
 from bottega.casi import argomenti_casi, comando_casi
+from bottega.configurazione import argomenti_configurazione, comando_configurazione
 from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
+from bottega.scelta import argomenti_scegli, comando_scegli
 
 # Nome del sottocomando -> funzione che riceve gli argomenti letti e restituisce l'esito (0 = tutto bene).
 COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "controlla-pubblico": controlla_pubblico,
     "casi": comando_casi,
+    "configurazione": comando_configurazione,
+    "scegli": comando_scegli,
 }
 # Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "controlla-pubblico": argomenti_controlla_pubblico,
     "casi": argomenti_casi,
+    "configurazione": argomenti_configurazione,
+    "scegli": argomenti_scegli,
 }
 
 
