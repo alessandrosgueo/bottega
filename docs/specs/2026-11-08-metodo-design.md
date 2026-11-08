@@ -151,6 +151,17 @@ fatto l'accesso al suo abbonamento.
   lavoro e lascia un solo avviso per chi decide, che resta finché il guasto dura; i lavori non diventano «bloccati»
   per un guasto della porta.
 
+- **I brief dei compiti fuori:** chi decide scrive il piano coi Ruling; il primo consigliere con quota lo divide in
+  issue coi brief; chi decide li scorre prima che partano (legge, non scrive). Senza consigliere con quota li scrive
+  chi decide.
+- **Il consigliere senza quota a metà tappa:** il compito va avanti senza rilettura e il lavoro lo segna; la revisione
+  di fine tappa guarda quei compiti per primi.
+- **Il repo pubblico non ha runner self-hosted** né workflow che girano su PR altrui (una PR da un fork farebbe girare
+  codice estraneo sulla macchina): solo il controllo dei dati personali, sui runner di GitHub. Le lezioni ci arrivano
+  con PR aperte da chi decide.
+- **Più progetti sulla stessa bottega:** un runner appartiene a un repo e `concurrency` vale dentro un repo, quindi
+  due progetti possono far lavorare insieme due esecutori della stessa quota; li reggono la scelta viva e la «quota
+  esaurita».
 - **Il fascicolo** che il workflow prepara contiene sempre, oltre al lavoro, la costituzione del progetto e il quaderno
   del modello dell'esecutore: le lezioni arrivano da sole.
 - **Una PR rifiutata** la chiude chi decide, col motivo scritto; la lezione va nel quaderno; il lavoro torna da rifare
