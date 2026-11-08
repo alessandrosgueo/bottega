@@ -365,6 +365,16 @@ def test_nome_ripetuto_e_un_errore(tmp_path):
     ]
 
 
+def test_nome_ripetuto_senza_badare_alle_maiuscole_e_un_errore(tmp_path):
+    candidato_maiuscolo = CANDIDATO_CON_NOME_RIPETUTO.replace(
+        'nome = "Maestro <modello forte>"', 'nome = "MAESTRO <MODELLO FORTE>"'
+    )
+    assert _errori(tmp_path, BASE + candidato_maiuscolo) == [
+        "bottega.toml: candidati.altro.nome: nome ripetuto: «MAESTRO <MODELLO FORTE>» (già in candidati.maestro)"
+    ]
+
+
+
 @pytest.mark.parametrize("valore", ["1:30", "24:00", "23:60", "0130", "01:30:00", "01.30"])
 def test_notte_non_hh_mm_e_un_errore(tmp_path, valore):
     testo = _cambia(BASE, 'fuso = "Europe/Rome"', f'fuso = "Europe/Rome"\nnotte = "{valore}"')

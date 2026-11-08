@@ -11,7 +11,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from bottega.configurazione import Bottega, Candidato, Configurazione, Progetto
-from bottega.quota import valore_esaurita
+from bottega.quota import disponibile, nome_variabile, valore_esaurita
 from bottega.scelta import Compito, Risultati, Scelta, argomenti_scegli, comando_scegli, scegli
 
 
@@ -51,6 +51,7 @@ def _configurazione_di_base() -> Configurazione:
 
 
 # --- Strategie Hypothesis per le proprietà del cancello ---
+
 
 @st.composite
 def strategie_scenario(draw: st.DrawFn) -> tuple[Configurazione, Compito, dict, dict, datetime]:
@@ -140,15 +141,51 @@ def test_proprieta_cancello_1_candidato_ha_sempre_quota(
     seme: int,
     estrazione: st.DataObject,
 ) -> None:
-    cfg, compito_base, risultati, quote_map, adesso = dati
-    # Anche col precedente della tappa e coi giri d'attesa: il candidato scelto ha sempre quota.
+    cfg, compito_base, risultati_base, quote_map_base, adesso = dati
+
+    # Quote passate sia per id della bottega sia come BOTTEGA_QUOTA_<ID>
+    quote_map: dict[str, str | None] = {}
+    for b_id, val in quote_map_base.items():
+        stile = estrazione.draw(st.sampled_from(["id", "variabile", "entrambi"]))
+        if stile in ("id", "entrambi"):
+            quote_map[b_id] = val
+        if stile in ("variabile", "entrambi"):
+            quote_map[nome_variabile(b_id)] = val
+
+    # Risultati anche per etichette specifiche
+    risultati = dict(risultati_base)
+    for c_id in cfg.candidati:
+        for et in compito_base.etichette:
+            u = estrazione.draw(st.integers(min_value=0, max_value=10))
+            cr = estrazione.draw(st.integers(min_value=0, max_value=5))
+            rf = estrazione.draw(st.integers(min_value=0, max_value=5))
+            risultati[(c_id, et)] = Risultati(u, cr, rf)
+
     precedente = estrazione.draw(st.one_of(st.none(), st.sampled_from(list(cfg.candidati))), label="precedente")
+    giri = estrazione.draw(st.integers(min_value=0, max_value=2), label="giri")
+
+    # Genera anche esegue
+    ha_esegue = estrazione.draw(st.booleans(), label="ha_esegue")
+    esegue_attr: str | None = None
+    etichette = set(compito_base.etichette)
+    if ha_esegue:
+        nomi_candidati = [c.id for c in cfg.candidati.values()] + [c.nome for c in cfg.candidati.values()]
+        nome_esegue = estrazione.draw(
+            st.one_of(st.sampled_from(nomi_candidati), st.text(min_size=1, max_size=10, alphabet="abcdef-"))
+        )
+        in_attr = estrazione.draw(st.booleans())
+        if in_attr:
+            esegue_attr = nome_esegue
+        else:
+            etichette.add(f"esegue: {nome_esegue}")
+
     compito = Compito(
         funzione=compito_base.funzione,
         fuori=compito_base.fuori,
-        etichette=compito_base.etichette,
+        etichette=frozenset(etichette),
+        esegue=esegue_attr,
         precedente=precedente,
-        giri_in_attesa=estrazione.draw(st.integers(min_value=0, max_value=2), label="giri"),
+        giri_in_attesa=giri,
     )
     caso = random.Random(seme)
     scelta = scegli(compito, cfg, risultati, quote_map, adesso, caso)
@@ -156,10 +193,10 @@ def test_proprieta_cancello_1_candidato_ha_sempre_quota(
     if scelta.candidato is not None:
         cand = cfg.candidati[scelta.candidato]
         val_quota = quote_map.get(cand.bottega)
-        # Se c'è un valore di quota, non deve essere nel futuro
-        if val_quota and val_quota.startswith("esaurita fino a "):
-            fino_a = datetime.fromisoformat(val_quota[len("esaurita fino a ") :])
-            assert adesso >= fino_a, f"Candidato {cand.id} scelto ma quota esaurita fino a {fino_a}"
+        if val_quota is None:
+            val_quota = quote_map.get(nome_variabile(cand.bottega))
+        ha_q, _ = disponibile(val_quota, adesso)
+        assert ha_q is True, f"Candidato {cand.id} scelto ma quota non disponibile (valore: {val_quota})"
 
 
 @settings(max_examples=200)
@@ -174,37 +211,66 @@ def test_proprieta_cancello_2_etichetta_esegue_mai_un_altro(
     estrazione: st.DataObject,
 ) -> None:
     cfg, compito_base, risultati, quote_map, adesso = dati
-    # Il nome dell'etichetta: quasi sempre un candidato vero (per id o per nome, in un'altra maiuscola), a volte no.
+    # Il nome dell'etichetta: candidato vero (per id o nome, maiuscole/minuscole), o inesistente
     veri = [c.id for c in cfg.candidati.values()] + [c.nome.upper() for c in cfg.candidati.values()]
     nome_esegue = estrazione.draw(
         st.one_of(st.sampled_from(veri), st.text(min_size=1, max_size=15, alphabet="abcdef-012")), label="esegue"
     )
-    # Aggiungi esegue
-    compito = Compito(
-        funzione=compito_base.funzione,
-        fuori=compito_base.fuori,
-        etichette=compito_base.etichette,
-        esegue=nome_esegue,
-    )
+
+    in_campo = estrazione.draw(st.booleans(), label="in_campo")
+    etichette = set(compito_base.etichette)
+    # Rimuovi eventuali altre etichette esegue: generate in precedenza
+    etichette = {e for e in etichette if not e.lower().startswith("esegue:")}
+    if in_campo:
+        compito = Compito(
+            funzione=compito_base.funzione,
+            fuori=compito_base.fuori,
+            etichette=frozenset(etichette),
+            esegue=nome_esegue,
+        )
+    else:
+        etichette.add(f"esegue: {nome_esegue}")
+        compito = Compito(
+            funzione=compito_base.funzione,
+            fuori=compito_base.fuori,
+            etichette=frozenset(etichette),
+            esegue=None,
+        )
+
     caso = random.Random(seme)
     scelta = scegli(compito, cfg, risultati, quote_map, adesso, caso)
 
-    # La scelta può essere solo il candidato corrispondente a nome_esegue (per id o nome) oppure None
-    trovato = None
-    for c in cfg.candidati.values():
-        if c.id.casefold() == nome_esegue.casefold() or c.nome.casefold() == nome_esegue.casefold():
-            trovato = c
-            break
+    # Ricerca attesa: prima per id (senza maiuscole), poi per nome (senza maiuscole)
+    nome_cf = nome_esegue.casefold()
+    trovato = next((c for c in cfg.candidati.values() if c.id.casefold() == nome_cf), None)
+    if trovato is None:
+        trovato = next((c for c in cfg.candidati.values() if c.nome.casefold() == nome_cf), None)
 
-    if scelta.candidato is not None:
-        assert trovato is not None
-        assert scelta.candidato == trovato.id
+    idoneo = (
+        trovato is not None and compito.funzione in trovato.funzioni and (not compito.fuori or bool(trovato.runner))
+    )
+
+    if trovato is not None and idoneo:
+        val_q = quote_map.get(trovato.bottega)
+        if val_q is None:
+            val_q = quote_map.get(nome_variabile(trovato.bottega))
+        ha_q, _ = disponibile(val_q, adesso)
+        if ha_q:
+            # 1. trovato, idoneo e con quota
+            assert scelta.candidato == trovato.id
+            assert scelta.aspetta is False
+        else:
+            # 2. trovato e idoneo ma senza quota
+            assert scelta.candidato is None
+            assert scelta.aspetta is True
     else:
-        # Nessun candidato scelto: aspetta o esce per candidato inesistente/incompatibile
+        # 3. assente o non idoneo
         assert scelta.candidato is None
+        assert scelta.aspetta is False
 
 
 # --- Prove puntuali sui casi d'uso ---
+
 
 def test_precedente_con_quota_scelto() -> None:
     cfg = _configurazione_di_base()
@@ -368,16 +434,22 @@ def test_nessun_candidato_con_quota_aspetta() -> None:
 
 # --- Prove CLI scegli ---
 
+
 def test_cli_scegli_fatto_quando(capsys: pytest.CaptureFixture[str]) -> None:
     from bottega.__main__ import main
 
-    codice = main([
-        "scegli",
-        "--funzione", "eseguire",
-        "--fuori",
-        "--file", "plugin/skills/bottega/modelli/bottega.toml",
-        "--seme", "1",
-    ])
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--fuori",
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+            "--seme",
+            "1",
+        ]
+    )
     assert codice == 0
     catturato = capsys.readouterr()
     riga = catturato.out.strip()
@@ -391,12 +463,17 @@ def test_cli_scegli_fatto_quando(capsys: pytest.CaptureFixture[str]) -> None:
 def test_cli_scegli_etichetta_inesistente_esce_1(capsys: pytest.CaptureFixture[str]) -> None:
     from bottega.__main__ import main
 
-    codice = main([
-        "scegli",
-        "--funzione", "eseguire",
-        "--esegue", "persona-misteriosa",
-        "--file", "plugin/skills/bottega/modelli/bottega.toml",
-    ])
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--esegue",
+            "persona-misteriosa",
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
     assert codice == 1
     catturato = capsys.readouterr()
     riga = catturato.out.strip()
@@ -409,11 +486,15 @@ def test_cli_scegli_etichetta_inesistente_esce_1(capsys: pytest.CaptureFixture[s
 def test_cli_scegli_file_non_trovato_esce_2(capsys: pytest.CaptureFixture[str]) -> None:
     from bottega.__main__ import main
 
-    codice = main([
-        "scegli",
-        "--funzione", "eseguire",
-        "--file", "file-che-non-esiste.toml",
-    ])
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--file",
+            "file-che-non-esiste.toml",
+        ]
+    )
     assert codice == 2
     catturato = capsys.readouterr()
     assert "errore" in catturato.err.lower() or "file non trovato" in catturato.err.lower()
@@ -431,14 +512,20 @@ def test_cli_scegli_con_json_quote_e_risultati(tmp_path: Path, capsys: pytest.Ca
     f_risultati.write_text(json.dumps({"lavorante": {"*": {"uniti": 5, "corretti": 0, "rifiutati": 0}}}))
 
     # Con secondaria esaurita, lavorante non ha quota -> aspetta
-    codice = main([
-        "scegli",
-        "--funzione", "eseguire",
-        "--fuori",
-        "--quote", str(f_quote),
-        "--risultati", str(f_risultati),
-        "--file", "plugin/skills/bottega/modelli/bottega.toml",
-    ])
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--fuori",
+            "--quote",
+            str(f_quote),
+            "--risultati",
+            str(f_risultati),
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
     assert codice == 0
     catturato = capsys.readouterr()
     riga = catturato.out.strip()
@@ -446,3 +533,272 @@ def test_cli_scegli_con_json_quote_e_risultati(tmp_path: Path, capsys: pytest.Ca
     assert primo == "aspetta"
     assert "aspetta" in perche
 
+
+# --- Nuove prove sulle correzioni della revisione finale ---
+
+
+def test_mutante_etichetta_esegue_con_quota_sceglie_davvero() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito_attr = Compito(funzione="eseguire", fuori=False, esegue="lavorante")
+    scelta_attr = scegli(compito_attr, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta_attr.candidato == "lavorante"
+    assert scelta_attr.aspetta is False
+
+    compito_et = Compito(funzione="eseguire", fuori=False, etichette=frozenset({"esegue: lavorante"}))
+    scelta_et = scegli(compito_et, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta_et.candidato == "lavorante"
+    assert scelta_et.aspetta is False
+
+
+def test_nessun_candidato_ha_la_funzione_restituisce_aspetta_false() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="consigliare", fuori=False)
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is False
+    assert "nessun candidato per la funzione «consigliare»" in scelta.perche
+
+
+def test_nessun_candidato_ha_runner_per_compito_fuori_restituisce_aspetta_false() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    # maestro sa decidere ma non ha runner
+    compito = Compito(funzione="decidere", fuori=True)
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is False
+    assert "nessun candidato per la funzione «decidere» fuori" in scelta.perche
+
+
+def test_cli_scegli_nessun_candidato_idoneo_esce_1(capsys: pytest.CaptureFixture[str]) -> None:
+    from bottega.__main__ import main
+
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "consigliare",
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
+    assert codice == 1
+    catturato = capsys.readouterr()
+    primo, perche = catturato.out.strip().split("\t", 1)
+    assert primo == "nessuno"
+    assert "nessun candidato per la funzione «consigliare»" in perche
+
+
+def test_due_etichette_esegue_diverse_in_conflitto() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=False, etichette=frozenset({"esegue: maestro", "esegue: lavorante"}))
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is False
+    assert scelta.perche == "etichette esegue in conflitto: lavorante, maestro"
+
+
+def test_conflitto_fra_attributo_esegue_ed_etichetta() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=False, esegue="lavorante", etichette=frozenset({"esegue: maestro"}))
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is False
+    assert scelta.perche == "etichette esegue in conflitto: lavorante, maestro"
+
+
+def test_conflitto_esegue_non_dipende_dall_ordine_del_frozenset() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    c1 = Compito(funzione="eseguire", fuori=False, etichette=frozenset({"esegue: zorro", "esegue: alfa"}))
+    c2 = Compito(funzione="eseguire", fuori=False, etichette=frozenset({"esegue: alfa", "esegue: zorro"}))
+    s1 = scegli(c1, cfg, {}, {}, adesso, random.Random(1))
+    s2 = scegli(c2, cfg, {}, {}, adesso, random.Random(1))
+    assert s1.perche == s2.perche == "etichette esegue in conflitto: alfa, zorro"
+
+
+def test_etichette_esegue_stesso_candidato_non_conflitto() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=False, esegue="lavorante", etichette=frozenset({"esegue: LAVORANTE"}))
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato == "lavorante"
+    assert scelta.aspetta is False
+
+
+def test_scelta_etichetta_cerca_prima_per_id_poi_per_nome() -> None:
+    # Candidato 1 ha id="c1" e nome="c2"
+    # Candidato 2 ha id="c2" e nome="c3"
+    progetto = Progetto(("admin",), None, "Europe/Rome", None, ())
+    botteghe = {"b": Bottega("b", "abbondante", ("porta",))}
+    candidati = {
+        "c1": Candidato("c1", "c2", "b", "porta", "mod", ("eseguire",), None),
+        "c2": Candidato("c2", "c3", "b", "porta", "mod", ("eseguire",), None),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Ricerca per "c2" (o "C2"): deve trovare il candidato con id="c2", non quello con nome="c2" (c1)
+    compito_id = Compito(funzione="eseguire", fuori=False, esegue="C2")
+    scelta_id = scegli(compito_id, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta_id.candidato == "c2"
+
+    # Ricerca per "c3": nessun candidato ha id="c3", trova per nome (c2)
+    compito_nome = Compito(funzione="eseguire", fuori=False, esegue="c3")
+    scelta_nome = scegli(compito_nome, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta_nome.candidato == "c2"
+
+
+def test_cli_scegli_json_risultati_non_oggetto_esce_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "risultati.json"
+    f.write_text("[1, 2, 3]")
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--risultati",
+            str(f),
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "errore" in catturato.err.lower()
+
+
+def test_cli_scegli_json_risultati_sotto_oggetti_non_oggetti_esce_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "risultati.json"
+    f.write_text(json.dumps({"lavorante": [1, 2]}))
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--risultati",
+            str(f),
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "errore" in catturato.err.lower()
+
+
+def test_cli_scegli_json_risultati_conteggi_booleani_esce_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "risultati.json"
+    f.write_text(json.dumps({"lavorante": {"*": {"uniti": True}}}))
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--risultati",
+            str(f),
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "errore" in catturato.err.lower()
+
+
+def test_cli_scegli_json_risultati_conteggi_negativi_esce_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "risultati.json"
+    f.write_text(json.dumps({"lavorante": {"*": {"uniti": -1}}}))
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--risultati",
+            str(f),
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "errore" in catturato.err.lower()
+
+
+def test_cli_scegli_json_quote_non_oggetto_esce_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "quote.json"
+    f.write_text('"non un dizionario"')
+    codice = main(
+        ["scegli", "--funzione", "eseguire", "--quote", str(f), "--file", "plugin/skills/bottega/modelli/bottega.toml"]
+    )
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "errore" in catturato.err.lower()
+
+
+def test_cli_scegli_json_quote_valori_non_stringa_o_null_esce_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "quote.json"
+    f.write_text(json.dumps({"secondaria": 123}))
+    codice = main(
+        ["scegli", "--funzione", "eseguire", "--quote", str(f), "--file", "plugin/skills/bottega/modelli/bottega.toml"]
+    )
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "errore" in catturato.err.lower()
+
+
+def test_avvisi_quota_in_fondo_al_perche_separati() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    # Valore malformato per la bottega secondaria
+    quote = {"secondaria": "valore non riconosciuto"}
+    compito = Compito(funzione="eseguire", fuori=False)
+    scelta = scegli(compito, cfg, {}, quote, adesso, random.Random(1))
+    assert "; avviso: " in scelta.perche
+    assert "valore della quota non riconosciuto: «valore non riconosciuto»" in scelta.perche
+
+
+def test_cli_scegli_stampa_avvisi_quota_su_stderr_uno_per_bottega(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bottega.__main__ import main
+
+    f = tmp_path / "quote.json"
+    f.write_text(json.dumps({"secondaria": "quota corrotta"}))
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--quote",
+            str(f),
+            "--file",
+            "plugin/skills/bottega/modelli/bottega.toml",
+        ]
+    )
+    assert codice == 0
+    catturato = capsys.readouterr()
+    assert "avviso: secondaria:" in catturato.err or "avviso:" in catturato.err
+    assert "quota corrotta" in catturato.err
+    assert "; avviso: " in catturato.out
+    assert "quota corrotta" in catturato.out

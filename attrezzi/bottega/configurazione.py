@@ -238,10 +238,11 @@ def _candidati(
         _sconosciute(tabella, _CHIAVI_CANDIDATO, percorso, errori)
         nome = _testo(tabella, "nome", percorso, errori, obbligatoria=True)
         if nome is not None:
-            if nome in nomi:
-                _errore(errori, f"{percorso}.nome", f"nome ripetuto: «{nome}» (già in candidati.{nomi[nome]})")
+            chiave = nome.casefold()
+            if chiave in nomi:
+                _errore(errori, f"{percorso}.nome", f"nome ripetuto: «{nome}» (già in candidati.{nomi[chiave]})")
             else:
-                nomi[nome] = id_
+                nomi[chiave] = id_
         bottega = _testo(tabella, "bottega", percorso, errori, obbligatoria=True)
         if bottega is not None and ids is not None and bottega not in ids:
             _errore(errori, f"{percorso}.bottega", f"bottega inesistente: «{bottega}»")

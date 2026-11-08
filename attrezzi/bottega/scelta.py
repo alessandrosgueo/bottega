@@ -72,10 +72,39 @@ def scegli(
     costi_propri: Mapping[str, float] | None = None,
 ) -> Scelta:
     """Sceglie il candidato per il compito secondo le regole B2-R3 e B2-R4."""
+    base = _scegli_senza_avvisi(
+        compito=compito,
+        configurazione=configurazione,
+        risultati=risultati,
+        quote=quote,
+        adesso=adesso,
+        caso=caso,
+        costo_decisore=costo_decisore,
+        costi_propri=costi_propri,
+    )
+    return _con_avvisi(base, configurazione, quote, adesso)
+
+
+def _scegli_senza_avvisi(
+    compito: Compito,
+    configurazione: Configurazione,
+    risultati: Mapping[tuple[str, str], Risultati],
+    quote: Mapping[str, str | None],
+    adesso: datetime,
+    caso: random.Random,
+    costo_decisore: float,
+    costi_propri: Mapping[str, float] | None,
+) -> Scelta:
     tutti = list(configurazione.candidati.values())
 
     # 1. Etichetta esegue (B2-R3.2)
-    nome_esegue = _ricava_esegue(compito)
+    nome_esegue, conflitti = _ricava_esegue(compito)
+    if conflitti:
+        return Scelta(
+            candidato=None,
+            aspetta=False,
+            perche=f"etichette esegue in conflitto: {', '.join(conflitti)}",
+        )
     if nome_esegue is not None:
         return _scegli_per_etichetta_esegue(nome_esegue, compito, tutti, quote, adesso)
 
@@ -87,6 +116,10 @@ def scegli(
 
     # 3. Candidati eleggibili per funzione e runner (B2-R3.1)
     elegibili = [c for c in tutti if _elegibile(c, compito)]
+    if not elegibili:
+        perche = f"nessun candidato per la funzione «{compito.funzione}»" + (" fuori" if compito.fuori else "")
+        return Scelta(candidato=None, aspetta=False, perche=perche)
+
     if compito.precedente is not None and compito.giri_in_attesa >= 1:
         # Dopo un giro di attesa si sceglie fra gli altri
         elegibili = [c for c in elegibili if c.id != compito.precedente]
@@ -137,6 +170,53 @@ def argomenti_scegli(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _carica_risultati_json(percorso: Path) -> tuple[dict[tuple[str, str], Risultati] | None, str | None]:
+    try:
+        with percorso.open("rb") as f:
+            dati = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+        return None, motivo
+
+    if not isinstance(dati, dict):
+        return None, "la radice del file JSON deve essere un oggetto"
+
+    risultati_map: dict[tuple[str, str], Risultati] = {}
+    for c_id, per_etichetta in dati.items():
+        if not isinstance(per_etichetta, dict):
+            return None, f"il valore per il candidato «{c_id}» deve essere un oggetto"
+        for etichetta, conteggi in per_etichetta.items():
+            if not isinstance(conteggi, dict):
+                return None, f"i conteggi per «{c_id}» ed etichetta «{etichetta}» devono essere un oggetto"
+            for k, v in conteggi.items():
+                if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                    return None, f"il conteggio «{k}» per «{c_id}» deve essere un intero >= 0 (trovato {v!r})"
+            uniti = conteggi.get("uniti", 0)
+            corretti = conteggi.get("corretti", 0)
+            rifiutati = conteggi.get("rifiutati", 0)
+            risultati_map[(c_id, etichetta)] = Risultati(uniti=uniti, corretti=corretti, rifiutati=rifiutati)
+
+    return risultati_map, None
+
+
+def _carica_quote_json(percorso: Path) -> tuple[dict[str, str | None] | None, str | None]:
+    try:
+        with percorso.open("rb") as f:
+            dati = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+        return None, motivo
+
+    if not isinstance(dati, dict):
+        return None, "la radice del file JSON deve essere un oggetto"
+
+    for k, v in dati.items():
+        if v is not None and (not isinstance(v, str) or isinstance(v, bool)):
+            return None, f"il valore della quota per «{k}» deve essere una stringa o null (trovato {v!r})"
+
+    return dati, None
+
+
 def comando_scegli(args: argparse.Namespace) -> int:
     """Sceglie il candidato per un compito: esce 0 (o aspetta), 1 se non esiste, 2 con errore."""
     percorso_cfg = Path(args.file)
@@ -150,39 +230,37 @@ def comando_scegli(args: argparse.Namespace) -> int:
     risultati_map: dict[tuple[str, str], Risultati] = {}
     if args.risultati:
         percorso_ris = Path(args.risultati)
-        try:
-            with percorso_ris.open("rb") as f:
-                dati_ris = json.load(f)
-            for c_id, per_etichetta in dati_ris.items():
-                if isinstance(per_etichetta, dict):
-                    for etichetta, conteggi in per_etichetta.items():
-                        if isinstance(conteggi, dict):
-                            risultati_map[(c_id, etichetta)] = Risultati(
-                                uniti=int(conteggi.get("uniti", 0)),
-                                corretti=int(conteggi.get("corretti", 0)),
-                                rifiutati=int(conteggi.get("rifiutati", 0)),
-                            )
-        except (OSError, json.JSONDecodeError, ValueError) as e:
-            motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
-            print(f"errore: {percorso_ris}: {motivo}", file=sys.stderr)
+        dati_ris, errore = _carica_risultati_json(percorso_ris)
+        if errore is not None:
+            print(f"errore: {percorso_ris}: {errore}", file=sys.stderr)
             return 2
+        assert dati_ris is not None
+        risultati_map = dati_ris
 
     quote_map: dict[str, str | None] = {}
     if args.quote:
         percorso_quote = Path(args.quote)
-        try:
-            with percorso_quote.open("rb") as f:
-                quote_map = json.load(f)
-        except (OSError, json.JSONDecodeError, ValueError) as e:
-            motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
-            print(f"errore: {percorso_quote}: {motivo}", file=sys.stderr)
+        dati_quote, errore = _carica_quote_json(percorso_quote)
+        if errore is not None:
+            print(f"errore: {percorso_quote}: {errore}", file=sys.stderr)
             return 2
+        assert dati_quote is not None
+        quote_map = dati_quote
 
     try:
         fuso = ZoneInfo(cfg.progetto.fuso)
     except Exception:
         fuso = ZoneInfo("UTC")
     adesso = datetime.now(fuso)
+
+    # Stampa gli avvisi della quota su stderr, uno per bottega
+    for b_id in cfg.botteghe:
+        valore = quote_map.get(b_id)
+        if valore is None:
+            valore = quote_map.get(nome_variabile(b_id))
+        _, avviso = disponibile(valore, adesso)
+        if avviso is not None:
+            print(f"avviso: {b_id}: {avviso}", file=sys.stderr)
 
     caso = random.Random(args.seme)
     compito = Compito(
@@ -205,13 +283,29 @@ def comando_scegli(args: argparse.Namespace) -> int:
     return 1
 
 
-def _ricava_esegue(compito: Compito) -> str | None:
+def _ricava_esegue(compito: Compito) -> tuple[str | None, list[str]]:
+    nomi: list[str] = []
     if compito.esegue is not None and compito.esegue.strip():
-        return compito.esegue.strip()
+        nomi.append(compito.esegue.strip())
     for etichetta in compito.etichette:
-        if etichetta.lower().startswith("esegue:"):
-            return etichetta.split(":", 1)[1].strip()
-    return None
+        if etichetta.casefold().startswith("esegue:"):
+            val = etichetta.split(":", 1)[1].strip()
+            if val:
+                nomi.append(val)
+    if not nomi:
+        return None, []
+
+    unici_cf: dict[str, str] = {}
+    for n in nomi:
+        cf = n.casefold()
+        if cf not in unici_cf:
+            unici_cf[cf] = n
+
+    if len(unici_cf) > 1:
+        ordinati = sorted(unici_cf.values(), key=str.casefold)
+        return None, ordinati
+
+    return nomi[0], []
 
 
 def _scegli_per_etichetta_esegue(
@@ -221,10 +315,11 @@ def _scegli_per_etichetta_esegue(
     quote: Mapping[str, str | None],
     adesso: datetime,
 ) -> Scelta:
-    trovato = next(
-        (c for c in tutti if c.id.casefold() == nome_esegue.casefold() or c.nome.casefold() == nome_esegue.casefold()),
-        None,
-    )
+    nome_cf = nome_esegue.casefold()
+    trovato = next((c for c in tutti if c.id.casefold() == nome_cf), None)
+    if trovato is None:
+        trovato = next((c for c in tutti if c.nome.casefold() == nome_cf), None)
+
     if trovato is None:
         return Scelta(
             candidato=None,
@@ -237,8 +332,7 @@ def _scegli_per_etichetta_esegue(
             aspetta=False,
             perche=(
                 f"il candidato «{trovato.id}» richiesto da «{nome_esegue}» "
-                f"non può svolgere la funzione «{compito.funzione}»"
-                + (" fuori" if compito.fuori else "")
+                f"non può svolgere la funzione «{compito.funzione}»" + (" fuori" if compito.fuori else "")
             ),
         )
     ha_quota, _ = _ha_quota(trovato, quote, adesso)
@@ -252,6 +346,38 @@ def _scegli_per_etichetta_esegue(
         candidato=None,
         aspetta=True,
         perche=f"aspetta: il candidato «{trovato.id}» richiesto dall'etichetta «{nome_esegue}» ha la quota esaurita",
+    )
+
+
+def _avvisi_quote(
+    configurazione: Configurazione,
+    quote: Mapping[str, str | None],
+    adesso: datetime,
+) -> list[str]:
+    avvisi: list[str] = []
+    for b_id in configurazione.botteghe:
+        valore = quote.get(b_id)
+        if valore is None:
+            valore = quote.get(nome_variabile(b_id))
+        _, avviso = disponibile(valore, adesso)
+        if avviso is not None and avviso not in avvisi:
+            avvisi.append(avviso)
+    return avvisi
+
+
+def _con_avvisi(
+    scelta: Scelta,
+    configurazione: Configurazione,
+    quote: Mapping[str, str | None],
+    adesso: datetime,
+) -> Scelta:
+    avvisi = _avvisi_quote(configurazione, quote, adesso)
+    if not avvisi:
+        return scelta
+    return Scelta(
+        candidato=scelta.candidato,
+        aspetta=scelta.aspetta,
+        perche=scelta.perche + "".join(f"; avviso: {' '.join(a.split())}" for a in avvisi),  # mai a capo
     )
 
 
@@ -319,9 +445,7 @@ def _scegli_per_costo_atteso(
     costo_txt = _virgola(migliore["costo"], 1)
     num_txt = _virgola(migliore["numeratore"], 1)
     p_txt = _virgola(migliore["p"], 2)
-    perche = (
-        f"costo atteso {costo_txt} per «{scelto.id}» ({num_txt} / {p_txt} su {migliore['totale']} risultati)"
-    )
+    perche = f"costo atteso {costo_txt} per «{scelto.id}» ({num_txt} / {p_txt} su {migliore['totale']} risultati)"
 
     altri = [v for v in valutazioni if v["candidato"].id != scelto.id]
     if altri:

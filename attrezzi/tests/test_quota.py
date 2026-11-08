@@ -72,6 +72,17 @@ def test_disponibile_valore_scritto_male_non_ferma_la_bottega() -> None:
     assert ok is True
     assert avviso is not None
 
+    # Valore che non è una stringa (numero, booleano, lista)
+    ok, avviso = disponibile(123, adesso)  # type: ignore[arg-type]
+    assert ok is True
+    assert avviso is not None
+    assert "non è una stringa" in avviso.lower() or "stringa" in avviso.lower()
+
+    ok, avviso = disponibile(True, adesso)  # type: ignore[arg-type]
+    assert ok is True
+    assert avviso is not None
+
+
 
 @given(
     delta_secondi=st.integers(min_value=-86400, max_value=86400),

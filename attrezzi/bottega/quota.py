@@ -33,6 +33,8 @@ def disponibile(valore: str | None, adesso: datetime) -> tuple[bool, str | None]
         raise ValueError("adesso deve avere un fuso orario")
     if valore is None:
         return True, None
+    if not isinstance(valore, str):
+        return True, f"valore della quota non valido (non è una stringa): «{valore}»"
     testo = valore.strip()
     if not testo:
         return True, None
