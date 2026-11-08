@@ -119,8 +119,8 @@ fatto l'accesso al suo abbonamento.
     non si blocca aspettando se stesso;
   - **le scritture su GitHub** di un giro (campi, commenti, etichette) restano sotto i limiti di GitHub: i giri lunghi
     le raccolgono e le scrivono a fine lavoro.
-- **Chi può comandare:** solo i commenti e le etichette di chi ha il ruolo di proprietario o collaboratore del repo;
-  il resto è testo.
+- **Chi può comandare:** solo i commenti e le etichette dell'utente e di chi decide, cioè senza il segno degli
+  esecutori; il resto è testo.
 - **Un workflow sceglie il candidato** coi criteri della scelta viva; a quota esaurita (riconosciuta dai messaggi
   d'errore della porta) il lavoro prende un'etichetta e il giro dopo riprova o passa al candidato seguente.
 - **Il consulto di un esecutore bloccato:** l'esecutore chiude il turno con un commento di consulto; il workflow
@@ -132,6 +132,23 @@ fatto l'accesso al suo abbonamento.
   riattiva.
 - **Senza runner sempre acceso** (per esempio un PC di lavoro spento la sera) non c'è la notte: l'esecutore fuori
   parte solo quando lo si chiama, sul runner di quella macchina, mentre è accesa.
+
+## La vita di un lavoro
+
+- **Una tappa, un ramo, una PR.** I compiti di un piano che dipendono l'uno dall'altro si fanno in ordine sullo stesso
+  ramo, un commit per compito; il raccoglitore prende il compito seguente di una tappa solo su quel ramo e solo dopo il
+  precedente. Un consigliere rilegge ogni compito appena fatto, nello stesso giro; chi decide rivede la PR intera a
+  fine tappa. I lavori sciolti (un debito, un bug) hanno ognuno il suo ramo e la sua PR.
+- **Il sostituto.** Se il primo candidato a decidere è senza quota, il primo candidato con quota rivede le PR pronte e
+  le segna «pronta per l'unione» o chiede correzioni; non pianifica e non unisce. L'unione resta a chi decide, che al
+  ritorno parte dalla revisione del sostituto.
+- **Salvataggio e ripresa.** Un giro che deve fermarsi (quota finita, runner che si riavvia, tempo scaduto) committa e
+  spinge lo stato sul suo ramo e scrive sul lavoro dov'era arrivato e l'identificativo della conversazione. Il giro
+  dopo riprende la conversazione se la porta la ha ancora, altrimenti riparte dal ramo e dalle note.
+- **Il controllo all'apertura.** Prima di toccare un lavoro, il giro controlla che la porta risponda, che l'accesso
+  sia valido e quale versione della porta c'è (le porte si aggiornano da sole). Se qualcosa non va non tocca nessun
+  lavoro e lascia un solo avviso per chi decide, che resta finché il guasto dura; i lavori non diventano «bloccati»
+  per un guasto della porta.
 
 ## L'esecutore fuori: libertà e confini
 
@@ -148,8 +165,14 @@ fatto l'accesso al suo abbonamento.
 - **Tre guardie locali:** un `gh` che rifiuta di unire e chiudere PR e issue; un controllo di git che rifiuta il push
   sui rami protetti; un controllo di git che rifiuta il push di un ramo che tocca `.github/`. Sono freni contro gli
   errori, non confini.
-- **Il confine vero sul rilascio:** l'esecutore committa con un'identità git sua; un progetto che rilascia da solo dal
-  ramo principale non rilascia una punta che non è un'unione di chi decide o dell'utente, e avvisa.
+- **Un solo account GitHub**, quello dell'utente, per tutti: niente account in più da creare. La guardia `gh` aggiunge
+  da sola un segno nascosto a ogni commento e PR dell'esecutore; i workflow ignorano i commenti col segno (niente
+  anelli) e prendono comandi solo da quelli senza. Le revisioni sono di solo commento (le uniche ammesse sulla propria
+  PR); l'esito («pronta per l'unione», «correzioni», «rifiutata») è un campo del Project.
+- **Il sigillo è una firma:** chi decide firma le sue unioni nel ramo principale con una chiave SSH che esiste solo
+  sulla sua macchina; il repo tiene l'elenco delle chiavi ammesse sotto `.github/` (dove l'esecutore non può spingere).
+  Un progetto che rilascia da solo dal ramo principale rilascia solo una punta che è un'unione firmata con una chiave
+  ammessa, altrimenti si ferma e avvisa: un push sbagliato, anche con `--no-verify`, resta rosso.
 
 ## Come impara
 
@@ -182,8 +205,11 @@ fatto l'accesso al suo abbonamento.
   sapere: come l'utente vuole essere chiamato, il progetto, quali abbonamenti si possono usare su quel progetto (un
   progetto di lavoro può avere regole su dove va il codice), se vuole l'esecutore fuori e la notte. Poi scrive nel
   progetto, con una PR: la costituzione, un `AGENTS.md` alla radice che rimanda a lei, la configurazione delle botteghe
-  e dei candidati, i workflow; prepara i campi del Project. Sulla macchina, se richiesto: l'utente dell'esecutore, il
-  runner, le guardie (chiede `sudo` una volta).
+  e dei candidati, i workflow; prepara i campi del Project (se manca il permesso lancia `gh auth refresh -s project`,
+  che apre il browser una volta; se manca il Project, lo crea). Crea la chiave di firma di chi decide e configura git
+  per firmare. Sulla macchina, se richiesto: l'utente dell'esecutore, il runner, le guardie (chiede `sudo` una volta).
+  Se il repo non ammette runner self-hosted (succede nei repo aziendali) o l'utente non li vuole, la bottega lavora
+  solo in sessione e lo dice in una riga.
 - **Il repo è pubblico:** un workflow controlla ogni PR del repo `bottega` cercando segreti, nomi e percorsi personali.
 
 ## Lasciato al costruttore
