@@ -37,8 +37,9 @@ from bottega.configurazione import (
     leggi_configurazione,
 )
 from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
+import bottega.misure as misure
 from bottega.porte import Porta, porta as porta_fabbrica
-from bottega.scelta import Compito, scegli
+from bottega.scelta import Compito, Risultati, scegli
 from bottega.segni import comando, nota, scrivi_nota
 
 CHIAVE_AVVISO_CI = "ci-ramo-principale"
@@ -138,6 +139,8 @@ def _gestisci_evento_commento(
     caso: random.Random,
     porte: Mapping[str, Porta] | None = None,
     prefisso: Sequence[str] = (),
+    risultati: Mapping[tuple[str, str], Risultati] | None = None,
+    costi_propri: Mapping[str, float] | None = None,
 ) -> tuple[bool, list[str]]:
     """Gestisce un eventuale comando da issue_comment nell'evento GITHUB_EVENT_PATH.
 
@@ -249,10 +252,11 @@ def _gestisci_evento_commento(
         scelta_cons = scegli(
             compito=compito_cons,
             configurazione=cfg_runner,
-            risultati={},
+            risultati=risultati if risultati is not None else {},
             quote=variabili,
             adesso=adesso_fuso,
             caso=caso,
+            costi_propri=costi_propri,
         )
 
         if scelta_cons.candidato is None:
@@ -342,6 +346,15 @@ def distribuisci(
         fuso_cfg = ZoneInfo("UTC")
     adesso_fuso = adesso.astimezone(fuso_cfg) if adesso.tzinfo else adesso.replace(tzinfo=fuso_cfg)
 
+    try:
+        lavori_elenco = board.elenco()
+        risultati_storici = misure.risultati(lavori_elenco, configurazione)
+        costi_relativi = misure.costi_propri(lavori_elenco, configurazione)
+    except Exception as exc:
+        print(f"distributore: errore lettura elenco board: {exc}", file=sys.stderr)
+        risultati_storici = {}
+        costi_relativi = None
+
     # RV13: gestione comandi da issue_comment nell'evento GITHUB_EVENT_PATH
     procedi, righe_ev = _gestisci_evento_commento(
         percorso_evento=percorso_evento,
@@ -353,6 +366,8 @@ def distribuisci(
         caso=caso,
         porte=porte,
         prefisso=prefisso,
+        risultati=risultati_storici,
+        costi_propri=costi_relativi,
     )
     righe.extend(righe_ev)
     if not procedi:
@@ -462,10 +477,11 @@ def distribuisci(
         scelta = scegli(
             compito=compito,
             configurazione=configurazione,
-            risultati={},
+            risultati=risultati_storici,
             quote=variabili,
             adesso=adesso_fuso,
             caso=caso,
+            costi_propri=costi_relativi,
         )
 
         if scelta.aspetta:

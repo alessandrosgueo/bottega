@@ -6,7 +6,7 @@ Solo libreria standard.
 """
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import math
 import sys
 
@@ -152,3 +152,45 @@ def costi_propri(lavori: Sequence[Lavoro], configurazione: Configurazione) -> di
         cid: media / media_delle_medie
         for cid, media in medie.items()
     }
+
+
+def token_dei_contatori(porta: str, contatori: Mapping[str, int]) -> int:
+    """Calcola il totale dei token dai contatori dell'uscita della porta (B5-R6)."""
+    if porta == "claude-code":
+        return int(
+            contatori.get("input_tokens", 0)
+            + contatori.get("output_tokens", 0)
+            + contatori.get("cache_creation_input_tokens", 0)
+            + contatori.get("cache_read_input_tokens", 0)
+        )
+    if porta == "antigravity":
+        if "total_tokens" in contatori:
+            return int(contatori["total_tokens"])
+        return int(
+            contatori.get("input_tokens", 0)
+            + contatori.get("output_tokens", 0)
+            + contatori.get("thinking_tokens", 0)
+            + contatori.get("cache_read_tokens", 0)
+        )
+    if porta == "pi":
+        if "totalTokens" in contatori:
+            return int(contatori["totalTokens"])
+        return int(
+            contatori.get("input", 0)
+            + contatori.get("output", 0)
+            + contatori.get("cacheRead", 0)
+            + contatori.get("cacheWrite", 0)
+        )
+    if porta == "copilot-cli":
+        return int(
+            contatori.get("inputTokens", 0)
+            + contatori.get("outputTokens", 0)
+            + contatori.get("cacheReadTokens", 0)
+            + contatori.get("cacheWriteTokens", 0)
+        )
+    if "total_tokens" in contatori:
+        return int(contatori["total_tokens"])
+    if "totalTokens" in contatori:
+        return int(contatori["totalTokens"])
+    return int(sum(v for v in contatori.values() if isinstance(v, (int, float))))
+

@@ -1173,3 +1173,99 @@ def test_c6_riprova_azzera_anche_le_quote(tmp_path: Path) -> None:
     lav = board.lavoro(1)
     assert lav is not None and lav.stato == "pronto"
     assert lav.nota == "ramo=bottega/1-x"
+
+
+def test_b5_scelta_usa_i_risultati_del_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    lavori_storici = [
+        Lavoro(
+            numero=10,
+            titolo="Compito vecchio 1",
+            stato="consegnato",
+            esecutore="Claude",
+            campi={"Esito del compito": "unito com'era", "Esecutore": "Claude", "Token esecutore": "1000"},
+            etichette=["bug"],
+        ),
+        Lavoro(
+            numero=11,
+            titolo="Compito vecchio 2",
+            stato="consegnato",
+            esecutore="Pi",
+            campi={"Esito del compito": "corretto", "Esecutore": "Pi", "Token esecutore": "2000"},
+            etichette=["bug"],
+        ),
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori", "bug"]),
+    ]
+    board = BoardFinta(lavori_storici)
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    chiamate_scegli: list[dict] = []
+    import bottega.distributore as dist
+    original_scegli = dist.scegli
+
+    def scegli_spia(**kwargs):
+        chiamate_scegli.append(kwargs)
+        return original_scegli(**kwargs)
+
+    monkeypatch.setattr(dist, "scegli", scegli_spia)
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+    )
+
+    assert len(chiamate_scegli) > 0
+    prima = chiamate_scegli[0]
+    assert prima["risultati"] != {}
+    assert ("c-claude", "*") in prima["risultati"]
+    assert prima["costi_propri"] is not None
+
+
+def test_b5_elenco_che_cade_non_ferma(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"])])
+    forgia = ForgiaFinta([Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice")])
+
+    def elenco_rotto():
+        raise RuntimeError("board non raggiungibile")
+
+    monkeypatch.setattr(board, "elenco", elenco_rotto)
+
+    chiamate_scegli: list[dict] = []
+    import bottega.distributore as dist
+    original_scegli = dist.scegli
+
+    def scegli_spia(**kwargs):
+        chiamate_scegli.append(kwargs)
+        return original_scegli(**kwargs)
+
+    monkeypatch.setattr(dist, "scegli", scegli_spia)
+
+    righe = distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+    )
+
+    assert len(chiamate_scegli) > 0
+    prima = chiamate_scegli[0]
+    assert prima["risultati"] == {}
+    assert prima["costi_propri"] is None
+
