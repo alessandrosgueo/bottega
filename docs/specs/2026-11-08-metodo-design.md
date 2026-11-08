@@ -68,13 +68,29 @@ Per ogni funzione la configurazione elenca i **candidati** (un modello di una bo
 candidato è un titolo più il nome del modello, scelto dall'utente all'installazione («Maestro Opus», «Lavorante
 Gemini 3.8»): il metodo non ne conosce nessuno.
 
-**La scelta viva.** Per ogni compito chi decide sceglie chi esegue fra i candidati guardando:
-- la quota del momento: un candidato senza quota passa il turno al successivo;
-- i risultati misurati dello stesso genere di compito (esito delle revisioni, giri, costo per chi decide);
-- il genere di compito, cioè se serve subito in sessione o può aspettare una PR.
+**La scelta viva.** Lo schema da cui il metodo nasce resta: un decisore forte che pensa e un esecutore economico che
+fa, per il massimo risultato al minimo costo. La scelta viva lo serve, non lo sostituisce.
 
-Di serie va **fuori**, come PR, tutto ciò che può aspettare una revisione; **in sessione** resta ciò che serve subito.
-Lo stesso vale per i consulti: il primo consigliere con quota risponde.
+- **Il criterio:** a ogni compito va il candidato col **costo atteso più basso per un risultato buono**: la quota
+  scarsa che spende (quella di chi decide per brief e revisione, più quella del candidato se è scarsa), divisa per la
+  probabilità che la sua PR sia unita com'è. Chi fa rifare metà del lavoro costa più di chi consuma un po' di quota e
+  consegna giusto. La probabilità si impara dai risultati veri (unito com'era, corretto, rifiutato), con un po' di
+  esplorazione per non smettere di imparare; non ci sono soglie fisse.
+- **Il genere di compito** sono le etichette che il progetto ha già: la bottega non impone un suo elenco. I risultati
+  si contano per candidato ed etichetta.
+- **Il punto di partenza**, prima dei numeri: va **fuori** al primo candidato con quota abbondante tutto ciò che può
+  aspettare una PR; **in sessione** resta ciò che serve subito. I numeri correggono da lì. I sotto-agenti in sessione
+  consumano l'abbonamento di chi decide (meno del suo modello, ma lo consumano): è il motivo del «fuori» di serie.
+- **La quota del momento:** nessuna porta la dice prima che finisca. Quando finisce, il workflow scrive lo stato della
+  bottega («esaurita fino a…», dall'ora del rinnovo se il messaggio la dà) in una variabile di GitHub Actions del repo;
+  i giri saltano quella bottega finché lo stato non scade.
+- **Chi sceglie:** per i compiti fuori il workflow, con un calcolo semplice e senza modello; per quelli in sessione chi
+  decide, con gli stessi numeri. Ogni scelta lascia sul lavoro una riga col perché.
+- **A metà tappa** l'esecutore senza quota la tiene per un giro; se manca ancora, passa al candidato seguente, che
+  riparte dal ramo e dalle note.
+- **A mano:** un'etichetta «esegue: <nome>» sul lavoro vince sulla scelta; il risultato conta comunque.
+- **I consulti** seguono la stessa regola fra i consiglieri: risponde il candidato col costo atteso più basso che ha
+  quota.
 
 **Due modi di eseguire:**
 - **in sessione:** un sotto-agente nel worktree di chi decide; il consulto è immediato; il commit è di chi decide;
