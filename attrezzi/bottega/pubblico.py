@@ -34,7 +34,7 @@ class ErroreControllo(RuntimeError):
 _PERCORSO_DI_CASA = re.compile(r"/home/([\w.-]+)|[A-Za-z]:\\+Users\\+([\w.-]+)", re.IGNORECASE)
 _SEGNAPOSTO_NOME = {"utente", "nome"}
 
-# Email locale@example.com. Esenti i domini di esempio e i locali che cominciano con noreply.
+# Email: parte locale, chiocciola, dominio. Esenti i domini di esempio e i locali che cominciano con noreply.
 _EMAIL = re.compile(r"([A-Za-z0-9._%+-]+)@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![A-Za-z0-9-])")
 _DOMINI_DI_ESEMPIO = {"example.com", "example.org"}
 

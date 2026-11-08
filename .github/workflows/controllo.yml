@@ -1,0 +1,72 @@
+# Controllo del repo bottega: prove, controllo dei dati personali e scansione dei segreti.
+# Gira a ogni push e a ogni PR sui runner di GitHub (ubuntu-24.04). Niente segreti, niente runner self-hosted.
+# uv e gitleaks sono fissati a una versione: l'archivio scaricato si controlla con lo SHA256 scritto qui, preso dal
+# file di checksum ufficiale della stessa release. Chi cambia versione cambia anche lo SHA256.
+name: controllo
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  controllo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Python è quello di sistema del runner (3.12). uv non scarica nessun Python da fuori.
+      UV_PYTHON: python3
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Scarica il repo con tutta la storia
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Controlla che Python sia il 3.12
+        run: |
+          python3 --version
+          python3 -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)"
+
+      - name: Installa uv 0.12.13
+        run: |
+          cartella="$RUNNER_TEMP/uv"
+          mkdir "$cartella"
+          cd "$cartella"
+          curl -fsSL -o uv.tar.gz https://github.com/astral-sh/uv/releases/download/0.12.13/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "745765a3b6e360ad76743599ae5c42e9278c7edf8bbff9fc76d05bf2623a04dd  uv.tar.gz" | sha256sum -c -
+          tar -xzf uv.tar.gz --strip-components=1
+          echo "$cartella" >> "$GITHUB_PATH"
+          "$cartella/uv" --version
+
+      - name: Dipendenze dal uv.lock (se non è allineato, la CI cade)
+        run: uv sync --locked
+
+      - name: Prove
+        run: uv run pytest -q
+
+      - name: Controllo dei dati personali
+        env:
+          PAROLE_VIETATE: ${{ vars.PAROLE_VIETATE }}
+        run: uv run python -m bottega controlla-pubblico
+
+      - name: Installa gitleaks 8.30.1
+        run: |
+          cartella="$RUNNER_TEMP/gitleaks"
+          mkdir "$cartella"
+          cd "$cartella"
+          curl -fsSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          echo "$cartella" >> "$GITHUB_PATH"
+          "$cartella/gitleaks" version
+
+      - name: "Scansione dei segreti su tutta la storia (--redact: i log di un repo pubblico sono pubblici)"
+        run: gitleaks git --redact --no-banner .
