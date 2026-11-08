@@ -1,6 +1,7 @@
 """Prove per bottega.firma (Compito B4.1)."""
 
 import argparse
+import os
 from pathlib import Path
 import subprocess
 
@@ -84,6 +85,43 @@ def _committa_firmato(
     subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
     res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
     return res.stdout.strip()
+
+
+def _committa_firma_finta(
+    repo: Path,
+    messaggio: str = "commit con firma finta",
+    tipo_firma: str = "SSH",
+    nome_file: str = "file_finto.txt",
+    contenuto: str = "finto\n",
+) -> str:
+    """Crea un commit con intestazione gpgsig finta inserita a basso livello."""
+    file_path = repo / nome_file
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(contenuto, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", messaggio], cwd=repo, check=True, capture_output=True)
+    sha_orig = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    cat = subprocess.run(["git", "cat-file", "commit", sha_orig], cwd=repo, check=True, capture_output=True, text=True).stdout
+    parti = cat.split("\n\n", 1)
+    sig_block = (
+        f"gpgsig -----BEGIN {tipo_firma} SIGNATURE-----\n"
+        " finta\n"
+        f" -----END {tipo_firma} SIGNATURE-----"
+    )
+    nuovo_commit = parti[0] + "\n" + sig_block + "\n\n" + parti[1]
+    res_h = subprocess.run(
+        ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+        input=nuovo_commit,
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    nuovo_sha = res_h.stdout.strip()
+    subprocess.run(["git", "update-ref", "HEAD", nuovo_sha], cwd=repo, check=True, capture_output=True)
+    return nuovo_sha
 
 
 def test_verifica_buona(tmp_path: Path) -> None:
@@ -499,3 +537,286 @@ def test_verifica_parola_gpgsig_nel_messaggio(tmp_path: Path) -> None:
     esito = verifica(clone=repo, punta="HEAD", primo=True)
     assert esito.buona is False
     assert esito.motivo == "punta non firmata"
+
+
+def test_c1_configurazione_del_clone_avvelenata(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path, email="a@x")
+    _, pub = _crea_chiave(tmp_path, "k")
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'a@x namespaces="git" {pub}\n', encoding="utf-8")
+
+    script = tmp_path / "ssh_finto.sh"
+    script.write_text(
+        '#!/bin/sh\n'
+        'case "$*" in\n'
+        '  *find-principals*) echo "a@x" ;;\n'
+        '  *) echo \'Good "git" signature for a@x with ED25519 key SHA256:finta\' ;;\n'
+        'esac\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    _committa_firma_finta(repo, "commit con firma finta", tipo_firma="SSH")
+    subprocess.run(["git", "config", "--local", "gpg.ssh.program", str(script)], cwd=repo, check=True)
+
+    esito = verifica(clone=repo, primo=True)
+    assert esito.buona is False
+
+
+def test_c1_path_avvelenato(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _crea_repo(tmp_path, email="a@x")
+    _, pub = _crea_chiave(tmp_path, "k")
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'a@x namespaces="git" {pub}\n', encoding="utf-8")
+
+    bin_finto = tmp_path / "bin_finto"
+    bin_finto.mkdir(parents=True, exist_ok=True)
+    script = bin_finto / "ssh-keygen"
+    script.write_text(
+        '#!/bin/sh\n'
+        'case "$*" in\n'
+        '  *find-principals*) echo "a@x" ;;\n'
+        '  *) echo \'Good "git" signature for a@x with ED25519 key SHA256:finta\' ;;\n'
+        'esac\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    monkeypatch.setenv("PATH", f"{bin_finto}:{os.environ.get('PATH', '')}")
+
+    _committa_firma_finta(repo, "commit con firma finta", tipo_firma="SSH")
+
+    esito = verifica(clone=repo, primo=True)
+    assert esito.buona is False
+
+
+def test_c1_gpg_program_finto(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path, email="a@x")
+    _, pub = _crea_chiave(tmp_path, "k")
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'a@x namespaces="git" {pub}\n', encoding="utf-8")
+
+    script = tmp_path / "gpg_finto.sh"
+    script.write_text(
+        '#!/bin/sh\n'
+        'echo \'Good "git" signature for a@x\'\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    _committa_firma_finta(repo, "commit con firma pgp finta", tipo_firma="PGP")
+    subprocess.run(["git", "config", "--local", "gpg.program", str(script)], cwd=repo, check=True)
+
+    esito = verifica(clone=repo, primo=True)
+    assert esito.buona is False
+    assert esito.motivo == "firma non SSH"
+
+
+def test_c1_rilascio_tag_rifiutato(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path)
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    email = "tester@example.com"
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'{email} namespaces="git" {pub}\n', encoding="utf-8")
+
+    _committa_firmato(repo, chiave, "rilascio v1.0", email=email)
+    subprocess.run(["git", "tag", "v1.0"], cwd=repo, check=True, capture_output=True)
+
+    esito = verifica(clone=repo, punta="HEAD", rilascio="v1.0")
+    assert esito.buona is False
+    assert esito.motivo == "il rilascio va dato come SHA intero, mai un tag o un ramo"
+
+
+def test_c1_stato_primo_e_poi(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path)
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    email = "tester@example.com"
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'{email} namespaces="git" {pub}\n', encoding="utf-8")
+    sha1 = _committa_firmato(repo, chiave, "primo commit", email=email)
+
+    stato_file = tmp_path / "stato" / "rilascio"
+    parser = argparse.ArgumentParser()
+    argomenti_firma(parser)
+
+    # Senza file e senza --primo -> codice 2
+    args_mancante = parser.parse_args(["verifica", "--cartella", str(repo), "--stato", str(stato_file)])
+    assert comando_firma(args_mancante) == 2
+    assert not stato_file.exists()
+
+    # Con --primo e firma buona -> codice 0 e il file contiene lo SHA intero della punta
+    args_primo = parser.parse_args(["verifica", "--cartella", str(repo), "--stato", str(stato_file), "--primo"])
+    assert comando_firma(args_primo) == 0
+    assert stato_file.is_file()
+    assert stato_file.read_text(encoding="utf-8").strip() == sha1
+
+    # Poi un commit nuovo firmato con la stessa chiave -> --stato dà codice 0 e il file si aggiorna
+    sha2 = _committa_firmato(repo, chiave, "secondo commit", nome_file="f2.txt", email=email)
+    args_secondo = parser.parse_args(["verifica", "--cartella", str(repo), "--stato", str(stato_file)])
+    assert comando_firma(args_secondo) == 0
+    assert stato_file.read_text(encoding="utf-8").strip() == sha2
+
+    # --primo col file presente -> codice 2
+    args_primo_presente = parser.parse_args(
+        ["verifica", "--cartella", str(repo), "--stato", str(stato_file), "--primo"]
+    )
+    assert comando_firma(args_primo_presente) == 2
+    assert stato_file.read_text(encoding="utf-8").strip() == sha2
+
+
+def test_c1_stato_rifiuta_punta_all_indietro(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    repo = _crea_repo(tmp_path)
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    email = "tester@example.com"
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'{email} namespaces="git" {pub}\n', encoding="utf-8")
+    sha1 = _committa_firmato(repo, chiave, "primo commit", email=email)
+
+    stato_file = tmp_path / "stato" / "rilascio"
+    parser = argparse.ArgumentParser()
+    argomenti_firma(parser)
+
+    # Due rilasci verificati con --stato
+    assert comando_firma(
+        parser.parse_args(["verifica", "--cartella", str(repo), "--stato", str(stato_file), "--primo"])
+    ) == 0
+    sha2 = _committa_firmato(repo, chiave, "secondo commit", nome_file="f2.txt", email=email)
+    assert comando_firma(
+        parser.parse_args(["verifica", "--cartella", str(repo), "--stato", str(stato_file)])
+    ) == 0
+    assert stato_file.read_text(encoding="utf-8").strip() == sha2
+
+    # La punta riportata al primo commit
+    subprocess.run(["git", "reset", "--hard", sha1], cwd=repo, check=True, capture_output=True)
+
+    capsys.readouterr()
+    codice = comando_firma(
+        parser.parse_args(["verifica", "--cartella", str(repo), "--stato", str(stato_file)])
+    )
+    assert codice == 1
+    out = capsys.readouterr().out
+    assert "punta non discende dal rilascio" in out
+    assert stato_file.read_text(encoding="utf-8").strip() == sha2
+
+
+def test_c1_messaggio_non_utf8(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path)
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    email = "tester@example.com"
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'{email} namespaces="git" {pub}\n', encoding="utf-8")
+    sha_base = _committa_firmato(repo, chiave, "rilascio base", email=email)
+
+    file_msg = tmp_path / "messaggio.bin"
+    file_msg.write_bytes(b"\xff\xfe")
+    (repo / "nuovo.txt").write_text("nuovo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "i18n.commitEncoding=latin1", "commit", "-F", str(file_msg)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    esito = verifica(clone=repo, punta="HEAD", rilascio=sha_base)
+    assert esito.buona is False
+
+    forgia = ForgiaFinta()
+    parser = argparse.ArgumentParser()
+    argomenti_firma(parser)
+    args = parser.parse_args(["verifica", "--cartella", str(repo), "--rilascio", sha_base, "--avvisa"])
+    codice = comando_firma(args, forgia=forgia)
+    assert codice == 1
+    assert any(
+        ch == "avviso" and k == "firma" and "Avviso della bottega" in tit and mot is not None
+        for ch, k, tit, mot in forgia.registro
+    )
+
+
+def test_c1_prepara_non_imposta_commit_gpgsign(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path)
+    chiave = tmp_path / "chiave"
+    prepara(cartella=repo, chiave=chiave, globale=False)
+    res = subprocess.run(["git", "-C", str(repo), "config", "--local", "commit.gpgsign"], capture_output=True)
+    assert res.returncode == 1
+
+
+def test_c1_prepara_pub_senza_privata(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path, email="alice@example.com")
+    chiave, pub_testo = _crea_chiave(tmp_path, "k")
+    chiave.unlink()
+    assert not chiave.exists()
+    pub_file = Path(str(chiave) + ".pub")
+    assert pub_file.is_file()
+
+    prepara(cartella=repo, chiave=chiave, globale=False)
+    assert not chiave.exists()
+    assert pub_file.read_text(encoding="utf-8").strip() == pub_testo
+
+    firme_file = repo / ".github" / "bottega" / "firme-ammesse"
+    assert firme_file.is_file()
+    testo = firme_file.read_text(encoding="utf-8")
+    parti = pub_testo.split()
+    assert f"{parti[0]} {parti[1]}" in testo
+    assert "alice@example.com" in testo
+
+
+def test_c1_prepara_da_una_sottocartella(tmp_path: Path) -> None:
+    repo = _crea_repo(tmp_path)
+    sotto = repo / "a" / "b"
+    sotto.mkdir(parents=True)
+    chiave = tmp_path / "chiave"
+    prepara(cartella=sotto, chiave=chiave, globale=False)
+    assert (repo / ".github" / "bottega" / "firme-ammesse").is_file()
+    assert not (sotto / ".github").exists()
+
+
+def test_c1_repo_sha256(tmp_path: Path) -> None:
+    repo = tmp_path / "repo_sha256"
+    repo.mkdir()
+    res_init = subprocess.run(
+        ["git", "init", "--object-format=sha256", "-b", "main"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if res_init.returncode != 0:
+        pytest.skip("git non supporta --object-format=sha256")
+
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "tester@example.com"], cwd=repo, check=True, capture_output=True)
+
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    email = "tester@example.com"
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'{email} namespaces="git" {pub}\n', encoding="utf-8")
+
+    _committa_firmato(repo, chiave, "commit firmato sha256", email=email)
+    esito = verifica(clone=repo, punta="HEAD", primo=True)
+    assert esito.buona is True
+
+
+def test_c1_lingua_italiana(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANG", "it_IT.UTF-8")
+    monkeypatch.setenv("LC_ALL", "it_IT.UTF-8")
+    repo = _crea_repo(tmp_path)
+    chiave, pub = _crea_chiave(tmp_path, "k")
+    email = "tester@example.com"
+    firme = repo / ".github" / "bottega" / "firme-ammesse"
+    firme.parent.mkdir(parents=True, exist_ok=True)
+    firme.write_text(f'{email} namespaces="git" {pub}\n', encoding="utf-8")
+
+    _committa_firmato(repo, chiave, "commit firmato", email=email)
+    esito = verifica(clone=repo, punta="HEAD", primo=True)
+    assert esito.buona is True
