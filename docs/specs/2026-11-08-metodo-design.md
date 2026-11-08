@@ -159,16 +159,22 @@ fatto l'accesso al suo abbonamento.
   irreversibili o verso l'esterno, più ciò che la costituzione del progetto aggiunge.
 - **Tiene vive le sue PR:** risolve i conflitti col ramo principale e corregge ciò che chi decide chiede nei commenti.
 - **I sotto-agenti** solo col suo modello, mai con quello di un consigliere, la cui quota è di solito scarsa.
-- **Dove gira:** un utente Unix suo, con la sua cartella chiusa, il runner, la sua porta col suo accesso e un `gh`
-  coll'account dell'utente; non vede segreti del progetto, chiavi, archivi di password, memorie di altre CLI. La rete
-  la decide la costituzione del progetto (di serie libera).
-- **Tre guardie locali:** un `gh` che rifiuta di unire e chiudere PR e issue; un controllo di git che rifiuta il push
-  sui rami protetti; un controllo di git che rifiuta il push di un ramo che tocca `.github/`. Sono freni contro gli
-  errori, non confini.
-- **Un solo account GitHub**, quello dell'utente, per tutti: niente account in più da creare. La guardia `gh` aggiunge
-  da sola un segno nascosto a ogni commento e PR dell'esecutore; i workflow ignorano i commenti col segno (niente
-  anelli) e prendono comandi solo da quelli senza. Le revisioni sono di solo commento (le uniche ammesse sulla propria
-  PR); l'esito («pronta per l'unione», «correzioni», «rifiutata») è un campo del Project.
+- **Dove gira:** un utente Unix suo, con la sua cartella chiusa, il runner e la sua porta col suo accesso; non vede
+  segreti del progetto, chiavi, archivi di password, memorie di altre CLI. La rete la decide la costituzione del
+  progetto (di serie libera).
+- **Le chiavi le tiene il workflow, non il modello.** Ogni giro ha tre passi: prima il workflow, col token di GitHub,
+  prepara il fascicolo del lavoro (issue, piano, commenti, stato della PR) e il ramo; poi il modello lavora **senza
+  nessuna chiave di GitHub** (il repo, la sua porta, le prove), committa in locale e scrive su file il testo della PR,
+  dei commenti e delle consegne; infine il workflow controlla e consegna. I controlli sono quelli che prima erano
+  guardie, ma inaggirabili perché il modello non ha con cui spingere: ramo dell'esecutore, mai i rami protetti, niente
+  file sotto `.github/`; poi spinta, PR in bozza, commenti, campi del Project. Una pagina malevola letta durante una
+  ricerca non arriva a nessun repo.
+- **Si chiama da GitHub**, di giorno come di notte: un'etichetta o un'assegnazione sul lavoro. Una sessione aperta a
+  mano con la porta dell'esecutore serve per esplorare, non per consegnare.
+- **Un solo account GitHub**, quello dell'utente, per tutti: niente account in più da creare. Il workflow mette un
+  segno nascosto su ogni commento e PR che scrive per un esecutore o un consigliere; i workflow ignorano i commenti col
+  segno (niente anelli) e prendono comandi solo da quelli senza. Le revisioni sono di solo commento (le uniche ammesse
+  sulla propria PR); l'esito («pronta per l'unione», «correzioni», «rifiutata») è un campo del Project.
 - **Il sigillo è una firma:** chi decide firma le sue unioni nel ramo principale con una chiave SSH che esiste solo
   sulla sua macchina; il repo tiene l'elenco delle chiavi ammesse sotto `.github/` (dove l'esecutore non può spingere).
   Un progetto che rilascia da solo dal ramo principale rilascia solo una punta che è un'unione firmata con una chiave
@@ -207,7 +213,7 @@ fatto l'accesso al suo abbonamento.
   progetto, con una PR: la costituzione, un `AGENTS.md` alla radice che rimanda a lei, la configurazione delle botteghe
   e dei candidati, i workflow; prepara i campi del Project (se manca il permesso lancia `gh auth refresh -s project`,
   che apre il browser una volta; se manca il Project, lo crea). Crea la chiave di firma di chi decide e configura git
-  per firmare. Sulla macchina, se richiesto: l'utente dell'esecutore, il runner, le guardie (chiede `sudo` una volta).
+  per firmare. Sulla macchina, se richiesto: l'utente dell'esecutore e il runner (chiede `sudo` una volta).
   Se il repo non ammette runner self-hosted (succede nei repo aziendali) o l'utente non li vuole, la bottega lavora
   solo in sessione e lo dice in una riga.
 - **Il repo è pubblico:** un workflow controlla ogni PR del repo `bottega` cercando segreti, nomi e percorsi personali.
