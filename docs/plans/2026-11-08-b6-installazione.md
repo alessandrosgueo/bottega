@@ -75,6 +75,11 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
   fisso già mentre preparava i passi, e un altro utente poteva cambiare il sudoers prima dell'installazione). Il
   `.env` è di `root:bottega`, `0640`: il runner lo legge, nessuno dei due utenti lo cambia.
 
+- **B6-R12. Un utente dell'esecutore per runner** (cioè per progetto): `kill -KILL -1` come quell'utente uccide tutti
+  i suoi processi, e due giri dello stesso utente potrebbero comunque toccarsi i file a vicenda. Il primo progetto su
+  una macchina usa `bottega-esecutore`; un secondo progetto riceve un utente suo (`bottega-esecutore-<repo>`), col
+  suo `sudoers` e il suo `.env`. Il runner resta uno per progetto (B6-R3).
+
 ## Review Focus
 
 1. **`sudoers` sbagliato** che chiude fuori chi installa: si controlla con `visudo -c -f` su un temporaneo, mai
