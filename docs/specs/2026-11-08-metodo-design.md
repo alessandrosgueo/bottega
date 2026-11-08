@@ -86,6 +86,7 @@ Lo stesso vale per i consulti: il primo consigliere con quota risponde.
 | Cosa | Dove vive |
 |---|---|
 | il lavoro da fare | issue del progetto, nel suo Project |
+| il brief di un compito, in sessione o fuori | il corpo della sua issue |
 | chi lo esegue e il suo stato | campi del Project |
 | la consegna | una PR in bozza con la riga `Lavoro: #N` |
 | un consulto e la sua risposta | commenti sulla PR o sull'issue |
@@ -150,6 +151,12 @@ fatto l'accesso al suo abbonamento.
   lavoro e lascia un solo avviso per chi decide, che resta finché il guasto dura; i lavori non diventano «bloccati»
   per un guasto della porta.
 
+- **Il fascicolo** che il workflow prepara contiene sempre, oltre al lavoro, la costituzione del progetto e il quaderno
+  del modello dell'esecutore: le lezioni arrivano da sole.
+- **Una PR rifiutata** la chiude chi decide, col motivo scritto; la lezione va nel quaderno; il lavoro torna da rifare
+  o si chiude.
+- **Il resoconto** per chi decide è una vista del Project, «toccati nelle ultime 24 ore», non un testo scritto apposta.
+
 ## L'esecutore fuori: libertà e confini
 
 - **Fiducia larga da subito**, anche sul codice delicato quando il piano dà firme e valori.
@@ -213,7 +220,8 @@ fatto l'accesso al suo abbonamento.
   progetto, con una PR: la costituzione, un `AGENTS.md` alla radice che rimanda a lei, la configurazione delle botteghe
   e dei candidati, i workflow; prepara i campi del Project (se manca il permesso lancia `gh auth refresh -s project`,
   che apre il browser una volta; se manca il Project, lo crea). Crea la chiave di firma di chi decide e configura git
-  per firmare. Sulla macchina, se richiesto: l'utente dell'esecutore e il runner (chiede `sudo` una volta).
+  per firmare. Mette fra i segreti del repo il token dell'accesso che `gh` ha già (`gh secret set`), senza far creare
+  token a mano. Sulla macchina, se richiesto: l'utente dell'esecutore e il runner (chiede `sudo` una volta).
   Se il repo non ammette runner self-hosted (succede nei repo aziendali) o l'utente non li vuole, la bottega lavora
   solo in sessione e lo dice in una riga.
 - **Il repo è pubblico:** un workflow controlla ogni PR del repo `bottega` cercando segreti, nomi e percorsi personali.
