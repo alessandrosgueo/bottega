@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 import os
+import signal
 import subprocess
 
 from bottega import configurazione
@@ -42,7 +43,7 @@ class Porta(Protocol):
     nome: str
     eseguibile: str
 
-    def controlla(self) -> Controllo:
+    def controlla(self, prefisso: Sequence[str] = ()) -> Controllo:
         """Verifica la disponibilità e la versione dell'eseguibile senza mai sollevare eccezioni."""
         ...
 
@@ -90,19 +91,28 @@ def costruisci_comando(prefisso: Sequence[str], base_cmd: Sequence[str]) -> list
     return list(prefisso) + list(base_cmd)
 
 
-def controlla_eseguibile(eseguibile: str) -> Controllo:
-    """Controlla la presenza e la versione dell'eseguibile invocando `--version`."""
+def controlla_eseguibile(
+    eseguibile: str,
+    prefisso: Sequence[str] = (),
+    tempo: int | float = 30,
+) -> Controllo:
+    """Controlla la presenza e la versione dell'eseguibile invocando `--version` con ambiente ripulito."""
+    completo = costruisci_comando(prefisso, [eseguibile, "--version"])
+    env = ambiente_ripulito()
     try:
         proc = subprocess.run(
-            [eseguibile, "--version"],
+            completo,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=tempo,
+            env=env,
         )
     except FileNotFoundError:
-        return Controllo(ok=False, versione=None, motivo=f"eseguibile non trovato: {eseguibile}")
+        nome_cmd = completo[0] if completo else eseguibile
+        return Controllo(ok=False, versione=None, motivo=f"eseguibile non trovato: {nome_cmd}")
     except PermissionError:
-        return Controllo(ok=False, versione=None, motivo=f"permesso negato: {eseguibile}")
+        nome_cmd = completo[0] if completo else eseguibile
+        return Controllo(ok=False, versione=None, motivo=f"permesso negato: {nome_cmd}")
     except subprocess.TimeoutExpired:
         return Controllo(ok=False, versione=None, motivo="tempo scaduto durante il controllo di versione")
     except OSError as e:
@@ -120,32 +130,53 @@ def esegui_porta(
     tempo: int | float,
     prefisso: Sequence[str] = (),
 ) -> tuple[int | None, str, str, str | None]:
-    """Esegue il comando della porta nella cartella con ambiente ripulito e tetto di tempo.
+    """Esegue il comando della porta nella cartella con ambiente ripulito, gruppo di processi e tetto di tempo.
 
     Restituisce (codice_uscita, stdout, stderr, errore_eccezione).
     """
     completo = costruisci_comando(prefisso, cmd)
     env = ambiente_ripulito()
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             completo,
             cwd=str(cartella),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=tempo,
             env=env,
+            start_new_session=True,
         )
-        return proc.returncode, proc.stdout, proc.stderr, None
     except FileNotFoundError:
         nome_cmd = completo[0] if completo else ""
         return None, "", "", f"eseguibile non trovato: {nome_cmd}"
     except PermissionError:
         nome_cmd = completo[0] if completo else ""
         return None, "", "", f"permesso negato: {nome_cmd}"
+    except OSError as e:
+        return None, "", "", f"errore di sistema: {e}"
+
+    try:
+        stdout, stderr = proc.communicate(timeout=tempo)
+        return proc.returncode, stdout, stderr, None
     except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        proc.communicate()
         return None, "", "", f"tempo scaduto dopo {tempo} secondi"
     except OSError as e:
         return None, "", "", f"errore di sistema: {e}"
+
+
+def _abilita_prefisso_controlla(cls: type) -> None:
+    """Estende la classe porta per supportare `prefisso` in `controlla()`."""
+    if not getattr(cls, "_supporta_prefisso", False):
+        def controlla(self, prefisso: Sequence[str] = ()) -> Controllo:
+            return controlla_eseguibile(self.eseguibile, prefisso=prefisso)
+
+        cls.controlla = controlla  # type: ignore[assignment]
+        cls._supporta_prefisso = True  # type: ignore[attr-defined]
 
 
 def porta(nome: str, eseguibile: str | None = None) -> Porta:
@@ -155,17 +186,21 @@ def porta(nome: str, eseguibile: str | None = None) -> Porta:
     if nome == "claude-code":
         from bottega.porte.claude_code import ClaudeCode
 
+        _abilita_prefisso_controlla(ClaudeCode)
         return ClaudeCode(eseguibile=eseguibile or "claude")
     if nome == "antigravity":
         from bottega.porte.antigravity import Antigravity
 
+        _abilita_prefisso_controlla(Antigravity)
         return Antigravity(eseguibile=eseguibile or "agy")
     if nome == "pi":
         from bottega.porte.pi import Pi
 
+        _abilita_prefisso_controlla(Pi)
         return Pi(eseguibile=eseguibile or "pi")
     if nome == "copilot-cli":
         from bottega.porte.copilot_cli import CopilotCli
 
+        _abilita_prefisso_controlla(CopilotCli)
         return CopilotCli(eseguibile=eseguibile or "copilot")
     raise ValueError(f"porta sconosciuta: {nome}")

@@ -106,6 +106,20 @@ def test_fatto_quando_con_quattro_apici():
     assert fatto_quando(corpo) == "echo test"
 
 
+def test_fatto_quando_con_commento_cancelletto_nel_blocco():
+    corpo = (
+        "## Obiettivo\n\nFai il compito.\n\n"
+        "## Fatto quando\n\n"
+        "```bash\n"
+        "# Esegui le prove\n"
+        "uv run pytest -q\n"
+        "```\n\n"
+        "## Rapporto finale\n"
+    )
+    assert fatto_quando(corpo) == "# Esegui le prove\nuv run pytest -q"
+
+
+
 # Prove per ramo(numero, titolo)
 
 

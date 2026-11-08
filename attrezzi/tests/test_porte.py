@@ -102,6 +102,57 @@ sys.exit(1)
     assert c.motivo is None
 
 
+def test_controlla_eseguibile_ambiente_ripulito_senza_gh_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Attacco 11: `controlla()` con un falso eseguibile che scrive su file il suo ambiente (non deve contenere GH_TOKEN)."""
+    env_dump = tmp_path / "ambiente.json"
+    script = _crea_script_finto(
+        tmp_path,
+        "falso_dump_env.py",
+        f"""
+import json, os, sys
+with open({repr(str(env_dump))}, "w") as f:
+    json.dump(dict(os.environ), f)
+if "--version" in sys.argv:
+    print("1.0.0")
+    sys.exit(0)
+sys.exit(1)
+""",
+    )
+    monkeypatch.setenv("GH_TOKEN", "segreto_gh_12345")
+    monkeypatch.setenv("BOTTEGA_TOKEN", "segreto_bottega_abcde")
+    p = porta("claude-code", eseguibile=str(script))
+    c = p.controlla()
+    assert c.ok is True
+    import json
+    dumped = json.loads(env_dump.read_text(encoding="utf-8"))
+    assert "GH_TOKEN" not in dumped
+    assert "BOTTEGA_TOKEN" not in dumped
+
+
+def test_controlla_eseguibile_con_prefisso(tmp_path: Path) -> None:
+    """RV9: `controlla()` gira col prefisso."""
+    out_file = tmp_path / "prefisso_ok.txt"
+    script = _crea_script_finto(
+        tmp_path,
+        "falso_prefisso.py",
+        f"""
+import sys
+if "--version" in sys.argv:
+    print("2.0.0")
+    sys.exit(0)
+sys.exit(1)
+""",
+    )
+    prefisso = ["sh", "-c", f"touch {out_file} && exec \"$@\"", "--"]
+    p = porta("antigravity", eseguibile=str(script))
+    c = p.controlla(prefisso=prefisso)
+    assert c.ok is True
+    assert c.versione == "2.0.0"
+    assert out_file.exists()
+
+
+
+
 def test_controlla_eseguibile_errore(tmp_path: Path) -> None:
     """`controlla()` con uscita diversa da 0 restituisce ok=False col messaggio."""
     script = _crea_script_finto(

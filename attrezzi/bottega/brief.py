@@ -4,17 +4,15 @@ import re
 import unicodedata
 
 _TITOLO_FATTO_QUANDO = re.compile(r"^##\s+Fatto quando(?:\s*:)?\s*$", re.IGNORECASE | re.MULTILINE)
-_PROSSIMO_TITOLO = re.compile(r"^#{1,2}\s+\S", re.MULTILINE)
-_PRIMO_BLOCCO = re.compile(
-    r"^[ \t]*(`{3,})[^\r\n]*\r?\n(.*?)\r?\n[ \t]*\1[ \t]*$",
-    re.MULTILINE | re.DOTALL,
-)
+_INIZIO_RECINTO = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+_PROSSIMO_TITOLO = re.compile(r"^#{1,2}\s+\S")
 
 
 def fatto_quando(corpo: str) -> str | None:
     """Il comando del primo blocco recintato dopo «## Fatto quando» e prima della sezione seguente.
 
-    Restituisce None se manca il titolo, se manca il blocco o se il blocco è vuoto.
+    Trova prima i recinti di codice, poi i titoli fuori dai recinti. Un '#' di commento nel blocco
+    non lo annulla. Restituisce None se manca il titolo, se manca il blocco o se il blocco è vuoto.
     """
     if not corpo:
         return None
@@ -24,15 +22,26 @@ def fatto_quando(corpo: str) -> str | None:
         return None
 
     testo_dopo = corpo[m.end() :]
-    m_fine = _PROSSIMO_TITOLO.search(testo_dopo)
-    sezione = testo_dopo[: m_fine.start()] if m_fine else testo_dopo
+    righe = testo_dopo.splitlines()
 
-    m_blocco = _PRIMO_BLOCCO.search(sezione)
-    if not m_blocco:
-        return None
+    recinto_aperto: str | None = None
+    contenuto_blocco: list[str] = []
 
-    contenuto = m_blocco.group(2).strip()
-    return contenuto if contenuto else None
+    for riga in righe:
+        if recinto_aperto is None:
+            if _PROSSIMO_TITOLO.match(riga):
+                break
+            m_recinto = _INIZIO_RECINTO.match(riga)
+            if m_recinto:
+                recinto_aperto = m_recinto.group(1)
+                contenuto_blocco = []
+        else:
+            if re.match(r"^[ \t]*" + re.escape(recinto_aperto) + r"[ \t]*$", riga):
+                testo = "\n".join(contenuto_blocco).strip()
+                return testo if testo else None
+            contenuto_blocco.append(riga)
+
+    return None
 
 
 def ramo(numero: int, titolo: str) -> str:

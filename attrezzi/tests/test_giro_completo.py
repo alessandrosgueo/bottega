@@ -243,7 +243,7 @@ def test_giro_completo_ciclo_e_segno(tmp_path: Path) -> None:
     assert forgia.issue(3).stato == "OPEN"
     # Madre torna pronta per il prossimo compito, la tappa continua
     assert board.lavoro(1).stato == "pronto"
-    assert "precedente=2" in board.lavoro(1).nota
+    assert "precedente=esecutore" in board.lavoro(1).nota
 
     ramo_tappa = "bottega/1-tappa-nuova-funzionalita"
     pr_num1 = forgia.pr_del_ramo(ramo_tappa)
@@ -481,11 +481,10 @@ def test_giro_completo_review_focus_3_quota_esaurita_e_ripresa(tmp_path: Path) -
     assert pr_num is not None
     assert "Salvataggio parziale per quota esaurita" in forgia._pr[pr_num]["corpo"]
 
-    # Stato della board torna a pronto con conversazione e attese=1
+    # Stato della board torna a pronto con conversazione (RV8: attese la cresce solo il distributore)
     lav = board.lavoro(30)
     assert lav.stato == "pronto"
     assert f"conversazione={id_conversazione}" in lav.nota
-    assert "attese=1" in lav.nota
 
     # 2. Giro di ripresa: dopo il rinnovo della quota, passa la conversazione memorizzata
     conversazione_ricevuta = False
