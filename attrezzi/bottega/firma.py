@@ -32,115 +32,126 @@ class EsitoFirma:
     sha: str | None = None
 
 
+# Il percorso dei programmi della verifica: fisso, mai quello dell'ambiente (un passo di prima può averlo cambiato).
+PATH_FIDATO = "/usr/local/bin:/usr/bin:/bin"
+
+# Chiavi della configurazione git che la verifica fissa da riga di comando (vincono su quella del clone, che un passo
+# di prima può aver scritto): i programmi di firma, l'elenco, gli hook, fsmonitor.
+_OPZIONI_GIT_FIDATE: tuple[str, ...] = (
+    "-c", "gpg.ssh.program=ssh-keygen",
+    "-c", "gpg.program=false",
+    "-c", "gpg.openpgp.program=false",
+    "-c", "gpg.x509.program=false",
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.fsmonitor=false",
+)
+
+_SHA_INTERO = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _ambiente_fidato() -> dict[str, str]:
+    """Ambiente minimo per git e ssh-keygen: PATH fisso, niente configurazione globale o di sistema, messaggi in C."""
+    env = {
+        "PATH": PATH_FIDATO,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "LC_ALL": "C",
+        "LANG": "C",
+    }
+    if os.environ.get("HOME"):
+        env["HOME"] = os.environ["HOME"]
+    return env
+
+
+def _git(clone: Path, *argomenti: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *_OPZIONI_GIT_FIDATE, "-C", str(clone), *argomenti],
+        capture_output=True,
+        text=True,
+        errors="replace",
+        env=_ambiente_fidato(),
+        stdin=subprocess.DEVNULL,
+        timeout=120,
+    )
+
+
 def verifica(
     clone: Path,
     punta: str = "HEAD",
     rilascio: str | None = None,
     primo: bool = False,
 ) -> EsitoFirma:
-    """Verifica la firma della punta rispetto alle chiavi ammesse nel rilascio indicato (o nella punta con primo).
+    """Verifica la firma della punta rispetto alle chiavi ammesse nel rilascio (o nella punta con primo).
 
-    Non solleva mai eccezioni: qualsiasi errore di git o ssh-keygen restituisce un EsitoFirma con buona=False.
+    Il rilascio è lo SHA intero dell'ultima punta verificata, tenuto fuori dal repo: un tag o un ramo li può spingere
+    chiunque abbia il token. Solo firme SSH. Non solleva mai: ogni errore è un EsitoFirma con buona=False.
     """
     try:
-        # 1. Risolve la punta
-        res_punta = subprocess.run(
-            ["git", "-C", str(clone), "rev-parse", "--verify", f"{punta}^{{commit}}"],
-            capture_output=True,
-            text=True,
-        )
-        if res_punta.returncode != 0:
-            return EsitoFirma(buona=False, motivo=f"riferimento sconosciuto: {punta}")
-        punta_commit = res_punta.stdout.strip()
+        return _verifica(clone, punta, rilascio, primo)
+    except Exception as e:  # noqa: BLE001 - B4-R2.7: nessuna eccezione esce, ogni errore è un rifiuto
+        return EsitoFirma(buona=False, motivo=f"errore: {e}")
 
-        res_sha = subprocess.run(
-            ["git", "-C", str(clone), "rev-parse", "--short", punta_commit],
-            capture_output=True,
-            text=True,
-        )
-        sha_corto = res_sha.stdout.strip() if res_sha.returncode == 0 else punta_commit[:7]
 
-        # 2. Controlla il rilascio o il flag primo
-        if not primo:
-            if not rilascio:
-                return EsitoFirma(buona=False, motivo="serve un rilascio o --primo", sha=sha_corto)
-            res_ril = subprocess.run(
-                ["git", "-C", str(clone), "rev-parse", "--verify", f"{rilascio}^{{commit}}"],
-                capture_output=True,
-                text=True,
+def _verifica(clone: Path, punta: str, rilascio: str | None, primo: bool) -> EsitoFirma:
+    # 1. Risolve la punta
+    res_punta = _git(clone, "rev-parse", "--verify", "--end-of-options", f"{punta}^{{commit}}")
+    if res_punta.returncode != 0:
+        return EsitoFirma(buona=False, motivo=f"riferimento sconosciuto: {punta}")
+    punta_commit = res_punta.stdout.strip()
+    sha_corto = punta_commit[:7]
+
+    # 2. Il rilascio: uno SHA intero (o --primo)
+    if primo:
+        ref_elenco = punta_commit
+    else:
+        if not rilascio:
+            return EsitoFirma(buona=False, motivo="serve un rilascio o --primo", sha=sha_corto)
+        if not _SHA_INTERO.fullmatch(rilascio):
+            return EsitoFirma(
+                buona=False, motivo="il rilascio va dato come SHA intero, mai un tag o un ramo", sha=sha_corto
             )
-            if res_ril.returncode != 0:
-                return EsitoFirma(buona=False, motivo=f"riferimento sconosciuto: {rilascio}", sha=sha_corto)
-            rilascio_commit = res_ril.stdout.strip()
+        res_ril = _git(clone, "rev-parse", "--verify", "--end-of-options", f"{rilascio}^{{commit}}")
+        if res_ril.returncode != 0:
+            return EsitoFirma(buona=False, motivo=f"riferimento sconosciuto: {rilascio}", sha=sha_corto)
+        rilascio_commit = res_ril.stdout.strip()
 
-            # 3. La punta deve discendere dal rilascio
-            res_anc = subprocess.run(
-                ["git", "-C", str(clone), "merge-base", "--is-ancestor", rilascio_commit, punta_commit],
-                capture_output=True,
-            )
-            if res_anc.returncode != 0:
-                return EsitoFirma(buona=False, motivo="punta non discende dal rilascio", sha=sha_corto)
+        # 3. La punta deve discendere dal rilascio
+        res_anc = _git(clone, "merge-base", "--is-ancestor", rilascio_commit, punta_commit)
+        if res_anc.returncode != 0:
+            return EsitoFirma(buona=False, motivo="punta non discende dal rilascio", sha=sha_corto)
+        ref_elenco = rilascio_commit
 
-            ref_elenco = rilascio_commit
-        else:
-            ref_elenco = punta_commit
+    # 4. L'elenco dall'oggetto git del rilascio (o della punta con primo), mai dall'albero di lavoro
+    res_show = _git(clone, "show", f"{ref_elenco}:.github/bottega/firme-ammesse")
+    if res_show.returncode != 0:
+        return EsitoFirma(buona=False, motivo="elenco assente nel rilascio", sha=sha_corto)
+    elenco_testo = res_show.stdout
+    righe_chiavi = [r for r in elenco_testo.splitlines() if r.strip() and not r.strip().startswith("#")]
+    if not righe_chiavi:
+        return EsitoFirma(buona=False, motivo="elenco vuoto", sha=sha_corto)
 
-        # 4. Legge l'elenco delle chiavi ammesse dall'oggetto git del rilascio (o della punta se primo)
-        res_show = subprocess.run(
-            ["git", "-C", str(clone), "show", f"{ref_elenco}:.github/bottega/firme-ammesse"],
-            capture_output=True,
-            text=True,
-        )
-        if res_show.returncode != 0:
-            return EsitoFirma(buona=False, motivo="elenco assente nel rilascio", sha=sha_corto)
+    # 5. La firma: solo l'intestazione del commit (fino alla prima riga vuota), solo SSH
+    res_cat = _git(clone, "cat-file", "commit", punta_commit)
+    intestazione = res_cat.stdout.split("\n\n", 1)[0].splitlines()
+    firme = [i for i, r in enumerate(intestazione) if r.startswith(("gpgsig ", "gpgsig-sha256 "))]
+    if not firme:
+        return EsitoFirma(buona=False, motivo="punta non firmata", sha=sha_corto)
+    if any(intestazione[i].split(" ", 1)[1].strip() != "-----BEGIN SSH SIGNATURE-----" for i in firme):
+        return EsitoFirma(buona=False, motivo="firma non SSH", sha=sha_corto)
 
-        elenco_testo = res_show.stdout
-        righe_chiavi = [r for r in elenco_testo.splitlines() if r.strip() and not r.strip().startswith("#")]
-        if not righe_chiavi:
-            return EsitoFirma(buona=False, motivo="elenco vuoto", sha=sha_corto)
-
-        # 5. Verifica se il commit ha una firma
-        res_cat = subprocess.run(
-            ["git", "-C", str(clone), "cat-file", "commit", punta_commit],
-            capture_output=True,
-            text=True,
-        )
-        # Solo l'intestazione del commit (fino alla prima riga vuota): il messaggio può contenere la parola.
-        intestazione = res_cat.stdout.split("\n\n", 1)[0]
-        if not any(r.startswith("gpgsig ") for r in intestazione.splitlines()):
-            return EsitoFirma(buona=False, motivo="punta non firmata", sha=sha_corto)
-
-        # 6. Esegue il controllo con allowedSignersFile temporaneo
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as f_elenco:
-            f_elenco.write(elenco_testo)
-            percorso_elenco = Path(f_elenco.name)
-
-        try:
-            res_v = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(clone),
-                    "-c",
-                    f"gpg.ssh.allowedSignersFile={percorso_elenco}",
-                    "verify-commit",
-                    "--raw",
-                    punta_commit,
-                ],
-                capture_output=True,
-                text=True,
-            )
-            uscita = (res_v.stdout or "") + "\n" + (res_v.stderr or "")
-            match = re.search(r'Good "git" signature for (\S+)', uscita)
-            if res_v.returncode == 0 and match:
-                principale = match.group(1)
-                return EsitoFirma(buona=True, motivo="", principale=principale, sha=sha_corto)
-            return EsitoFirma(buona=False, motivo="firma di una chiave non ammessa", sha=sha_corto)
-        finally:
-            percorso_elenco.unlink(missing_ok=True)
-
-    except OSError as e:
-        return EsitoFirma(buona=False, motivo=str(e))
+    # 6. git verify-commit con l'elenco in un file temporaneo
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as f_elenco:
+        f_elenco.write(elenco_testo)
+        percorso_elenco = Path(f_elenco.name)
+    try:
+        res_v = _git(clone, "-c", f"gpg.ssh.allowedSignersFile={percorso_elenco}", "verify-commit", "--raw", punta_commit)
+        uscita = (res_v.stdout or "") + "\n" + (res_v.stderr or "")
+        match = re.search(r'Good "git" signature for (\S+)', uscita)
+        if res_v.returncode == 0 and match:
+            return EsitoFirma(buona=True, motivo="", principale=match.group(1), sha=sha_corto)
+        return EsitoFirma(buona=False, motivo="firma di una chiave non ammessa", sha=sha_corto)
+    finally:
+        percorso_elenco.unlink(missing_ok=True)
 
 
 def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
@@ -150,7 +161,8 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
     if chiave.is_file() and not chiave_pub.is_file():
         raise ErroreFirma(f"chiave privata presente senza pubblica: {chiave_pub}")
 
-    if not chiave.is_file():
+    # Una .pub senza la privata è una chiave tenuta in un agente (un gestore di password, un token): si usa com'è.
+    if not chiave.is_file() and not chiave_pub.is_file():
         if not chiave.parent.exists():
             chiave.parent.mkdir(parents=True, mode=0o700)
         # Il commento di serie sarebbe utente@macchina: la riga pubblica finisce in un repo che può essere pubblico.
@@ -166,6 +178,14 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
         raise ErroreFirma(f"chiave pubblica non trovata: {chiave_pub}")
 
     pub_line = chiave_pub.read_text(encoding="utf-8").strip()
+
+    # La radice del repo, anche se si lancia da una sottocartella: l'elenco sta sempre lì.
+    res_radice = subprocess.run(
+        ["git", "-C", str(cartella), "rev-parse", "--show-toplevel"], capture_output=True, text=True
+    )
+    if res_radice.returncode != 0 or not res_radice.stdout.strip():
+        raise ErroreFirma(f"non è un repo git: {cartella}")
+    cartella = Path(res_radice.stdout.strip())
 
     # Ricava l'email utente da git
     res_email = subprocess.run(
@@ -189,9 +209,10 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
         if res.returncode != 0:
             raise ErroreFirma(f"impostazione git config {k} fallita: {res.stderr.strip()}")
 
+    # Solo le unioni si firmano (`git merge --no-ff -S`): con commit.gpgsign ogni commit di lavoro di chi decide, anche
+    # su un ramo rifiutato, diventerebbe una punta rilasciabile.
     _imposta("gpg.format", "ssh")
     _imposta("user.signingkey", str(chiave_pub.resolve()))
-    _imposta("commit.gpgsign", "true")
     _imposta("tag.gpgsign", "true")
 
     # Aggiunge a .github/bottega/firme-ammesse della cartella corrente se non presente
@@ -241,9 +262,19 @@ def argomenti_firma(parser: argparse.ArgumentParser) -> None:
         metavar="REF",
         help="riferimento da verificare (predefinito: HEAD)",
     )
-    gruppo = p_verifica.add_mutually_exclusive_group(required=True)
-    gruppo.add_argument("--rilascio", metavar="REF", help="riferimento dell'ultimo rilascio da cui leggere l'elenco")
-    gruppo.add_argument("--primo", action="store_true", help="primo rilascio: legge l'elenco dalla punta stessa")
+    gruppo = p_verifica.add_mutually_exclusive_group()
+    gruppo.add_argument("--rilascio", metavar="SHA", help="SHA intero dell'ultimo rilascio verificato")
+    gruppo.add_argument(
+        "--stato",
+        type=Path,
+        metavar="FILE",
+        help="file fuori dal repo con lo SHA dell'ultimo rilascio verificato; se la firma è buona vi scrive la punta",
+    )
+    p_verifica.add_argument(
+        "--primo",
+        action="store_true",
+        help="primo rilascio: legge l'elenco dalla punta stessa (con --stato, solo se il file non c'è ancora)",
+    )
     p_verifica.add_argument("--avvisa", action="store_true", help="apre o chiude l'avviso sulla forgia GitHub")
     p_verifica.add_argument("--cartella", type=Path, default=Path("."), help=argparse.SUPPRESS)
 
@@ -265,7 +296,30 @@ def comando_firma(args: argparse.Namespace, forgia: Forgia | None = None) -> int
 
     if azione == "verifica":
         cartella = getattr(args, "cartella", Path("."))
-        esito = verifica(clone=cartella, punta=args.punta, rilascio=args.rilascio, primo=args.primo)
+        stato: Path | None = getattr(args, "stato", None)
+        rilascio = args.rilascio
+        if rilascio is not None and args.primo:
+            print("errore: --rilascio e --primo si escludono", file=sys.stderr)
+            return 2
+        if rilascio is None and stato is None and not args.primo:
+            print("errore: serve --rilascio, --stato o --primo", file=sys.stderr)
+            return 2
+        if stato is not None:
+            if stato.is_file():
+                if args.primo:
+                    print(f"errore: {stato} c'è già: --primo vale solo per il primo rilascio", file=sys.stderr)
+                    return 2
+                rilascio = stato.read_text(encoding="utf-8").strip()
+            elif not args.primo:
+                print(f"errore: {stato} non c'è: il primo rilascio si verifica con --primo", file=sys.stderr)
+                return 2
+        esito = verifica(clone=cartella, punta=args.punta, rilascio=rilascio, primo=args.primo)
+        if esito.buona and stato is not None:
+            punta_intera = _git(cartella, "rev-parse", "--verify", "--end-of-options", f"{args.punta}^{{commit}}")
+            stato.parent.mkdir(parents=True, exist_ok=True)
+            temporaneo = stato.with_name(stato.name + ".nuovo")
+            temporaneo.write_text(punta_intera.stdout.strip() + "\n", encoding="utf-8")
+            os.replace(temporaneo, stato)
         if getattr(args, "avvisa", False):
             if forgia is None:
                 repo = os.environ.get("GITHUB_REPOSITORY", "")

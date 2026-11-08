@@ -28,6 +28,12 @@ def isola_ambiente(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
+def _sha(repo: Path, ref: str) -> str:
+    """Lo SHA intero di un riferimento: il rilascio si passa sempre così."""
+    res = subprocess.run(["git", "rev-parse", f"{ref}^{{commit}}"], cwd=repo, check=True, capture_output=True, text=True)
+    return res.stdout.strip()
+
+
 def _crea_chiave(cartella: Path, nome: str = "chiave") -> tuple[Path, str]:
     """Crea una coppia di chiavi ed25519 vera e restituisce (percorso_privata, testo_pubblica)."""
     chiave = cartella / nome
@@ -94,7 +100,7 @@ def test_verifica_buona(tmp_path: Path) -> None:
 
     c2 = _committa_firmato(repo, chiave_alice, "lavoro su main", nome_file="f2.txt", email=email_alice)
 
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is True
     assert esito.motivo == ""
     assert esito.principale == email_alice
@@ -118,7 +124,7 @@ def test_verifica_punta_non_firmata(tmp_path: Path) -> None:
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "senza firma"], cwd=repo, check=True, capture_output=True)
 
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "punta non firmata"
 
@@ -146,7 +152,7 @@ def test_verifica_chiave_aggiunta_nello_stesso_push(tmp_path: Path) -> None:
     _committa_firmato(repo, chiave_bob, "commit con chiave nuova", nome_file="f2.txt", email=email_bob)
 
     # La verifica deve leggere l'elenco da v1.0, quindi rifiutare bob!
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "firma di una chiave non ammessa"
 
@@ -165,7 +171,7 @@ def test_verifica_punta_all_indietro(tmp_path: Path) -> None:
     subprocess.run(["git", "tag", "v2.0", c2], cwd=repo, check=True, capture_output=True)
 
     # Punta all'indietro: c1 punta a un commit precedente a v2.0
-    esito = verifica(repo, punta=c1, rilascio="v2.0", primo=False)
+    esito = verifica(repo, punta=c1, rilascio=_sha(repo, "v2.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "punta non discende dal rilascio"
 
@@ -210,7 +216,7 @@ def test_verifica_namespace_sbagliato(tmp_path: Path) -> None:
         programma_ssh=wrapper,
     )
 
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "firma di una chiave non ammessa"
 
@@ -226,7 +232,7 @@ def test_verifica_elenco_assente_nel_rilascio(tmp_path: Path) -> None:
 
     _committa_firmato(repo, chiave_alice, "lavoro su main", nome_file="f2.txt", email=email_alice)
 
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "elenco assente nel rilascio"
 
@@ -245,7 +251,7 @@ def test_verifica_elenco_vuoto(tmp_path: Path) -> None:
 
     _committa_firmato(repo, chiave_alice, "lavoro su main", nome_file="f2.txt", email=email_alice)
 
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "elenco vuoto"
 
@@ -260,13 +266,14 @@ def test_verifica_riferimento_sconosciuto(tmp_path: Path) -> None:
     firme.write_text(f"{email_alice} namespaces=\"git\" {pub_alice}\n", encoding="utf-8")
     _committa_firmato(repo, chiave_alice, "commit iniziale", email=email_alice)
 
-    esito_punta = verifica(repo, punta="INESISTENTE", rilascio="v1.0", primo=False)
+    esito_punta = verifica(repo, punta="INESISTENTE", rilascio=_sha(repo, "HEAD"), primo=False)
     assert esito_punta.buona is False
     assert esito_punta.motivo == "riferimento sconosciuto: INESISTENTE"
 
-    esito_rilascio = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    assente = "0123456789abcdef0123456789abcdef01234567"
+    esito_rilascio = verifica(repo, punta="HEAD", rilascio=assente, primo=False)
     assert esito_rilascio.buona is False
-    assert esito_rilascio.motivo == "riferimento sconosciuto: v1.0"
+    assert esito_rilascio.motivo == f"riferimento sconosciuto: {assente}"
 
 
 def test_verifica_primo_legge_la_punta(tmp_path: Path) -> None:
@@ -312,7 +319,7 @@ def test_verifica_non_legge_l_albero_di_lavoro(tmp_path: Path) -> None:
     )
 
     # La verifica DEVE ignorare l'albero di lavoro e leggere da v1.0: rifiuto!
-    esito = verifica(repo, punta="HEAD", rilascio="v1.0", primo=False)
+    esito = verifica(repo, punta="HEAD", rilascio=_sha(repo, "v1.0"), primo=False)
     assert esito.buona is False
     assert esito.motivo == "firma di una chiave non ammessa"
 
@@ -339,7 +346,8 @@ def test_prepara_crea_chiave_e_configura_git(tmp_path: Path) -> None:
 
     assert _cfg("gpg.format") == "ssh"
     assert _cfg("user.signingkey") == str(chiave) + ".pub"
-    assert _cfg("commit.gpgsign") == "true"
+    # Solo le unioni si firmano (`git merge --no-ff -S`): niente commit.gpgsign.
+    assert subprocess.run(["git", "config", "--local", "commit.gpgsign"], cwd=repo, capture_output=True).returncode == 1
     assert _cfg("tag.gpgsign") == "true"
 
     assert any("PR" in r or "pr" in r.lower() for r in righe)
@@ -393,7 +401,7 @@ def test_prepara_globale(tmp_path: Path) -> None:
 
     assert _cfg_global("gpg.format") == "ssh"
     assert _cfg_global("user.signingkey") == str(chiave) + ".pub"
-    assert _cfg_global("commit.gpgsign") == "true"
+    assert subprocess.run(["git", "config", "--global", "commit.gpgsign"], capture_output=True).returncode == 1
     assert _cfg_global("tag.gpgsign") == "true"
 
     # La configurazione locale non deve contenerli
@@ -422,7 +430,7 @@ def test_comando_verifica_avvisa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     forgia = ForgiaFinta()
     parser = argparse.ArgumentParser()
     argomenti_firma(parser)
-    args_rifiuto = parser.parse_args(["verifica", "--rilascio", "v1.0", "--avvisa"])
+    args_rifiuto = parser.parse_args(["verifica", "--rilascio", _sha(repo, "v1.0"), "--avvisa"])
 
     codice_1 = comando_firma(args_rifiuto, forgia=forgia)
     assert codice_1 == 1
@@ -435,7 +443,7 @@ def test_comando_verifica_avvisa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     # Caso 2: buona -> chiude avviso
     _committa_firmato(repo, chiave_alice, "nuovo commit firmato", nome_file="f3.txt", email=email_alice)
-    args_buona = parser.parse_args(["verifica", "--rilascio", "v1.0", "--avvisa"])
+    args_buona = parser.parse_args(["verifica", "--rilascio", _sha(repo, "v1.0"), "--avvisa"])
     codice_2 = comando_firma(args_buona, forgia=forgia)
     assert codice_2 == 0
     out_2 = capsys.readouterr().out
@@ -450,10 +458,8 @@ def test_comando_firma_codici_d_uscita(tmp_path: Path, monkeypatch: pytest.Monke
     parser = argparse.ArgumentParser()
     argomenti_firma(parser)
 
-    # Errore sintassi argomenti (manca rilascio o primo): argparse solleva SystemExit con codice 2
-    with pytest.raises(SystemExit) as exc_info:
-        parser.parse_args(["verifica"])
-    assert exc_info.value.code == 2
+    # Manca rilascio, stato o primo: codice 2 (B4-R5)
+    assert comando_firma(parser.parse_args(["verifica", "--cartella", str(tmp_path)])) == 2
 
     # Prepara con successo: codice 0
     chiave = tmp_path / "chiavi" / "k"

@@ -12,3 +12,5 @@ alto del modello (`--effort max` non esiste).
 - Cerca parole chiave in tutto il testo per riconoscere un errore: il brief dice in quali campi cercare (B3.3).
 - Le prove di proprietà le scrive deboli: il brief detta le proprietà e i generatori (B2).
 - Può lasciare percorsi della macchina nelle prove: il controllo pubblico prima di ogni commit li ferma (B3.7).
+- Lancia le prove come attività in sottofondo e poi aspetta una notifica che non arriva: il giro scade dopo un'ora
+  senza aver scritto niente. Il brief dice di lanciare le prove in primo piano (B4.1).
