@@ -52,7 +52,8 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
   -> list[Rischio]` legge i workflow come testo (solo libreria standard) e segnala un workflow che parte su `push`
   senza escludere `bottega/**` (o su `pull_request` senza una guardia `!startsWith(github.head_ref, 'bottega/')` in
   ogni job), e che usa `secrets.` (anche `secrets: inherit`) o un runner self-hosted (`self-hosted` o un'etichetta che
-  non è di GitHub). Lo usano: `bottega configurazione` (avviso), `bottega installa progetto` (si ferma e propone la
+  non è di GitHub) o chiama un workflow riusabile (`uses:` verso `.github/workflows/`, locale o di un altro repo: il
+  chiamato non si vede, quindi nel dubbio è un rischio; è il caso di `sviluppo.yml` di Jarvis). Lo usano: `bottega configurazione` (avviso), `bottega installa progetto` (si ferma e propone la
   correzione nella PR) e il giro, che **non spinge** se il ramo principale del progetto ha un rischio (avviso con
   chiave `ci`, lavoro `in attesa`). Nel dubbio (una forma che il lettore non capisce) è un rischio.
 - **B6-R8. Il progetto,** con una PR sul ramo `bottega/installazione`: `.github/bottega/bottega.toml` (dalle risposte),
