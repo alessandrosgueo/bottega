@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -310,9 +311,139 @@ def test_casistica_vera_passa_il_controllo(capsys):
     assert out.startswith("casi: ") and out.endswith(", nessun errore\n")
 
 
-def test_foglio_della_casistica_vera_non_mostra_le_risposte(capsys):
+# Una riga del foglio che comincia con un'etichetta di risposta. «Scelta del formato» non ci cade: manca i due punti.
+RISPOSTA_A_INIZIO_RIGA = re.compile(
+    r"^\s*(\*\*(Scelta|Perché|Esito|Fonte)(:\*\*|\*\*:)|(Scelta|Perché|Esito|Fonte):)", re.MULTILINE
+)
+
+
+@pytest.mark.parametrize("etichetta", ["**Scelta:** A", "**Scelta**: A"])
+def test_etichetta_in_linea_nello_scenario(tmp_path, etichetta):
+    scenario = "**Scenario:** chi esegue il compito 2 scopre un difetto piccolo nel compito 1."
+    testo = _cambia(CASO, scenario, f"{scenario} {etichetta}")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:{_riga(testo, '**Scenario:**')}: etichetta non a inizio riga: **Scelta:**"]
+
+
+def test_etichetta_in_linea_nella_domanda(tmp_path):
+    testo = _cambia(CASO, "**Domanda:** che cosa fa chi esegue?", "**Domanda:** che cosa fa chi esegue? **Esito:** X")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:{_riga(testo, '**Domanda:**')}: etichetta non a inizio riga: **Esito:**"]
+
+
+def test_etichetta_in_linea_nell_opzione(tmp_path):
+    testo = _cambia(CASO, "- A) lo corregge con una prova che lo fissa", "- A) uno **Perché:** X")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:{_riga(testo, '- A) uno')}: etichetta non a inizio riga: **Perché:**"]
+
+
+def test_etichetta_in_linea_nel_titolo(tmp_path):
+    testo = _cambia(CASO, "### CICLO-1. Un difetto del compito prima", "### CICLO-1. Un **Esito:** difetto")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:1: etichetta non a inizio riga: **Esito:**"]
+
+
+def test_etichetta_in_grassetto_rientrata_non_apre_il_campo(tmp_path):
+    testo = _cambia(CASO, "**Esito:** tenuta.", "  **Esito:** tenuta.")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [
+        f"{p}:1: campo mancante: **Esito:**",
+        f"{p}:{_riga(testo, '  **Esito:**')}: etichetta non a inizio riga: **Esito:**",
+    ]
+
+
+def test_etichetta_con_i_due_punti_fuori_dal_grassetto(tmp_path):
+    testo = _cambia(CASO, "**Scelta:** A", "**Scelta**: A")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [
+        f"{p}:1: campo mancante: **Scelta:**",
+        f"{p}:{_riga(testo, '**Scelta**: A')}: i due punti vanno dentro il grassetto: **Scelta:**",
+    ]
+
+
+def test_scelta_senza_grassetto_al_posto_della_sua_riga(tmp_path):
+    testo = _cambia(CASO, "**Scelta:** A", "Scelta: A")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [
+        f"{p}:1: campo mancante: **Scelta:**",
+        f"{p}:{_riga(testo, 'Scelta: A')}: etichetta senza grassetto: serve **Scelta:**",
+    ]
+
+
+@pytest.mark.parametrize("nome", ["Scelta", "Perché", "Esito", "Fonte"])
+def test_etichetta_senza_grassetto_a_inizio_riga_non_apre_il_campo(tmp_path, nome):
+    riga = f"{nome}: testo"
+    testo = _cambia(
+        CASO,
+        "**Perché:** è una modifica sensata, non irreversibile.\n",
+        f"**Perché:** è una modifica sensata, non irreversibile.\n{riga}\n",
+    )
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:{_riga(testo, riga)}: etichetta senza grassetto: serve **{nome}:**"]
+
+
+def test_etichetta_senza_grassetto_rientrata_sotto_un_opzione(tmp_path):
+    testo = _cambia(CASO, "- C) lo lascia stare\n", "- C) lo lascia stare\n  Esito: tenuta.\n")
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:{_riga(testo, '  Esito:')}: etichetta senza grassetto: serve **Esito:**"]
+
+
+def test_titolo_con_tab_si_riconosce(tmp_path):
+    p = _scrivi(tmp_path, "ciclo.md", _cambia(CASO, "### CICLO-1.", "###\tCICLO-1."))
+    assert [caso.id for caso in leggi(p)] == ["CICLO-1"]
+
+
+@pytest.mark.parametrize("intestazione", ["###\tCICLO-1 Un difetto del compito prima", "###"])
+def test_titolo_malformato_con_tab_o_vuoto_da_l_errore_giusto(tmp_path, intestazione):
+    testo = _cambia(CASO, "### CICLO-1. Un difetto del compito prima", intestazione)
+    p = _scrivi(tmp_path, "ciclo.md", testo)
+    assert _errori(tmp_path) == [f"{p}:1: intestazione malformata: serve «### <id>. <titolo>»"]
+
+
+def test_file_d_area_con_estensione_maiuscola_si_segnala(tmp_path):
+    p = _scrivi(tmp_path, "ciclo.MD", CASO)
+    assert _errori(tmp_path) == [f"{p}:1: estensione «.MD»: serve «.md» minuscolo"]
+
+
+@pytest.mark.parametrize(
+    "nome, testo", [("LEGGIMI.md", "Nessun caso qui.\n"), ("ciclo.md", "# Premessa\n\nSolo testo.\n")]
+)
+def test_cartella_senza_casi_e_un_errore(tmp_path, capsys, nome, testo):
+    _scrivi(tmp_path, nome, testo)
+    assert _errori(tmp_path) == [f"{tmp_path}: nessun caso"]
+    assert main(["casi", "--cartella", str(tmp_path)]) == 1
+    assert capsys.readouterr().out == f"{tmp_path}: nessun caso\n"
+    assert main(["casi", "--cartella", str(tmp_path), "--domande"]) == 1
+    uscita = capsys.readouterr()
+    assert uscita.out == "" and uscita.err == f"{tmp_path}: nessun caso\n"
+
+
+def test_controlla_casistica_con_cartella_mancante_restituisce_l_errore(tmp_path):
+    manca = tmp_path / "manca"
+    assert controlla_casistica(manca) == [f"{manca}: cartella non trovata"]
+
+
+@pytest.mark.parametrize(
+    "riga", ["**Scelta:** A", "**Esito**: X", "Scelta: A", "  Perché: X", "**Fonte:** di chi decide"]
+)
+def test_la_prova_del_foglio_vede_le_risposte_a_inizio_riga(riga):
+    assert RISPOSTA_A_INIZIO_RIGA.search(riga)
+
+
+@pytest.mark.parametrize("riga", ["### FORMATO-1. Scelta del formato", "Scelta del formato", "Esito positivo"])
+def test_la_prova_del_foglio_non_scambia_la_prosa_per_una_risposta(riga):
+    assert not RISPOSTA_A_INIZIO_RIGA.search(riga)
+
+
+def test_foglio_della_casistica_vera_non_ha_righe_con_le_risposte(capsys):
     assert main(["casi", "--cartella", str(ROOT / "casistica"), "--domande"]) == 0
     out = capsys.readouterr().out
     assert "### CICLO-1." in out
-    for etichetta in ("**Scelta:**", "**Perché:**", "**Esito:**", "**Fonte:**", "Scelta"):
-        assert etichetta not in out
+    assert not RISPOSTA_A_INIZIO_RIGA.search(out)
+
+
+def test_titolo_con_scelta_del_formato_non_da_allarme(tmp_path, capsys):
+    testo = CASO.replace("### CICLO-1. Un difetto del compito prima", "### FORMATO-1. Scelta del formato")
+    _scrivi(tmp_path, "formato.md", testo)
+    assert main(["casi", "--cartella", str(tmp_path), "--domande"]) == 0
+    assert "### FORMATO-1. Scelta del formato\n" in capsys.readouterr().out

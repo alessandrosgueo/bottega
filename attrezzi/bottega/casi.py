@@ -2,7 +2,8 @@
 
 Un file per area, `casistica/<area>.md` (area in minuscolo). Ogni caso è una sezione `### <ID>. <titolo>` con i campi in
 quest'ordine, uno per riga che comincia col nome in grassetto; il testo di un campo può andare a capo. Le opzioni sono
-righe `- <LETTERA>) <testo>`: una riga rientrata sotto un'opzione ne continua il testo.
+righe `- <LETTERA>) <testo>`: una riga rientrata sotto un'opzione ne continua il testo. Un'etichetta che non sta a
+inizio riga, o che sta senza grassetto, è un errore: il foglio del banco non deve mai stampare una risposta.
 """
 
 import argparse
@@ -20,6 +21,13 @@ _ETICHETTA = re.compile(r"\*\*([^*:]+):\*\*(.*)")
 _INTESTAZIONE = re.compile(r"###\s+(\S+?)\.\s+(\S.*)")
 _OPZIONE = re.compile(r"- ([A-Z])\) (\S.*)")
 _DAL_VIVO = re.compile(r"dal vivo ([0-9]{4}-[0-9]{2}-[0-9]{2})")
+_TITOLO = re.compile(r"###(?:[ \t]|$)")  # un titolo è «###» seguito da spazio, tab o fine riga, anche se malformato
+_NOMI_DEI_CAMPI = "|".join(CAMPI)
+# Un'etichetta in grassetto, anche con i due punti fuori: a inizio riga apre un campo, altrove è un errore.
+_ETICHETTA_IN_LINEA = re.compile(rf"\*\*({_NOMI_DEI_CAMPI})(?::\*\*|\*\*:)", re.IGNORECASE)
+_DUE_PUNTI_FUORI = re.compile(rf"\*\*({_NOMI_DEI_CAMPI})\*\*:", re.IGNORECASE)
+# Un'etichetta di risposta senza grassetto, a inizio riga: non apre un campo.
+_SENZA_GRASSETTO = re.compile(r"(Scelta|Perché|Esito|Fonte):")
 
 
 class ErroreCasi(ValueError):
@@ -64,8 +72,16 @@ def leggi(percorso: Path) -> list[Caso]:
 
 
 def controlla_casistica(cartella: Path) -> list[str]:
-    """Gli errori di formato della casistica, come `file:riga: motivo`, nell'ordine dei file e delle righe."""
-    return _esamina(cartella)[1]
+    """Gli errori di formato della casistica, come `file:riga: motivo`, nell'ordine dei file e delle righe.
+
+    Non solleva mai un'eccezione: una cartella mancante o illeggibile è un errore come gli altri.
+    """
+    try:
+        return _esamina(cartella)[1]
+    except FileNotFoundError:
+        return [f"{cartella}: cartella non trovata"]
+    except OSError as e:
+        return [f"{cartella}: {e.strerror or e}"]
 
 
 def argomenti_casi(parser: argparse.ArgumentParser) -> None:
@@ -104,10 +120,13 @@ def comando_casi(args: argparse.Namespace) -> int:
 
 
 def _file_di_area(cartella: Path) -> list[Path]:
-    """I file di area della cartella in ordine di nome: i .md, tranne LEGGIMI.md, che descrive e non è un'area."""
+    """I file di area della cartella in ordine di nome: i .md, anche con un'altra maiuscola nell'estensione (che si
+    segnala dopo), tranne LEGGIMI.md, che descrive e non è un'area."""
     if not cartella.is_dir():
         raise FileNotFoundError(f"cartella della casistica non trovata: {cartella}")
-    file = [p for p in cartella.glob("*.md") if p.is_file() and p.name.casefold() != "leggimi.md"]
+    file = [
+        p for p in cartella.iterdir() if p.is_file() and p.suffix.lower() == ".md" and p.name.casefold() != "leggimi.md"
+    ]
     return sorted(file, key=lambda p: p.name)
 
 
@@ -116,9 +135,13 @@ def _esamina(cartella: Path) -> tuple[list[Caso], list[str]]:
     casi: list[Caso] = []
     errori: list[str] = []
     for percorso in _file_di_area(cartella):
+        if percorso.suffix != ".md":
+            errori.append(_errore(percorso, 1, f"estensione «{percorso.suffix}»: serve «.md» minuscolo"))
         nuovi, nuovi_errori = _analizza(percorso, visti)
         casi += nuovi
         errori += nuovi_errori
+    if not casi and not errori:
+        errori.append(f"{cartella}: nessun caso")
     return casi, errori
 
 
@@ -133,7 +156,7 @@ def _analizza(percorso: Path, visti: dict[str, tuple[str, int]]) -> tuple[list[C
     sezioni: list[tuple[int, str, list[tuple[int, str]]]] = []  # riga del titolo, titolo, righe del corpo
     corpo: list[tuple[int, str]] | None = None
     for numero, riga in enumerate(testo.split("\n"), 1):
-        if riga.startswith("### "):
+        if _TITOLO.match(riga):
             corpo = []
             sezioni.append((numero, riga.strip(), corpo))
         elif corpo is not None:
@@ -159,11 +182,14 @@ def _caso(
     visti: dict[str, tuple[str, int]],
 ) -> tuple[Caso | None, list[tuple[int, str]]]:
     """Il caso di una sezione, o None con i suoi errori. `numero` è la riga del titolo."""
+    errori: list[tuple[int, str]] = [
+        (numero, f"etichetta non a inizio riga: **{etichetta.group(1)}:**")
+        for etichetta in _ETICHETTA_IN_LINEA.finditer(intestazione)
+    ]
     trovata = _INTESTAZIONE.fullmatch(intestazione)
     if trovata is None:
-        return None, [(numero, "intestazione malformata: serve «### <id>. <titolo>»")]
+        return None, [*errori, (numero, "intestazione malformata: serve «### <id>. <titolo>»")]
     id_, titolo = trovata.groups()
-    errori: list[tuple[int, str]] = []
     if not re.fullmatch(re.escape(area) + r"-[0-9]+", id_):
         errori.append((numero, f"id «{id_}» deve cominciare con {area}- e un numero"))
     elif id_ in visti:
@@ -219,7 +245,11 @@ def _caso(
 
 
 def _campi(righe: list[tuple[int, str]]) -> tuple[dict[str, _Campo], list[tuple[int, str]]]:
-    """I campi di un caso per nome; segnala righe fuori campo, nomi sconosciuti, ripetuti o fuori ordine."""
+    """I campi di un caso per nome; segnala righe fuori campo, nomi sconosciuti, ripetuti o fuori ordine.
+
+    Un'etichetta in grassetto che non sta a inizio riga è un errore. Un'etichetta senza grassetto è un errore anche
+    se rientrata, e non apre un campo: la sua riga non entra nel testo di nessun campo.
+    """
     campi: dict[str, _Campo] = {}
     errori: list[tuple[int, str]] = []
     ultimo = -1  # posizione in CAMPI del campo più avanzato visto finora
@@ -228,7 +258,16 @@ def _campi(righe: list[tuple[int, str]]) -> tuple[dict[str, _Campo], list[tuple[
         testo = riga.strip()
         if not testo:
             continue
-        etichetta = _ETICHETTA.match(testo)
+        for in_linea in _ETICHETTA_IN_LINEA.finditer(riga):
+            if in_linea.start() != 0:
+                errori.append((numero, f"etichetta non a inizio riga: **{in_linea.group(1)}:**"))
+        if (due_punti := _DUE_PUNTI_FUORI.match(riga)) is not None:
+            errori.append((numero, f"i due punti vanno dentro il grassetto: **{due_punti.group(1)}:**"))
+            continue
+        if (senza := _SENZA_GRASSETTO.match(testo)) is not None:
+            errori.append((numero, f"etichetta senza grassetto: serve **{senza.group(1)}:**"))
+            continue
+        etichetta = _ETICHETTA.match(riga)
         if etichetta is None:
             if attuale is None:
                 errori.append((numero, "riga fuori da un campo"))
