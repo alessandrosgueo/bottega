@@ -223,6 +223,7 @@ class ClaudeCode:
         percorso: Path,
         dopo: datetime,
         fino: datetime,
+        visti: set[str] | None = None,
     ) -> Token:
         """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
         if dopo.tzinfo is None:
@@ -270,7 +271,12 @@ class ClaudeCode:
                 )
                 if subtot is None:
                     continue
-                chiave = msg.get("id") or rec.get("requestId") or f"riga-{n_riga}"
+                # Senza id un record si confronta solo dentro il suo file.
+                chiave = msg.get("id") or rec.get("requestId") or f"{percorso}:{n_riga}"
                 per_messaggio[str(chiave)] = subtot
 
-        return Token(totale=sum(per_messaggio.values()), parziale=False)
+        # Un messaggio già contato in un'altra trascrizione (una ripresa che ricopia la storia) non conta di nuovo.
+        if visti is not None:
+            per_messaggio = {k: v for k, v in per_messaggio.items() if k not in visti}
+            visti.update(per_messaggio)
+        return Token(totale=sum(per_messaggio.values()), parziale=False, messaggi=len(per_messaggio))

@@ -91,8 +91,8 @@ class CopilotCli:
                             u = mdata.get("usage")
                             if isinstance(u, dict):
                                 for uk, uv in u.items():
-                                    if isinstance(uv, int):
-                                        contatori[uk] = uv
+                                    if isinstance(uv, int) and not isinstance(uv, bool):
+                                        contatori[uk] = contatori.get(uk, 0) + uv
 
             # Rilevamento evento d'errore nel JSONL (senza mai leggere assistant.message)
             if tipo in ("error", "session.error") or (isinstance(tipo, str) and "error" in tipo):
@@ -199,6 +199,7 @@ class CopilotCli:
         percorso: Path,
         dopo: datetime,
         fino: datetime,
+        visti: set[str] | None = None,
     ) -> Token:
         """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
         if dopo.tzinfo is None:
@@ -207,6 +208,7 @@ class CopilotCli:
             fino = fino.replace(tzinfo=timezone.utc)
 
         totale = 0
+        messaggi = 0
         with percorso.open("r", encoding="utf-8") as f:
             for riga in f:
                 riga = riga.strip()
@@ -248,10 +250,12 @@ class CopilotCli:
                     if subtot is None:
                         continue
                     totale += subtot
+                    messaggi += 1
                 elif tipo == "subagent.completed":
                     v = data.get("totalTokens")
                     if isinstance(v, bool) or not isinstance(v, int):
                         continue
                     totale += v
+                    messaggi += 1
 
-        return Token(totale=totale, parziale=False)
+        return Token(totale=totale, parziale=False, messaggi=messaggi)

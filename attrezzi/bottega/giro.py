@@ -256,6 +256,7 @@ def _scrivi_misure(
     token_esecutore: int,
 ) -> None:
     """Scrive le misure del compito sulla board nel finally del giro (B5-R6)."""
+    lav = None
     try:
         lav = board.lavoro(compito_numero)
         if lav is None:
@@ -263,11 +264,22 @@ def _scrivi_misure(
     except Exception as exc:
         print(f"misure: errore verifica/aggiunta compito #{compito_numero}: {exc}", file=sys.stderr)
 
-    for nome_campo, val in (
-        ("Esecutore", candidato.nome),
-        ("Porta", candidato.porta),
-        ("Dove", "fuori"),
-    ):
+    # Un compito già misurato per un altro candidato (cambio dopo una quota): le misure si sommano, ma il compito si
+    # segna «più esecutori» e non entra né nei risultati né nei costi di un candidato.
+    precedente = (lav.campi.get("Esecutore") or "").strip() if lav is not None else ""
+    if precedente and precedente.lower() not in (candidato.nome.lower(), candidato.id.lower()):
+        voci = [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
+        if misure.PIU_ESECUTORI not in voci:
+            voci.append(misure.PIU_ESECUTORI)
+            try:
+                board.campo(compito_numero, "Misure parziali", ", ".join(voci))
+            except Exception as exc:
+                print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
+        da_scrivere: tuple[tuple[str, str], ...] = ()
+    else:
+        da_scrivere = (("Esecutore", candidato.nome), ("Porta", candidato.porta), ("Dove", "fuori"))
+
+    for nome_campo, val in da_scrivere:
         try:
             board.campo(compito_numero, nome_campo, val)
         except Exception as exc:

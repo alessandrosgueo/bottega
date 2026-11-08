@@ -78,14 +78,14 @@ class Pi:
                 usage = rec.get("usage")
                 if isinstance(usage, dict):
                     for k, v in usage.items():
-                        if isinstance(v, int):
-                            contatori[k] = v
+                        if isinstance(v, int) and not isinstance(v, bool):
+                            contatori[k] = contatori.get(k, 0) + v
             elif tipo == "usage":
                 usage = rec.get("usage")
                 if isinstance(usage, dict):
                     for k, v in usage.items():
-                        if isinstance(v, int):
-                            contatori[k] = v
+                        if isinstance(v, int) and not isinstance(v, bool):
+                            contatori[k] = contatori.get(k, 0) + v
 
             if rec.get("stopReason") == "error" or rec.get("errorMessage") or rec.get("type") == "error":
                 ha_errore = True
@@ -141,6 +141,11 @@ class Pi:
                 return p_diretto
             if (sessions_dir / sess).is_file():
                 return sessions_dir / sess
+            # Un nome di file senza cartella (quello che il segno scrive): si cerca nelle cartelle delle sessioni.
+            if "/" not in sess and "\\" not in sess and not sess.startswith(".") and sessions_dir.is_dir():
+                trovati = sorted(f for f in sessions_dir.glob(f"*/{sess}") if f.is_file())
+                if trovati:
+                    return trovati[0]
 
         if not sessions_dir.is_dir():
             return None
@@ -174,6 +179,7 @@ class Pi:
         percorso: Path,
         dopo: datetime,
         fino: datetime,
+        visti: set[str] | None = None,
     ) -> Token:
         """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
         if dopo.tzinfo is None:
@@ -182,6 +188,7 @@ class Pi:
             fino = fino.replace(tzinfo=timezone.utc)
 
         totale = 0
+        messaggi = 0
         with percorso.open("r", encoding="utf-8") as f:
             for riga in f:
                 riga = riga.strip()
@@ -252,5 +259,6 @@ class Pi:
                 if invalido:
                     continue
                 totale += subtot
+                messaggi += 1
 
-        return Token(totale=totale, parziale=False)
+        return Token(totale=totale, parziale=False, messaggi=messaggi)

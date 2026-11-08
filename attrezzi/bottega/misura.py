@@ -11,6 +11,7 @@ import sys
 
 from bottega.board import Board, BoardComando, BoardProject
 from bottega.configurazione import (
+    PORTE,
     PERCORSO_PREDEFINITO,
     ErroreConfigurazione,
     leggi_configurazione,
@@ -114,6 +115,17 @@ def comando_misura(args: argparse.Namespace, board: Board | None = None) -> int:
     dove = getattr(args, "dove", None)
     if dove is not None and dove not in ("sessione", "fuori"):
         print("misura: --dove deve essere 'sessione' o 'fuori'", file=sys.stderr)
+        return 2
+
+    for opt in OPZIONI_MISURA:
+        val = getattr(args, opt, None)
+        if isinstance(val, int) and not isinstance(val, bool) and val < 0:
+            print(f"misura: --{opt.replace('_', '-')} non può essere negativo", file=sys.stderr)
+            return 2
+
+    porta_arg = getattr(args, "porta", None)
+    if porta_arg is not None and porta_arg not in PORTE:
+        print(f"misura: --porta deve essere una di {', '.join(PORTE)}", file=sys.stderr)
         return 2
 
     esito = getattr(args, "esito", None)

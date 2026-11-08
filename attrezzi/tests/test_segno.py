@@ -95,7 +95,8 @@ def test_porta_della_sessione() -> None:
 
     # 3. Poi Pi (la sessione è il percorso)
     del env["ANTIGRAVITY_CONVERSATION_ID"]
-    assert porta_della_sessione(env) == ("pi", "/tmp/pi.jsonl")
+    # Solo il nome del file: il percorso contiene la casa di chi decide (B5-R11).
+    assert porta_della_sessione(env) == ("pi", "pi.jsonl")
 
     # 4. Poi Copilot
     del env["PI_SESSION_FILE"]
@@ -289,7 +290,13 @@ def test_comando_segno_codici(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, c
     assert res_inizio == 0
     assert board.lavoro(10).campi.get("Segno") is not None
 
-    # 3. Fine con successo: codice 0
+    # 3. Fine con successo: codice 0. Il messaggio sta fra l'inizio (adesso) e la fine: B5-R11 vuole almeno un
+    # messaggio nell'intervallo, altrimenti niente numero.
+    from datetime import datetime as _dt, timezone as _tz
+
+    _scrivi_trascrizione_claude(
+        casa, cartella, "sess-cli", 40, _dt.now(_tz.utc).isoformat()
+    )
     args_fine = parser.parse_args(["fine", "10"])
     res_fine = comando_segno(args_fine, board=board)
     assert res_fine == 0

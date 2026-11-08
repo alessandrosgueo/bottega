@@ -152,6 +152,7 @@ class Antigravity:
         percorso: Path,
         dopo: datetime,
         fino: datetime,
+        visti: set[str] | None = None,
     ) -> Token:
         """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
         if dopo.tzinfo is None:
@@ -160,6 +161,7 @@ class Antigravity:
             fino = fino.replace(tzinfo=timezone.utc)
 
         totale = 0
+        messaggi = 0
         with percorso.open("r", encoding="utf-8") as f:
             for riga in f:
                 riga = riga.strip()
@@ -192,5 +194,6 @@ class Antigravity:
                 if subtot is None:
                     continue
                 totale += subtot
+                messaggi += 1
 
-        return Token(totale=totale, parziale=True)
+        return Token(totale=totale, parziale=True, messaggi=messaggi)

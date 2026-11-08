@@ -39,7 +39,8 @@ def porta_della_sessione(env: Mapping[str, str]) -> tuple[str, str] | None:
 
     pi = env.get("PI_SESSION_FILE", "").strip()
     if pi:
-        return "pi", pi
+        # Solo il nome del file: il percorso contiene la casa e la cartella di chi decide.
+        return "pi", Path(pi).name
 
     copilot = env.get("COPILOT_AGENT_SESSION_ID", "").strip()
     if copilot:
@@ -66,6 +67,19 @@ def inizio(
     avviso = None
     if lav is not None and lav.campi.get("Segno"):
         avviso = f"avviso: segno già aperto sul #{numero}: sostituito"
+    try:
+        altri = [
+            altro.numero
+            for altro in board.elenco()
+            if altro.numero != numero and nota(altro.campi.get("Segno", "")).get("sessione") == sessione
+        ]
+    except Exception:  # noqa: BLE001 - l'avviso è un di più
+        altri = []
+    if altri:
+        elenco_altri = ", ".join(f"#{n}" for n in altri)
+        avviso = (avviso + "; " if avviso else "avviso: ") + (
+            f"la stessa sessione ha un segno aperto anche su {elenco_altri}: i token si conteranno su tutti e due"
+        )
 
     val_segno = scrivi_nota({
         "porta": porta,
@@ -123,8 +137,10 @@ def fine(
     tutte = [(p_segno, sessione_segno)] + list(porte_e_sessioni)
 
     totale_token = 0
+    totale_messaggi = 0
     ha_parziale = False
     file_visti: set[Path] = set()
+    messaggi_visti: set[str] = set()
 
     for p_obj, s_id in tutte:
         try:
@@ -141,17 +157,28 @@ def fine(
         file_visti.add(tr_risolto)
 
         try:
-            tok = p_obj.token(tr_risolto, dopo, fino)
+            tok = p_obj.token(tr_risolto, dopo, fino, visti=messaggi_visti)
         except OSError as e:
             return None, f"trascrizione non leggibile: {e}: niente numero"
 
         totale_token += tok.totale
+        totale_messaggi += tok.messaggi
         if tok.parziale:
             ha_parziale = True
 
+    # Nessun messaggio nell'intervallo: quasi sempre la trascrizione sbagliata. Niente numero, e il segno resta aperto
+    # per riprovare con --sessione.
+    if totale_messaggi == 0:
+        return None, f"nessun messaggio fra l'inizio e adesso nella trascrizione: niente numero (segno ancora aperto)"
+
+    # Prima si chiude il segno: se poi la somma non riesce il numero si perde, ma non si conta mai due volte.
+    try:
+        board.campo(numero, "Segno", None)
+    except Exception as e:  # noqa: BLE001 - un guasto qui lascia tutto com'era
+        return None, f"segno non chiuso ({e}): niente numero, riprova"
     ok = misure.somma(board, numero, "Token di chi decide", totale_token)
     if not ok:
-        return None, "scrittura delle misure non riuscita sulla board: niente numero"
+        return None, "segno chiuso ma la somma non è riuscita sulla board: niente numero"
 
     if ha_parziale:
         attuali = lav.campi.get("Misure parziali", "")
@@ -160,7 +187,6 @@ def fine(
             voci.append("Token di chi decide")
             board.campo(numero, "Misure parziali", ", ".join(voci))
 
-    board.campo(numero, "Segno", None)
     return totale_token, f"chiuso: aggiunti {totale_token} token a Token di chi decide"
 
 
@@ -246,7 +272,7 @@ def comando_segno(args: argparse.Namespace, board: Board | None = None) -> int:
                         print(f"errore: trascrizione per {p_nome} non trovata: niente numero", file=sys.stderr)
                         return 1
                     if p_nome == "pi":
-                        s_id = str(tr)
+                        s_id = tr.name
                     elif p_nome == "copilot-cli":
                         s_id = tr.parent.name
                     elif p_nome == "antigravity":
@@ -274,7 +300,7 @@ def comando_segno(args: argparse.Namespace, board: Board | None = None) -> int:
                 if sessione_arg:
                     s_id = sessione_arg
                 elif p_nome == "pi":
-                    s_id = str(tr)
+                    s_id = tr.name
                 elif p_nome == "copilot-cli":
                     s_id = tr.parent.name
                 elif p_nome == "antigravity":
@@ -301,7 +327,7 @@ def comando_segno(args: argparse.Namespace, board: Board | None = None) -> int:
                     tr = p_obj.trascrizione(env, cartella, sessione=None)
                     if tr:
                         if p_nome == "pi":
-                            s_id = str(tr)
+                            s_id = tr.name
                         elif p_nome == "copilot-cli":
                             s_id = tr.parent.name
                         elif p_nome == "antigravity":

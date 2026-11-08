@@ -102,7 +102,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               }
             }
           }
-          fieldValues(first: 20) {
+          fieldValues(first: 100) {
             nodes {
               ... on ProjectV2ItemFieldTextValue {
                 text
@@ -182,7 +182,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               }
             }
           }
-          fieldValues(first: 20) {
+          fieldValues(first: 100) {
             nodes {
               ... on ProjectV2ItemFieldTextValue {
                 text
@@ -303,12 +303,16 @@ class BoardProject:
         self._tipo_proprietario: str | None = None
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
-        risultato = subprocess.run(
-            ["gh", *argomenti],
-            input=ingresso,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            risultato = subprocess.run(
+                ["gh", *argomenti],
+                input=ingresso,
+                text=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise ErroreBoard(f"gh non ha risposto in 120 secondi: {argomenti[:2]}") from None
         if risultato.returncode != 0:
             raise ErroreBoard(f"gh ha fallito ({risultato.returncode}): {risultato.stderr.strip()}")
         return risultato.stdout
@@ -551,6 +555,7 @@ def _dati_a_lavoro(d: dict[str, Any]) -> Lavoro:
         d_filtrato["campi"] = {
             str(k): _formatta_numero_str(v) if isinstance(v, (int, float)) else str(v)
             for k, v in d_filtrato["campi"].items()
+            if v is not None
         }
     return Lavoro(**d_filtrato)
 
@@ -576,12 +581,16 @@ class BoardComando:
     def _esegui(self, argomenti: list[str], ingresso: str | None = None) -> str:
         if self._esegui_custom is not None:
             return self._esegui_custom(argomenti, ingresso)
-        risultato = subprocess.run(
-            argomenti,
-            input=ingresso,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            risultato = subprocess.run(
+                argomenti,
+                input=ingresso,
+                text=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}") from None
         if risultato.returncode != 0:
             raise ErroreBoard(f"Comando {argomenti} fallito ({risultato.returncode}): {risultato.stderr.strip()}")
         return risultato.stdout
@@ -602,8 +611,13 @@ class BoardComando:
         return [_dati_a_lavoro(d) for d in dati]
 
     def lavoro(self, numero: int) -> Lavoro | None:
-        # B5: si cerca fra tutti gli elementi (anche un compito consegnato o senza stato riceve le sue misure).
-        for lav in self.elenco():
+        # B5: si cerca fra tutti gli elementi (anche un compito consegnato o senza stato riceve le sue misure); un
+        # adattatore di prima di B5, senza `elenco`, cerca ancora fra in corso e pronti.
+        try:
+            tutti = self.elenco()
+        except ErroreBoard:
+            tutti = [*self.in_corso(), *self.pronti()]
+        for lav in tutti:
             if lav.numero == numero:
                 return lav
         return None

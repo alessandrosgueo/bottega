@@ -35,6 +35,14 @@ CAMPI: dict[str, str] = {
 
 OPZIONI_ESITO: tuple[str, ...] = ("unito com'era", "corretto", "rifiutato")
 
+# La voce di `Misure parziali` di un compito eseguito da più candidati: non entra in risultati e costi.
+PIU_ESECUTORI = "più esecutori"
+
+
+def _di_piu_esecutori(lavoro: Lavoro) -> bool:
+    voci = [v.strip() for v in (lavoro.campi.get("Misure parziali") or "").split(",")]
+    return PIU_ESECUTORI in voci
+
 
 def numero(lavoro: Lavoro, nome: str) -> float:
     """Il valore del campo come float, 0.0 se vuoto o non numerico."""
@@ -90,6 +98,8 @@ def risultati(lavori: Sequence[Lavoro], configurazione: Configurazione) -> dict[
     conteggi: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
 
     for lav in lavori:
+        if _di_piu_esecutori(lav):
+            continue
         esito = lav.campi.get("Esito del compito")
         if esito not in OPZIONI_ESITO:
             continue
@@ -127,6 +137,8 @@ def costi_propri(lavori: Sequence[Lavoro], configurazione: Configurazione) -> di
     token_per_candidato: dict[str, list[float]] = {}
 
     for lav in lavori:
+        if _di_piu_esecutori(lav):
+            continue
         esec_testo = lav.campi.get("Esecutore") or lav.esecutore
         if not esec_testo:
             continue

@@ -61,6 +61,7 @@ class Token:
 
     totale: int
     parziale: bool
+    messaggi: int = 0
 
 
 class Porta(Protocol):
@@ -101,6 +102,7 @@ class Porta(Protocol):
         percorso: Path,
         dopo: datetime,
         fino: datetime,
+        visti: set[str] | None = None,
     ) -> Token:
         """Somma i contatori dei token registrati nel percorso compresi fra dopo e fino."""
         ...
