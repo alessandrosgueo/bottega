@@ -5,16 +5,24 @@ import sys
 from collections.abc import Callable
 
 from bottega import VERSIONE
+from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
 
 # Nome del sottocomando -> funzione che riceve gli argomenti letti e restituisce l'esito (0 = tutto bene).
-COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {}
+COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
+    "controlla-pubblico": controlla_pubblico,
+}
+# Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
+ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
+    "controlla-pubblico": argomenti_controlla_pubblico,
+}
 
 
 class _Formattatore(argparse.HelpFormatter):
     """Mette «uso:» davanti all'uso: argparse ci mette «usage:» di serie."""
 
     def add_usage(self, usage, actions, groups, prefix=None):
-        super().add_usage(usage, actions, groups, prefix or "uso: ")
+        # Il prefisso vuoto serve ad add_subparsers per ricavare il nome del comando: non va riempito.
+        super().add_usage(usage, actions, groups, "uso: " if prefix is None else prefix)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -27,6 +35,16 @@ class _Parser(argparse.ArgumentParser):
         self.opzioni = self.add_argument_group("opzioni")
         self.opzioni.add_argument("-h", "--help", action="help", help="mostra questo aiuto ed esci")
 
+    def add_argument(self, *args, **kwargs):
+        """Le opzioni, anche quelle dei sottocomandi, finiscono nel gruppo «opzioni»."""
+        return self.opzioni.add_argument(*args, **kwargs)
+
+
+def _prima_riga(funzione: Callable) -> str:
+    """Prima riga della docstring del comando: è la scritta che l'elenco dei comandi mostra."""
+    righe = (funzione.__doc__ or "").strip().splitlines()
+    return righe[0].strip() if righe else ""
+
 
 def costruisci_parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="bottega")
@@ -34,8 +52,10 @@ def costruisci_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"bottega {VERSIONE}", help="mostra la versione ed esci"
     )
     sottocomandi = parser.add_subparsers(dest="comando", title="comandi", metavar="COMANDO", parser_class=_Parser)
-    for nome in COMANDI:
-        sottocomandi.add_parser(nome)
+    for nome, funzione in COMANDI.items():
+        sottoparser = sottocomandi.add_parser(nome, help=_prima_riga(funzione))
+        if nome in ARGOMENTI:
+            ARGOMENTI[nome](sottoparser)
     return parser
 
 
