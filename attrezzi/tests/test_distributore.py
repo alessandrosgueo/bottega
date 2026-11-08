@@ -932,6 +932,107 @@ runner = "linux"
     assert "Traceback" not in catturato.err
 
 
+def test_c4_riprova_azzera_i_contatori(tmp_path: Path) -> None:
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    nota_iniziale = "ramo=bottega/1-x;tentativi=3;attese=2;motivo=errore"
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="in attesa", etichette=["bottega: fuori"], nota=nota_iniziale),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+    forgia.imposta_stato_ci(forgia.ramo_principale(), "rosso")
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega riprova", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+        percorso_evento=evento_file,
+    )
+
+    lav = board.lavoro(1)
+    assert lav is not None
+    assert lav.stato == "pronto"
+    assert lav.nota == "ramo=bottega/1-x"
+
+
+def test_c4_consulta_col_prefisso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Come procediamo?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    chiamate_porta: list[dict[str, Any]] = []
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self, prefisso=()): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            chiamate_porta.append({"prefisso": prefisso, "sola_lettura": sola_lettura})
+            return Lancio(esito="fatto", testo="Risposta consiglio")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+        prefisso=("env",),
+    )
+
+    assert len(chiamate_porta) == 1
+    assert chiamate_porta[0]["prefisso"] == ("env",)
+
+
+
 
 
 

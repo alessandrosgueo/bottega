@@ -187,3 +187,14 @@ def test_proprieta_ramo(numero: int, titolo: str):
     assert not slug.endswith("-")
     assert "--" not in slug
     assert re.fullmatch(r"[a-z0-9-]+", slug) is not None
+
+
+def test_c4_recinto_di_chiusura_piu_lungo():
+    corpo = (
+        "## Fatto quando\n\n"
+        "```\n"
+        "uv run pytest\n"
+        "````\n"
+    )
+    assert fatto_quando(corpo) == "uv run pytest"
+

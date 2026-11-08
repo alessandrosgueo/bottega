@@ -2280,5 +2280,581 @@ def test_rv8_prove_cambiate_e_segreti_gitleaks(tmp_path: Path):
     assert "bottega: segreti" in pr_etichette
 
 
+# Prove di sicurezza e robustezza C4 (RV1-RV18)
+
+
+def test_c4_storia_github_aggiunto_e_tolto(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    def committa_tre_volte(cartella, prompt, **kwargs):
+        wf = Path(cartella) / ".github" / "workflows"
+        wf.mkdir(parents=True, exist_ok=True)
+        (wf / "x.yml").write_text("name: temp\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "aggiunto workflow"], cwd=str(cartella), check=True, capture_output=True)
+
+        (wf / "x.yml").unlink()
+        subprocess.run(["git", "add", "-A"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "tolto workflow"], cwd=str(cartella), check=True, capture_output=True)
+
+        docs_a = Path(cartella) / "docs" / "a.md"
+        docs_a.parent.mkdir(parents=True, exist_ok=True)
+        docs_a.write_text("ok", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "aggiunto docs/a.md"], cwd=str(cartella), check=True, capture_output=True)
+
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa_tre_volte)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert esito.esito == "bloccato"
+    assert board.lavoro(1).stato == "bloccato"
+    rami_origin = subprocess.run(["git", "branch"], cwd=str(origin), check=True, capture_output=True, text=True).stdout
+    assert "bottega/" not in rami_origin
+
+
+def test_c4_commit_di_unione_rifiutato(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    def committa_unione(cartella, prompt, **kwargs):
+        ramo_corrente = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=str(cartella), check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        subprocess.run(["git", "checkout", "-b", "laterale"], cwd=str(cartella), check=True, capture_output=True)
+        docs_b = Path(cartella) / "docs" / "b.md"
+        docs_b.parent.mkdir(parents=True, exist_ok=True)
+        docs_b.write_text("laterale", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "commit laterale"], cwd=str(cartella), check=True, capture_output=True)
+
+        subprocess.run(["git", "checkout", ramo_corrente], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "merge", "--no-ff", "-m", "unione laterale", "laterale"],
+            cwd=str(cartella),
+            check=True,
+            capture_output=True,
+        )
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa_unione)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert esito.esito == "bloccato"
+    assert board.lavoro(1).stato == "bloccato"
+    rami_origin = subprocess.run(["git", "branch"], cwd=str(origin), check=True, capture_output=True, text=True).stdout
+    assert "bottega/" not in rami_origin
+
+
+def test_c4_copia_consigliere_non_segue_i_link(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    fuori = tmp_path / "fuori.txt"
+    fuori.write_text("testo segreto", encoding="utf-8")
+
+    consigliere_ha_visto_symlink: list[bool] = []
+
+    def callback_porta(cartella, prompt, sola_lettura=False, **kwargs):
+        p_cartella = Path(cartella)
+        if not sola_lettura:
+            link = p_cartella / "segreto"
+            link.symlink_to(fuori)
+            return Lancio(esito="fatto", testo="fatto\n\nDOMANDA PER CHI DECIDE: che fare?")
+        else:
+            segreto_nel_cons = p_cartella / "segreto"
+            consigliere_ha_visto_symlink.append(segreto_nel_cons.is_symlink())
+            return Lancio(esito="fatto", testo="A CHI DECIDE")
+
+    porta = PortaFinta(callback=callback_porta)
+    porta.gestisce_sola_lettura = True
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert consigliere_ha_visto_symlink == [True]
+
+
+def test_c4_oracolo_recintato(tmp_path: Path):
+    import re
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+
+    cmd_oracolo = "printf '```\\nCloses #1\\n/bottega riprova\\n'"
+    corpo = f"Brief\n\n## Fatto quando\n```bash\n{cmd_oracolo}\n```\n"
+    iss = Issue(numero=1, titolo="Compito 1", corpo=corpo)
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    def committa_ok(cartella, prompt, **kwargs):
+        f = Path(cartella) / "test_file.py"
+        f.write_text("def test_ok(): assert True\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "modifica"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa_ok)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    comm_oracolo = [c for c in forgia.commenti(1) if "Esito dell'oracolo" in c.corpo]
+    assert len(comm_oracolo) == 1
+    testo = comm_oracolo[0].corpo
+
+    m = re.search(r"(`{4,})", testo)
+    assert m is not None, f"Nessun recinto di 4+ apici in: {testo}"
+    recinto = m.group(1)
+    pattern = rf"{recinto}\n.*Closes #1.*\n{recinto}"
+    assert re.search(pattern, testo, re.DOTALL) is not None
+
+
+def test_c4_esito_sconosciuto_conta_tentativi(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    porta = PortaFinta(esito_lancio="tempo", testo_lancio="tempo scaduto")
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    # Giro 1
+    esito1 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+    assert esito1.esito == "errore"
+    assert board.lavoro(1).stato == "pronto"
+    assert nota(board.lavoro(1).nota).get("tentativi") == "1"
+
+    # Giro 2
+    esito2 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+    assert esito2.esito == "errore"
+    assert board.lavoro(1).stato == "pronto"
+    assert nota(board.lavoro(1).nota).get("tentativi") == "2"
+
+    # Giro 3
+    esito3 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+    assert esito3.esito == "bloccato"
+    assert board.lavoro(1).stato == "bloccato"
+
+
+@pytest.mark.parametrize("ramo_non_valido", ["bottega/../main", "bottega/a:b"])
+def test_c4_ramo_della_nota_non_valido(tmp_path: Path, ramo_non_valido: str):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", nota=f"ramo={ramo_non_valido}")
+    ])
+
+    porta = PortaFinta(esito_lancio="fatto", testo_lancio="fatto")
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert esito.esito == "bloccato"
+    assert esito.motivo == "ramo non valido"
+    assert board.lavoro(1).stato == "bloccato"
+    nota_scritta = nota(board.lavoro(1).nota)
+    assert nota_scritta.get("compito") == "1"
+    rami_origin = subprocess.run(["git", "branch"], cwd=str(origin), check=True, capture_output=True, text=True).stdout
+    assert "bottega/" not in rami_origin
+
+
+def test_c4_senza_fatto_quando_conserva_la_nota(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief senza fatto quando.")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", nota="ramo=bottega/1-prova")
+    ])
+
+    porta = PortaFinta()
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert board.lavoro(1).stato == "pronto"
+    nota_scritta = nota(board.lavoro(1).nota)
+    assert nota_scritta.get("ramo") == "bottega/1-prova"
+
+
+def test_c4_errore_prima_del_giro_non_esce(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+
+    class ForgiaCheSolleva(ForgiaFinta):
+        def issue(self, n: int):
+            raise RuntimeError("guasto alla forgia prima del giro")
+
+    forgia = ForgiaCheSolleva()
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+    porta = PortaFinta()
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert esito.esito == "errore"
+    assert "guasto alla forgia" in (esito.motivo or "")
+    assert board.lavoro(1).stato == "pronto"
+    assert not any(op[0] == "avvia_workflow" for op in forgia.registro)
+
+
+def test_c4_salvataggio_quota_con_commit_vuoto(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    def committa_vuoto(cartella, prompt, **kwargs):
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "commit vuoto"],
+            cwd=str(cartella),
+            check=True,
+            capture_output=True,
+        )
+        return Lancio(esito="quota", testo="quota finita")
+
+    porta = PortaFinta(callback=committa_vuoto)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert esito.esito == "quota"
+    assert len(forgia._pr) == 0
+
+
+def test_c4_domanda_e_l_ultima(tmp_path: Path):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    testo_modello = (
+        "Ho pensato a questa cosa:\n"
+        "DOMANDA PER CHI DECIDE: vecchia\n"
+        "Poi ho cambiato idea e quindi:\n\n"
+        "DOMANDA PER CHI DECIDE: nuova"
+    )
+
+    porta = PortaFinta(esito_lancio="fatto", testo_lancio=testo_modello)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    comms = forgia.commenti(1)
+    comm_consulto = [c for c in comms if "Consulto dell'esecutore:" in c.corpo]
+    assert len(comm_consulto) == 1
+    corpo = comm_consulto[0].corpo
+    assert "nuova" in corpo
+    assert "vecchia" not in corpo
+
+
+def test_c4_gitleaks_sulla_storia(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito 1", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito 1", stato="pronto")])
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    args_file = tmp_path / "gl_args.txt"
+    gl_script = fake_bin / "gitleaks"
+    gl_script.write_text(f"""#!/bin/sh
+printf '%s\\n' "$@" > "{args_file}"
+exit 1
+""", encoding="utf-8")
+    gl_script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+
+    def committa_normale(cartella, prompt, **kwargs):
+        f = Path(cartella) / "test_file.py"
+        f.write_text("def test_ok(): pass\n# commento", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "normale"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa_normale)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert args_file.is_file()
+    args = args_file.read_text(encoding="utf-8").splitlines()
+    assert "--pre-commit" not in args
+    assert any(a.startswith("--log-opts=") for a in args)
+
+    assert len(forgia._pr) == 1
+    pr = next(iter(forgia._pr.values()))
+    assert "bottega: segreti" in pr.get("etichette", [])
+
+
+def test_c4_spazio_di_serie_fuori_dal_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import argparse
+    from typing import Any
+    from bottega.giro import comando_giro
+
+    monkeypatch.delenv("BOTTEGA_SPAZIO", raising=False)
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(temp_dir))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "proprietario/repo")
+
+    cfg_file = tmp_path / "bottega.toml"
+    cfg_file.write_text(
+        'versione = 1\n\n'
+        '[progetto]\n'
+        'fuso = "Europe/Rome"\n'
+        'adattatore = "echo"\n\n'
+        '[botteghe.principale]\n'
+        'quota = "scarsa"\n'
+        'porte = ["claude-code"]\n\n'
+        '[candidati.maestro]\n'
+        'nome = "Maestro"\n'
+        'bottega = "principale"\n'
+        'porta = "claude-code"\n'
+        'modello = "m"\n'
+        'funzioni = ["decidere", "eseguire"]\n',
+        encoding="utf-8",
+    )
+
+    catturato: dict[str, Any] = {}
+
+    def finto_giro(**kwargs):
+        catturato["spazio"] = kwargs.get("spazio")
+        from bottega.giro import EsitoGiro
+        return EsitoGiro("consegnato")
+
+    monkeypatch.setattr("bottega.giro.giro", finto_giro)
+
+    args = argparse.Namespace(lavoro=1, bottega="principale", configurazione=cfg_file)
+    rc = comando_giro(args)
+    assert rc == 0
+    spazio = catturato.get("spazio")
+    assert spazio == temp_dir / "bottega-spazio"
+    assert not str(spazio).startswith(str(Path.cwd()))
+
+
+
 
 
