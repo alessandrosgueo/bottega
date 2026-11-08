@@ -85,3 +85,6 @@ Dal sorgente della 1.0.32, non verificato in una sessione reale:
 - Elenco dei modelli fuori dalla sessione interattiva: non verificato.
 - Installazione da percorso diretto: deprecata nella 1.0.32, valida nella documentazione corrente. Qui non si usa.
 - Versione: il registro dava la 1.0.107 alla ricognizione; l'aiuto e i sorgenti letti sono della 1.0.32.
+- Che `copilot plugin marketplace add <clone>` legga `.claude-plugin/marketplace.json` del clone: è una scelta di
+  B1 fatta sulla documentazione, mai provata (Copilot CLI senza crediti alla tappa B1).
+- `copilot plugin marketplace update bottega`: visto in `copilot plugin marketplace --help`, non nella ricognizione.
