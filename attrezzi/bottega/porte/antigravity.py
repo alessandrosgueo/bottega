@@ -73,26 +73,42 @@ class Antigravity:
         else:
             conv_id = conversazione
 
-        testo_tutto = f"{errore}\n{stdout}\n{stderr}"
-        testo_tutto_lower = testo_tutto.lower()
+        testo_errore_parti: list[str] = []
+        ha_codice_429 = False
+
+        if errore:
+            if isinstance(errore, dict):
+                testo_errore_parti.append(json.dumps(errore))
+                if errore.get("code") == 429:
+                    ha_codice_429 = True
+            else:
+                testo_errore_parti.append(str(errore))
+        if isinstance(dati, dict):
+            if dati.get("code") == 429:
+                ha_codice_429 = True
+
+        if stderr.strip():
+            testo_errore_parti.append(stderr.strip())
+
+        testo_controllo_errore = "\n".join(testo_errore_parti).lower()
 
         if status == "SUCCESS" and ret == 0:
             esito = "fatto"
             if not testo:
                 testo = stdout.strip()
         else:
-            # Parole chiave di quota secondo B3-R8: quota, exhausted, RESOURCE_EXHAUSTED, rate limit, 429
+            # RV16: quota e accesso cercati solo nei campi d'errore e in stderr, mai nel testo del modello
             parole_quota = ("quota", "exhausted", "resource_exhausted", "rate limit", "429")
             parole_accesso = ("authentication required", "unauthorized", "login required", "not logged in")
 
-            if any(k in testo_tutto_lower for k in parole_quota):
+            if ha_codice_429 or any(k in testo_controllo_errore for k in parole_quota):
                 esito = "quota"
-            elif any(k in testo_tutto_lower for k in parole_accesso):
+            elif any(k in testo_controllo_errore for k in parole_accesso):
                 esito = "accesso"
             else:
                 esito = "errore"
             if not testo:
-                testo = errore or stderr.strip() or stdout.strip()
+                testo = (str(errore) if errore else "") or stderr.strip() or stdout.strip()
 
         return Lancio(
             esito=esito,

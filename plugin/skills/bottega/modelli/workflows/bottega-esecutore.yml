@@ -17,11 +17,12 @@ concurrency:
 
 jobs:
   esecutore:
-    uses: <proprietario>/bottega/.github/workflows/esecutore.yml@<tag>
+    uses: <proprietario>/bottega/.github/workflows/esecutore.yml@<sha>
     with:
       bottega_repo: <proprietario>/bottega
       bottega_ref: <tag>
       runner: '["<etichetta del runner>"]'
       bottega: <id>
       lavoro: ${{ inputs.lavoro }}
-    secrets: inherit
+    secrets:
+      BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}

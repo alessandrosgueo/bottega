@@ -715,6 +715,9 @@ print(json.dumps({{"type": "assistant.message", "data": {{"content": "ispezione 
     assert "--available-tools" in ricevuti
     idx_tools = ricevuti.index("--available-tools")
     assert ricevuti[idx_tools + 1] == "view,grep,glob"
+    assert "--allow-tool" in ricevuti
+    idx_allow = ricevuti.index("--allow-tool")
+    assert ricevuti[idx_allow + 1] == "view,grep,glob"
     assert "--allow-all-tools" not in ricevuti
 
 
@@ -865,4 +868,79 @@ print(json.dumps({"type": "session.shutdown", "data": {"conversationTokens": 10}
     assert res.esito == "fatto"
     assert res.rinnovo is None
     assert "weekly limit" in res.testo
+
+
+def test_rv16_antigravity_errore_con_quota_in_risposta_resta_errore(tmp_path: Path) -> None:
+    """RV16: Antigravity in errore cerca la quota SOLO nei campi errore e stderr, mai nel testo del modello."""
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_agy_err_con_quota_in_risposta.py",
+        """
+import json, sys
+print(json.dumps({
+    "status": "ERROR",
+    "error": "Internal crash in sandbox",
+    "response": "Ho riscontrato quota 429 ed exhausted in precedenza",
+}))
+sys.exit(1)
+""",
+    )
+    p = porta("antigravity", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.esito == "errore"
+
+
+def test_rv16_antigravity_quota_con_intero_429(tmp_path: Path) -> None:
+    """RV16: Antigravity riconosce 429 come intero nei campi d'errore."""
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_agy_quota_429_int.py",
+        """
+import json, sys
+print(json.dumps({
+    "status": "ERROR",
+    "error": {"code": 429, "message": "Too Many Requests"},
+}))
+sys.exit(1)
+""",
+    )
+    p = porta("antigravity", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.esito == "quota"
+
+
+def test_rv16_pi_errore_con_quota_in_risposta_resta_errore(tmp_path: Path) -> None:
+    """RV16: Pi in errore cerca la quota SOLO in errorMessage e stderr, mai nei messaggi del modello."""
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_pi_err_con_quota_in_risposta.py",
+        """
+import json, sys
+print(json.dumps({"type": "session", "id": "pi-err"}))
+print(json.dumps({"type": "message", "role": "assistant", "content": "Attenzione: quota 429 esaurita nel modello"}))
+print(json.dumps({"type": "message", "stopReason": "error", "errorMessage": "Connection reset by peer"}))
+sys.exit(1)
+""",
+    )
+    p = porta("pi", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.esito == "errore"
+
+
+def test_rv16_pi_quota_con_intero_429(tmp_path: Path) -> None:
+    """RV16: Pi riconosce 429 come intero nei record d'errore."""
+    script = _crea_script_finto(
+        tmp_path,
+        "finto_pi_quota_429_int.py",
+        """
+import json, sys
+print(json.dumps({"type": "session", "id": "pi-429"}))
+print(json.dumps({"type": "error", "code": 429, "errorMessage": "Rate limit exceeded"}))
+sys.exit(1)
+""",
+    )
+    p = porta("pi", eseguibile=str(script))
+    res = p.lancia(tmp_path, "esegui", "model")
+    assert res.esito == "quota"
+
 

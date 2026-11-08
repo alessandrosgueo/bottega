@@ -81,6 +81,7 @@ class ForgiaFinta:
                 corpo=cur.corpo,
                 stato=cur.stato,
                 etichette=etichette,
+                autore=cur.autore,
             )
         if n in self._pr:
             etichette = list(self._pr[n].setdefault("etichette", []))
@@ -122,9 +123,9 @@ class ForgiaFinta:
     def imposta_stato_ci(self, ramo: str, stato: str) -> None:
         self._stato_ci[ramo] = stato
 
-    def crea_issue(self, titolo: str, corpo: str, madre: int | None = None) -> int:
+    def crea_issue(self, titolo: str, corpo: str, madre: int | None = None, autore: str = "") -> int:
         num = self._prossimo_num_issue()
-        iss = Issue(numero=num, titolo=titolo, corpo=corpo, stato="OPEN", etichette=[])
+        iss = Issue(numero=num, titolo=titolo, corpo=corpo, stato="OPEN", etichette=[], autore=autore)
         self._issues[num] = iss
         if madre is not None:
             self._sotto_issue.setdefault(madre, []).append(num)
@@ -141,6 +142,7 @@ class ForgiaFinta:
             corpo=cur.corpo,
             stato="CLOSED",
             etichette=cur.etichette,
+            autore=cur.autore,
         )
         self.registro.append(("chiudi_issue", n))
 
@@ -160,6 +162,7 @@ class ForgiaFinta:
                     corpo=cur.corpo,
                     stato="CLOSED",
                     etichette=cur.etichette,
+                    autore=cur.autore,
                 )
             self.registro.append(("avviso", chiave, titolo, None))
             return
@@ -173,6 +176,7 @@ class ForgiaFinta:
                 corpo=corpo,
                 stato="OPEN",
                 etichette=["bottega: avviso"],
+                autore="bottega",
             )
             self._issues[num] = iss
             self._avvisi[chiave] = num

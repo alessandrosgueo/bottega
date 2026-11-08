@@ -41,7 +41,7 @@ class CopilotCli:
         if conversazione:
             cmd.extend(["--resume", conversazione])
         if sola_lettura:
-            cmd.extend(["--available-tools", "view,grep,glob"])
+            cmd.extend(["--available-tools", "view,grep,glob", "--allow-tool", "view,grep,glob"])
         else:
             cmd.append("--allow-all-tools")
 

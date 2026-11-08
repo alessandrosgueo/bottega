@@ -16,15 +16,19 @@ Solo libreria standard.
 
 import argparse
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 import random
+import re
+import shlex
 import sys
+import tempfile
 from zoneinfo import ZoneInfo
 
-from bottega.board import Board, BoardComando, BoardProject, Lavoro
+from bottega.board import Board, BoardComando, BoardProject, ErroreBoard, Lavoro
 from bottega.brief import fatto_quando
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
@@ -32,9 +36,10 @@ from bottega.configurazione import (
     ErroreConfigurazione,
     leggi_configurazione,
 )
-from bottega.forgia import Forgia, ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
+from bottega.porte import Porta, porta as porta_fabbrica
 from bottega.scelta import Compito, scegli
-from bottega.segni import nota, scrivi_nota
+from bottega.segni import comando, nota, scrivi_nota
 
 CHIAVE_AVVISO_CI = "ci-ramo-principale"
 ORE_SCADENZA_IN_CORSO = 7.0
@@ -114,6 +119,185 @@ def _ricava_fatto_quando(lav_numero: int, forgia: Forgia) -> str | None:
         return None
 
 
+def _recinta(testo: str, limite: int = 60000) -> str:
+    """Racchiude il testo in un blocco recintato più lungo di ogni sequenza di apici presente, troncato a limite."""
+    testo_troncato = (testo or "")[:limite]
+    apici = [len(m.group(0)) for m in re.finditer(r"`+", testo_troncato)]
+    max_apici = max(apici) if apici else 0
+    recinto = "`" * max(3, max_apici + 1)
+    return f"{recinto}\n{testo_troncato}\n{recinto}"
+
+
+def _gestisci_evento_commento(
+    percorso_evento: Path | str | None,
+    configurazione: Configurazione,
+    forgia: Forgia,
+    board: Board,
+    variabili: Mapping[str, str | None],
+    adesso_fuso: datetime,
+    caso: random.Random,
+    porte: Mapping[str, Porta] | None = None,
+) -> tuple[bool, list[str]]:
+    """Gestisce un eventuale comando da issue_comment nell'evento GITHUB_EVENT_PATH.
+
+    Restituisce (procedi_con_distribuzione, righe).
+    """
+    if percorso_evento is None:
+        env_path = os.environ.get("GITHUB_EVENT_PATH")
+        if not env_path:
+            return True, []
+        p_ev = Path(env_path)
+    else:
+        p_ev = Path(percorso_evento)
+
+    if not p_ev.is_file():
+        return True, []
+
+    try:
+        evento = json.loads(p_ev.read_text(encoding="utf-8"))
+    except Exception:
+        return True, []
+
+    if not isinstance(evento, dict):
+        return True, []
+
+    issue_data = evento.get("issue")
+    comment_data = evento.get("comment")
+    if not isinstance(issue_data, dict) or not isinstance(comment_data, dict):
+        return True, []
+
+    num_issue = issue_data.get("number")
+    if not isinstance(num_issue, int):
+        return True, []
+
+    corpo = str(comment_data.get("body") or "")
+    user_data = comment_data.get("user")
+    autore = user_data.get("login", "") if isinstance(user_data, dict) else ""
+    if not autore:
+        return True, []
+
+    comandanti = configurazione.progetto.comandanti or [forgia.proprietario()]
+    cmd = comando(corpo, autore, comandanti)
+    if cmd is None:
+        return True, []
+
+    righe: list[str] = []
+
+    if cmd.nome == "riprova":
+        in_corso = [l.numero for l in board.in_corso()]
+        if num_issue in in_corso:
+            msg = f"Comando /bottega riprova ignorato: il lavoro #{num_issue} è già in corso."
+            forgia.commenta(num_issue, msg, "distributore")
+            riga = f"lavoro {num_issue}: riprova ignorato perché già in corso"
+            righe.append(riga)
+            print(riga)
+        else:
+            board.stato(num_issue, "pronto")
+            msg = f"Lavoro #{num_issue} rimesso a «pronto» su comando di @{autore}."
+            forgia.commenta(num_issue, msg, "distributore")
+            riga = f"lavoro {num_issue}: rimesso a pronto su comando di «{autore}»"
+            righe.append(riga)
+            print(riga)
+        # RV13: riprova rimette pronto e distribuisce
+        return True, righe
+
+    if cmd.nome == "sospendi":
+        motivo = cmd.argomento.strip() or f"sospeso su comando di @{autore}"
+        lavori = board.pronti() + board.in_corso()
+        lav = next((l for l in lavori if l.numero == num_issue), None)
+        d_nota = nota(lav.nota) if lav else {}
+        d_nota["motivo"] = motivo
+        board.stato(num_issue, "in attesa", nota=scrivi_nota(d_nota))
+        msg = f"Lavoro #{num_issue} sospeso su comando di @{autore}."
+        if cmd.argomento.strip():
+            msg += f"\n\nMotivo: {cmd.argomento.strip()}"
+        forgia.commenta(num_issue, msg, "distributore")
+        riga = f"lavoro {num_issue}: sospeso ({motivo})"
+        righe.append(riga)
+        print(riga)
+        return False, righe
+
+    if cmd.nome == "consulta":
+        runner = os.environ.get("BOTTEGA_RUNNER")
+        candidati_runner = {
+            k: c for k, c in configurazione.candidati.items()
+            if runner is not None and c.runner == runner
+        }
+        cfg_runner = replace(configurazione, candidati=candidati_runner)
+        compito_cons = Compito(funzione="consigliare", fuori=True)
+        scelta_cons = scegli(
+            compito=compito_cons,
+            configurazione=cfg_runner,
+            risultati={},
+            quote=variabili,
+            adesso=adesso_fuso,
+            caso=caso,
+        )
+
+        if scelta_cons.candidato is None:
+            msg = f"Nessun consigliere disponibile sul runner per il consulto ({scelta_cons.perche})."
+            forgia.commenta(num_issue, msg, "distributore")
+            riga = f"lavoro {num_issue}: consulto non eseguito ({scelta_cons.perche})"
+            righe.append(riga)
+            print(riga)
+            return False, righe
+
+        cand = configurazione.candidati[scelta_cons.candidato]
+        if porte and cand.porta in porte:
+            adattatore_porta = porte[cand.porta]
+        else:
+            adattatore_porta = porta_fabbrica(cand.porta)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p_tmp = Path(tmpdir)
+            try:
+                iss = forgia.issue(num_issue)
+                corpo_iss = iss.corpo
+                titolo_iss = iss.titolo
+            except Exception:
+                corpo_iss = ""
+                titolo_iss = f"Issue #{num_issue}"
+
+            comandanti_set = {c.strip().casefold() for c in comandanti}
+            try:
+                tutti_comm = forgia.commenti(num_issue)
+                comm_cmd = [c for c in tutti_comm if c.autore.strip().casefold() in comandanti_set]
+            except Exception:
+                comm_cmd = []
+
+            testo_comm = "\n\n".join(f"### Commento di @{c.autore}:\n{c.corpo}" for c in comm_cmd)
+
+            fascicolo_md = (
+                f"# {titolo_iss}\n\n"
+                f"## Corpo dell'issue\n{corpo_iss}\n\n"
+                f"## Commenti dei comandanti\n{testo_comm or '(nessun commento)'}\n\n"
+                f"## Domanda di consulto\n{cmd.argomento}\n"
+            )
+            (p_tmp / "fascicolo.md").write_text(fascicolo_md, encoding="utf-8")
+
+            prompt = (
+                f"Sei il consigliere della bottega. Rispondi alla seguente domanda sul compito #{num_issue}.\n"
+                f"Nella cartella di lavoro è presente il fascicolo minimo (`fascicolo.md`).\n\n"
+                f"Domanda:\n{cmd.argomento}\n"
+            )
+            lancio = adattatore_porta.lancia(
+                cartella=p_tmp,
+                prompt=prompt,
+                modello=cand.modello,
+                sola_lettura=True,
+            )
+
+        testo_cons = lancio.testo if lancio.esito == "fatto" else f"Errore consulto ({lancio.esito}): {lancio.testo}"
+        corpo_risposta = f"Risposta del consigliere ({cand.nome}):\n\n{_recinta(testo_cons)}"
+        forgia.commenta(num_issue, corpo_risposta, "consigliere")
+        riga = f"lavoro {num_issue}: consulto completato da «{cand.nome}»"
+        righe.append(riga)
+        print(riga)
+        return False, righe
+
+    return True, []
+
+
 def distribuisci(
     *,
     configurazione: Configurazione,
@@ -123,9 +307,32 @@ def distribuisci(
     adesso: datetime,
     caso: random.Random,
     notte: bool = False,
+    percorso_evento: Path | str | None = None,
+    porte: Mapping[str, Porta] | None = None,
 ) -> list[str]:
     """Esegue un giro di distribuzione dei lavori secondo la regola B3-R16."""
     righe: list[str] = []
+
+    try:
+        fuso_cfg = ZoneInfo(configurazione.progetto.fuso)
+    except Exception:
+        fuso_cfg = ZoneInfo("UTC")
+    adesso_fuso = adesso.astimezone(fuso_cfg) if adesso.tzinfo else adesso.replace(tzinfo=fuso_cfg)
+
+    # RV13: gestione comandi da issue_comment nell'evento GITHUB_EVENT_PATH
+    procedi, righe_ev = _gestisci_evento_commento(
+        percorso_evento=percorso_evento,
+        configurazione=configurazione,
+        forgia=forgia,
+        board=board,
+        variabili=variabili,
+        adesso_fuso=adesso_fuso,
+        caso=caso,
+        porte=porte,
+    )
+    righe.extend(righe_ev)
+    if not procedi:
+        return righe
 
     # 1. Finestra di manutenzione
     f_manutenzione = _in_manutenzione(adesso, configurazione.progetto.manutenzione, configurazione.progetto.fuso)
@@ -146,12 +353,6 @@ def distribuisci(
         return [riga]
     if stato_ci == "verde":
         forgia.avviso(CHIAVE_AVVISO_CI, titolo_avviso, None)
-
-    try:
-        fuso_cfg = ZoneInfo(configurazione.progetto.fuso)
-    except Exception:
-        fuso_cfg = ZoneInfo("UTC")
-    adesso_fuso = adesso.astimezone(fuso_cfg) if adesso.tzinfo else adesso.replace(tzinfo=fuso_cfg)
 
     # 3. Lavori in corso: verifica scadenza (> 7 ore) e botteghe occupate
     lavori_in_corso = board.in_corso()
@@ -184,8 +385,31 @@ def distribuisci(
     # 4. Lavori pronti
     lavori_pronti = board.pronti()
     for lav in lavori_pronti:
-        if not _elegibile_per_etichette(lav.etichette, configurazione.progetto.liberi, notte):
+        ha_comando_esplicito = any(
+            et.casefold().strip() == "bottega: fuori" or et.casefold().strip().startswith("esegue:")
+            for et in lav.etichette
+        )
+        ha_liberi = (
+            notte
+            and any(
+                any(et.casefold().strip() == lib.casefold().strip() for lib in configurazione.progetto.liberi)
+                for et in lav.etichette
+            )
+        )
+        if not (ha_comando_esplicito or ha_liberi):
             continue
+
+        # RV14: con liberi, solo issue il cui autore è un comandante
+        if not ha_comando_esplicito and ha_liberi:
+            comandanti = configurazione.progetto.comandanti or [forgia.proprietario()]
+            comandanti_cf = {c.strip().casefold() for c in comandanti}
+            try:
+                iss = forgia.issue(lav.numero)
+                autore = iss.autore.strip().casefold() if iss.autore else ""
+            except Exception:
+                autore = ""
+            if autore not in comandanti_cf:
+                continue
 
         fq = _ricava_fatto_quando(lav.numero, forgia)
         if fq is None:
@@ -298,29 +522,34 @@ def comando_distribuisci(args: argparse.Namespace) -> int:
 
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     forgia = ForgiaGh(repo)
-    if cfg.progetto.adattatore:
-        board = BoardComando([cfg.progetto.adattatore])
-    else:
-        if cfg.progetto.project is None:
-            print("errore: configurazione priva di progetto.project e senza adattatore", file=sys.stderr)
-            return 1
-        proprietario = forgia.proprietario()
-        board = BoardProject(proprietario=proprietario, numero=cfg.progetto.project, repo=repo)
-
     try:
-        fuso = ZoneInfo(cfg.progetto.fuso)
-    except Exception:
-        fuso = ZoneInfo("UTC")
-    adesso = datetime.now(fuso)
-    caso = random.Random()
+        if cfg.progetto.adattatore:
+            board = BoardComando(shlex.split(cfg.progetto.adattatore))
+        else:
+            if cfg.progetto.project is None:
+                print("errore: configurazione priva di progetto.project e senza adattatore", file=sys.stderr)
+                return 1
+            proprietario = forgia.proprietario()
+            board = BoardProject(proprietario=proprietario, numero=cfg.progetto.project, repo=repo)
 
-    distribuisci(
-        configurazione=cfg,
-        forgia=forgia,
-        board=board,
-        variabili=variabili,
-        adesso=adesso,
-        caso=caso,
-        notte=args.notte,
-    )
-    return 0
+        try:
+            fuso = ZoneInfo(cfg.progetto.fuso)
+        except Exception:
+            fuso = ZoneInfo("UTC")
+        adesso = datetime.now(fuso)
+        caso = random.Random()
+
+        distribuisci(
+            configurazione=cfg,
+            forgia=forgia,
+            board=board,
+            variabili=variabili,
+            adesso=adesso,
+            caso=caso,
+            notte=args.notte,
+        )
+        return 0
+    except (ErroreBoard, ErroreForgia, FileNotFoundError) as e:
+        motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+        print(f"errore: {motivo}", file=sys.stderr)
+        return 1

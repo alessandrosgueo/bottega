@@ -51,6 +51,7 @@ class Pi:
         contatori: dict[str, int] = {}
         ha_errore = False
         motivo_errore = ""
+        ha_codice_429 = False
 
         for linea in stdout.splitlines():
             linea = linea.strip()
@@ -84,21 +85,23 @@ class Pi:
                         if isinstance(v, int):
                             contatori[k] = v
 
-            if rec.get("stopReason") == "error" or rec.get("errorMessage"):
+            if rec.get("stopReason") == "error" or rec.get("errorMessage") or rec.get("type") == "error":
                 ha_errore = True
                 if not motivo_errore:
-                    motivo_errore = str(rec.get("errorMessage") or "stopReason: error")
+                    motivo_errore = str(rec.get("errorMessage") or rec.get("error") or "stopReason: error")
+            if rec.get("code") == 429 or (isinstance(rec.get("error"), dict) and rec["error"].get("code") == 429):
+                ha_codice_429 = True
 
-        testo_tutto = f"{motivo_errore}\n{stdout}\n{stderr}"
-        testo_tutto_lower = testo_tutto.lower()
+        testo_controllo_errore = f"{motivo_errore}\n{stderr}".lower()
 
         if ha_errore or ret != 0:
+            # RV16: quota e accesso cercati solo nei campi d'errore e in stderr, mai nei messaggi del modello
             parole_quota = ("quota", "exhausted", "resource_exhausted", "rate limit", "429")
             parole_accesso = ("/login", "login required", "not logged in", "unauthorized", "authentication required")
 
-            if any(k in testo_tutto_lower for k in parole_quota):
+            if ha_codice_429 or any(k in testo_controllo_errore for k in parole_quota):
                 esito = "quota"
-            elif any(k in testo_tutto_lower for k in parole_accesso):
+            elif any(k in testo_controllo_errore for k in parole_accesso):
                 esito = "accesso"
             else:
                 esito = "errore"

@@ -57,6 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}
           BOTTEGA_VARIABILI: ${{ toJSON(vars) }}
+          BOTTEGA_CLONE: ${{ github.workspace }}/.bottega
           PYTHONPATH: ${{ github.workspace }}/.bottega/attrezzi
           NOTTE: ${{ inputs.notte }}
         run: |

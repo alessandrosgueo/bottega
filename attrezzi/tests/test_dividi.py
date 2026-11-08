@@ -468,19 +468,42 @@ def test_cli_dividi_piano_inesistente_esce_1(tmp_path: Path, capsys: pytest.Capt
     assert "non trovato" in catturato.err.lower()
 
 
-def test_dividi_entrambi_piano_e_dal_json_salta_consigliere(tmp_path: Path) -> None:
-    from bottega.dividi import dividi
+def test_rv17_dividi_entrambi_piano_e_dal_json_si_escludono(tmp_path: Path) -> None:
+    """RV17: --piano e --dal-json si escludono a vicenda sia nella funzione che nella CLI."""
+    from bottega.__main__ import main
+    from bottega.dividi import ErroreDividi, dividi
 
     f_json = tmp_path / "divisione.json"
     f_json.write_text(json.dumps(_json_valido()), encoding="utf-8")
-    f_piano = tmp_path / "inesistente.md"
+    f_piano = tmp_path / "piano.md"
+    f_piano.write_text("# Piano\n", encoding="utf-8")
 
     forgia = ForgiaFinta()
-    porta = PortaFinta(esito="errore", testo="non deve essere chiamata")
+    with pytest.raises(ErroreDividi, match="escludono|oppure"):
+        dividi(piano=f_piano, dal_json=f_json, forgia=forgia)
 
-    creati = dividi(piano=f_piano, dal_json=f_json, forgia=forgia, porta=porta)
+    # CLI esce 2 perché il gruppo è mutualmente esclusivo
+    with pytest.raises(SystemExit) as exc:
+        main(["dividi", "--piano", str(f_piano), "--dal-json", str(f_json)])
+    assert exc.value.code == 2
+
+
+def test_rv17_dividi_aggiunge_madre_e_compiti_alla_board(tmp_path: Path) -> None:
+    """RV17: dividi aggiunge madre e compiti al Project tramite board.aggiungi."""
+    from bottega.dividi import dividi
+    from bottega.finta import BoardFinta
+
+    f_json = tmp_path / "divisione.json"
+    f_json.write_text(json.dumps(_json_valido()), encoding="utf-8")
+
+    forgia = ForgiaFinta()
+    board = BoardFinta()
+
+    creati = dividi(dal_json=f_json, forgia=forgia, board=board)
     assert creati == [1, 2, 3]
-    assert len(porta.chiamate) == 0
+
+    aggiunti = [r[1] for r in board.registro if r[0] == "aggiungi"]
+    assert aggiunti == [1, 2, 3]
 
 
 def test_dividi_blocco_fatto_quando_vuoto_non_crea_nulla(tmp_path: Path) -> None:
@@ -517,4 +540,43 @@ def test_dividi_blocco_senza_tag_json(tmp_path: Path) -> None:
         porta=porta,
     )
     assert creati == [1, 2, 3]
+
+
+def test_rv18_dividi_errore_senza_traccia(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """RV18: ErroreBoard, ErroreForgia, FileNotFoundError non mostrano traccia ed escono 1."""
+    from bottega.__main__ import main
+    from bottega.board import ErroreBoard
+
+    f_json = tmp_path / "divisione.json"
+    f_json.write_text(json.dumps(_json_valido()), encoding="utf-8")
+    cfg_file = tmp_path / "bottega.toml"
+    cfg_file.write_text("""versione = 1
+[progetto]
+fuso = "Europe/Rome"
+project = 1
+adattatore = "cmd_inesistente"
+[botteghe.b1]
+quota = "normale"
+porte = ["pi"]
+[candidati.c1]
+nome = "C1"
+bottega = "b1"
+porta = "pi"
+modello = "m1"
+funzioni = ["decidere", "eseguire"]
+runner = "linux"
+""", encoding="utf-8")
+
+    from bottega import dividi as dividi_module
+    def mock_dividi(*args, **kwargs):
+        raise ErroreBoard("Connessione alla board fallita")
+
+    monkeypatch.setattr(dividi_module, "dividi", mock_dividi)
+
+    esito = main(["dividi", "--dal-json", str(f_json), "--file", str(cfg_file)])
+    assert esito == 1
+    catturato = capsys.readouterr()
+    assert "errore: Connessione alla board fallita" in catturato.err
+    assert "Traceback" not in catturato.err
+
 

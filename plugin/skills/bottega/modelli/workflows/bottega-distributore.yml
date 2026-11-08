@@ -20,7 +20,10 @@ on:
         default: false
 
 concurrency:
-  group: bottega-distributore
+  group: >-
+    ${{ ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '<!-- bottega:')) ||
+        (github.event_name == 'issues' && github.event.label.name != 'bottega: fuori' && !startsWith(github.event.label.name, 'esegue:')))
+        && format('bottega-rumore-{0}', github.run_id) || 'bottega-distributore' }}
   cancel-in-progress: false
 
 jobs:
@@ -31,10 +34,11 @@ jobs:
       (github.event_name != 'issue_comment' || !contains(github.event.comment.body, '<!-- bottega:')) &&
       (github.event_name != 'issues' || github.event.label.name == 'bottega: fuori' ||
       startsWith(github.event.label.name, 'esegue:'))
-    uses: <proprietario>/bottega/.github/workflows/distributore.yml@<tag>
+    uses: <proprietario>/bottega/.github/workflows/distributore.yml@<sha>
     with:
       bottega_repo: <proprietario>/bottega
       bottega_ref: <tag>
       runner: '["<etichetta del runner>"]'
       notte: ${{ github.event_name == 'schedule' || inputs.notte == true }}
-    secrets: inherit
+    secrets:
+      BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}

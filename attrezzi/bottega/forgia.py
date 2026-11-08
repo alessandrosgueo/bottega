@@ -26,6 +26,7 @@ class Issue:
     corpo: str = ""
     stato: str = "OPEN"
     etichette: list[str] = field(default_factory=list)
+    autore: str = ""
 
     @property
     def aperta(self) -> bool:
@@ -112,16 +113,19 @@ class ForgiaGh:
         out = self._esegui([
             "issue", "view", str(n),
             "--repo", self.repo,
-            "--json", "number,title,body,state,labels",
+            "--json", "number,title,body,state,labels,author",
         ])
         d = json.loads(out)
         etichette = [et["name"] if isinstance(et, dict) else str(et) for et in d.get("labels", [])]
+        auth = d.get("author")
+        autore = auth.get("login", "") if isinstance(auth, dict) else str(auth or "")
         return Issue(
             numero=d["number"],
             titolo=d.get("title", ""),
             corpo=d.get("body", "") or "",
             stato=d.get("state", "OPEN"),
             etichette=etichette,
+            autore=autore,
         )
 
     def sotto_issue(self, n: int) -> list[Issue]:

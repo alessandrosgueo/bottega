@@ -5,6 +5,7 @@ import json
 import os
 import random
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from bottega.board import Board, BoardComando, BoardProject, ErroreBoard
 from bottega.brief import fatto_quando
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
@@ -20,7 +22,7 @@ from bottega.configurazione import (
     ErroreConfigurazione,
     leggi_configurazione,
 )
-from bottega.forgia import Forgia, ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
 from bottega.porte import Porta, porta as porta_fabbrica
 from bottega.quota import nome_variabile
 from bottega.scelta import Compito, scegli
@@ -201,6 +203,7 @@ def dividi(
     *,
     dal_json: Path | str | None = None,
     forgia: Forgia | None = None,
+    board: Board | None = None,
     configurazione: Configurazione | None = None,
     percorso_configurazione: Path | str | None = None,
     porta: Porta | None = None,
@@ -208,6 +211,9 @@ def dividi(
     caso: random.Random | None = None,
 ) -> list[int]:
     """Divide un piano in issue madre e sotto-issue, creandole nella forgia senza bottega: fuori."""
+    if piano is not None and dal_json is not None:
+        raise ErroreDividi("specificare --piano oppure --dal-json, non entrambi")
+
     if dal_json is not None:
         p_json = Path(dal_json)
         if not p_json.exists():
@@ -295,13 +301,18 @@ def dividi(
         num_c = f_effettiva.crea_issue(titolo=c_titolo, corpo=c_corpo, madre=num_madre)
         numeri_creati.append(num_c)
 
+    if board is not None:
+        for n in numeri_creati:
+            board.aggiungi(n)
+
     return numeri_creati
 
 
 def argomenti_dividi(parser: argparse.ArgumentParser) -> None:
     """Configura gli argomenti della riga di comando per il sottocomando `dividi`."""
-    parser.add_argument("--piano", metavar="FILE", help="il file del piano da dividere")
-    parser.add_argument(
+    gruppo = parser.add_mutually_exclusive_group()
+    gruppo.add_argument("--piano", metavar="FILE", help="il file del piano da dividere")
+    gruppo.add_argument(
         "--dal-json",
         metavar="FILE",
         help="legge la divisione da un file JSON senza consultare il consigliere",
@@ -326,26 +337,59 @@ def comando_dividi(args: argparse.Namespace) -> int:
         print("errore: specificare --piano FILE oppure --dal-json FILE", file=sys.stderr)
         return 2
 
-    if args.piano and not args.dal_json:
+    if args.piano and args.dal_json:
+        print("errore: specificare --piano oppure --dal-json, non entrambi", file=sys.stderr)
+        return 2
+
+    if args.piano:
         if not Path(args.piano).exists():
             print(f"errore: file del piano non trovato: {args.piano}", file=sys.stderr)
             return 1
 
-    forgia = crea_forgia(args.repo)
+    percorso_cfg = Path(args.file)
+    cfg: Configurazione | None = None
+    if percorso_cfg.is_file():
+        try:
+            cfg = leggi_configurazione(percorso_cfg)
+        except (ErroreConfigurazione, OSError) as e:
+            motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+            print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
+            return 1
+    elif args.piano or args.file != PERCORSO_PREDEFINITO:
+        try:
+            cfg = leggi_configurazione(percorso_cfg)
+        except (ErroreConfigurazione, OSError) as e:
+            motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+            print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
+            return 1
+
+    repo = args.repo or os.environ.get("GITHUB_REPOSITORY", "")
+    forgia = crea_forgia(repo)
+
+    board: Board | None = None
+    if cfg is not None:
+        if cfg.progetto.adattatore:
+            board = BoardComando(shlex.split(cfg.progetto.adattatore))
+        elif cfg.progetto.project is not None:
+            proprietario = forgia.proprietario()
+            board = BoardProject(proprietario=proprietario, numero=cfg.progetto.project, repo=repo)
+
     try:
         numeri = dividi(
             piano=args.piano,
             dal_json=args.dal_json,
             forgia=forgia,
+            board=board,
+            configurazione=cfg,
             percorso_configurazione=args.file,
         )
-    except ErroreDividi as e:
-        print(f"errore: {e}", file=sys.stderr)
+        for num in numeri:
+            print(num)
+        return 0
+    except (ErroreBoard, ErroreForgia, ErroreDividi, FileNotFoundError) as e:
+        motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+        print(f"errore: {motivo}", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"errore: {e}", file=sys.stderr)
         return 1
-
-    for num in numeri:
-        print(num)
-    return 0

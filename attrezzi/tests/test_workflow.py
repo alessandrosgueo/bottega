@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import pytest
 import re
 import shutil
 import subprocess
@@ -96,7 +97,8 @@ def test_eventi_dei_workflow():
 def test_gruppi_di_concorrenza():
     """I modelli devono definire i gruppi di concorrenza con cancel-in-progress: false."""
     testo_dist = DISTRIBUTORE_MODELLO.read_text(encoding="utf-8")
-    assert "group: bottega-distributore" in testo_dist
+    assert "bottega-rumore" in testo_dist
+    assert "bottega-distributore" in testo_dist
     assert "cancel-in-progress: false" in testo_dist
 
     testo_esec = ESECUTORE_MODELLO.read_text(encoding="utf-8")
@@ -196,8 +198,25 @@ def test_actionlint_se_disponibile():
     """Se actionlint c'è (nel PATH o nella variabile ACTIONLINT), controlla tutti e quattro i workflow."""
     eseguibile = os.environ.get("ACTIONLINT") or shutil.which("actionlint")
     if not eseguibile:
-        return
+        pytest.skip("actionlint non disponibile né nel PATH né in ACTIONLINT")
 
     cmd = [eseguibile] + [str(p) for p in QUATTRO_WORKFLOW]
     risultato = subprocess.run(cmd, capture_output=True, text=True)
     assert risultato.returncode == 0, f"actionlint ha segnalato errori:\n{risultato.stderr or risultato.stdout}"
+
+
+def test_rv15_workflow():
+    """RV15: fetch-depth: 0, BOTTEGA_CLONE, segreto passato per nome, uses per SHA."""
+    testo_esec_riu = ESECUTORE_RIUSABILE.read_text(encoding="utf-8")
+    assert "fetch-depth: 0" in testo_esec_riu
+    assert "BOTTEGA_CLONE: ${{ github.workspace }}/.bottega" in testo_esec_riu
+
+    testo_dist_riu = DISTRIBUTORE_RIUSABILE.read_text(encoding="utf-8")
+    assert "BOTTEGA_CLONE: ${{ github.workspace }}/.bottega" in testo_dist_riu
+
+    for mod in (DISTRIBUTORE_MODELLO, ESECUTORE_MODELLO):
+        testo = mod.read_text(encoding="utf-8")
+        assert "secrets: inherit" not in testo
+        assert "BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}" in testo
+        assert "@<sha>" in testo
+

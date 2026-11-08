@@ -462,7 +462,7 @@ def test_notte_e_lavori_liberi() -> None:
         Lavoro(numero=1, titolo="Lavoro Libero", stato="pronto", etichette=["bug"]),
     ])
     forgia = ForgiaFinta([
-        Issue(numero=1, titolo="Lavoro Libero", corpo="## Fatto quando\n```\npytest\n```")
+        Issue(numero=1, titolo="Lavoro Libero", corpo="## Fatto quando\n```\npytest\n```", autore="alice")
     ])
 
     # Giorno (notte=False) -> non ha "bottega: fuori" né "esegue:" -> ignorato
@@ -571,4 +571,367 @@ def test_cli_comando_distribuisci_file_mancante(capsys) -> None:
     assert codice == 1
     catturato = capsys.readouterr()
     assert "errore:" in catturato.err
+
+
+def test_rv14_liberi_solo_se_autore_comandante() -> None:
+    """RV14: Con liberi di notte, vengono presi solo issue il cui autore è un comandante."""
+    cfg = _configurazione_base(liberi=("bug",))
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Bug da non-comandante", stato="pronto", etichette=["bug"]),
+        Lavoro(numero=2, titolo="Bug da comandante", stato="pronto", etichette=["bug"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Bug da non-comandante", corpo="## Fatto quando\n```\npytest\n```", autore="sconosciuto"),
+        Issue(numero=2, titolo="Bug da comandante", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    righe = distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=True,
+    )
+
+    presi = [r[1] for r in board.registro if r[0] == "prendi"]
+    assert 1 not in presi
+    assert 2 in presi
+
+
+def test_rv13_evento_riprova(tmp_path: Path) -> None:
+    """RV13: Un issue_comment con `/bottega riprova` di un comandante rimette a pronto e distribuisce."""
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="in attesa", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega riprova", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    righe = distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+        percorso_evento=evento_file,
+    )
+
+    # 1. Deve aver commentato il riprova col segno
+    comms = forgia.commenti(1)
+    assert any("<!-- bottega:distributore -->" in c.corpo and "pronto" in c.corpo.lower() for c in comms)
+    # 2. Deve aver rimesso a pronto e preso il lavoro
+    stati = [r for r in board.registro if r[0] == "stato"]
+    assert any(s[1] == 1 and s[2] == "pronto" for s in stati)
+    assert any(r[0] == "prendi" and r[1] == 1 for r in board.registro)
+
+
+def test_rv13_evento_riprova_gia_in_corso(tmp_path: Path) -> None:
+    """RV13: Se il lavoro è già in corso, riprova viene ignorato con commento col segno."""
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="in corso", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega riprova", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+    )
+
+    comms = forgia.commenti(1)
+    assert any("<!-- bottega:distributore -->" in c.corpo and "in corso" in c.corpo.lower() for c in comms)
+    # Non deve essere stato reimpostato a pronto
+    stati = [r for r in board.registro if r[0] == "stato"]
+    assert not any(s[1] == 1 and s[2] == "pronto" for s in stati)
+
+
+def test_rv13_evento_sospendi(tmp_path: Path) -> None:
+    """RV13: `/bottega sospendi <motivo>` mette il lavoro in attesa con nota e commento col segno."""
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega sospendi necessita chiarimenti", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+    )
+
+    # Stato impostato a "in attesa"
+    stati = [r for r in board.registro if r[0] == "stato"]
+    assert any(s[1] == 1 and s[2] == "in attesa" for s in stati)
+    # Commento col segno presente
+    comms = forgia.commenti(1)
+    assert any("<!-- bottega:distributore -->" in c.corpo and "necessita chiarimenti" in c.corpo for c in comms)
+
+
+def test_rv13_evento_consulta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RV13: `/bottega consulta <domanda>` lancia un consigliere sul runner e pubblica la risposta recintata."""
+    # Candidato con runner e funzione consigliare
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    from dataclasses import replace
+    cfg = replace(cfg, candidati=candidati)
+
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Come procediamo con il test?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    from bottega.porte import Controllo, Lancio
+
+    chiamate_porta: list[dict] = []
+
+    class PortaFinta:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            # Verifica che il fascicolo minimo sia stato scritto nella cartella temporanea
+            p_cartella = Path(cartella)
+            assert (p_cartella / "fascicolo.md").is_file()
+            chiamate_porta.append({"cartella": cartella, "prompt": prompt, "sola_lettura": sola_lettura})
+            return Lancio(esito="fatto", testo="Suggerisco di usare pytest con un mock.", conversazione=None, rinnovo=None, contatori={})
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFinta()},
+    )
+
+    assert len(chiamate_porta) == 1
+    assert chiamate_porta[0]["sola_lettura"] is True
+
+    comms = forgia.commenti(1)
+    assert len(comms) == 1
+    assert "<!-- bottega:consigliere -->" in comms[0].corpo
+    # RV6: risposta racchiusa in blocco recintato
+    assert "```" in comms[0].corpo
+    assert "Suggerisco di usare pytest con un mock." in comms[0].corpo
+
+
+def test_rv13_evento_consulta_senza_consigliere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RV13: `/bottega consulta` senza consigliere sul runner lascia un commento che lo dice."""
+    cfg = _configurazione_base()
+    monkeypatch.setenv("BOTTEGA_RUNNER", "diverso-runner")
+
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Come procediamo?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+    )
+
+    comms = forgia.commenti(1)
+    assert len(comms) == 1
+    assert "<!-- bottega:distributore -->" in comms[0].corpo
+    assert "nessun consigliere" in comms[0].corpo.lower()
+
+
+def test_rv13_evento_commento_da_non_comandante_o_col_segno(tmp_path: Path) -> None:
+    """RV13: Commenti da non comandanti o con il segno della bottega non eseguono comandi."""
+    cfg = _configurazione_base()
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="in attesa", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    # Commento con comando ma da autore non comandante (bob)
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega riprova", "user": {"login": "bob"}},
+    }), encoding="utf-8")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+    )
+
+    # Nessun commento lasciato sul compito da parte del distributore
+    assert len(forgia.commenti(1)) == 0
+
+
+def test_rv18_comando_distribuisci_shlex_split(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RV18: comando_distribuisci usa shlex.split per l'adattatore."""
+    cfg_file = tmp_path / "bottega.toml"
+    cfg_file.write_text("""versione = 1
+[progetto]
+fuso = "Europe/Rome"
+project = 1
+adattatore = "mio_comando --opzione valore"
+[botteghe.b1]
+quota = "normale"
+porte = ["pi"]
+[candidati.c1]
+nome = "C1"
+bottega = "b1"
+porta = "pi"
+modello = "m1"
+funzioni = ["decidere", "eseguire"]
+runner = "linux"
+""", encoding="utf-8")
+
+    chiamate_board: list[list[str]] = []
+    from bottega.board import BoardComando
+    orig_init = BoardComando.__init__
+    def mock_init(self, comando):
+        chiamate_board.append(list(comando))
+        orig_init(self, comando)
+
+    monkeypatch.setattr(BoardComando, "__init__", mock_init)
+    from bottega.__main__ import main
+    main(["distribuisci", "--file", str(cfg_file)])
+    assert len(chiamate_board) >= 1
+    assert chiamate_board[0] == ["mio_comando", "--opzione", "valore"]
+
+
+def test_rv18_distribuisci_errore_senza_traccia(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """RV18: Nessun comando esce con una traccia (ErroreBoard -> messaggio ed esito 1)."""
+    cfg_file = tmp_path / "bottega.toml"
+    cfg_file.write_text("""versione = 1
+[progetto]
+fuso = "Europe/Rome"
+project = 1
+adattatore = "cmd"
+[botteghe.b1]
+quota = "normale"
+porte = ["pi"]
+[candidati.c1]
+nome = "C1"
+bottega = "b1"
+porta = "pi"
+modello = "m1"
+funzioni = ["decidere", "eseguire"]
+runner = "linux"
+""", encoding="utf-8")
+
+    from bottega import distributore as dist_module
+    from bottega.board import ErroreBoard
+    def mock_distribuisci(*args, **kwargs):
+        raise ErroreBoard("GitHub Project non raggiungibile")
+
+    monkeypatch.setattr(dist_module, "distribuisci", mock_distribuisci)
+    from bottega.__main__ import main
+    codice = main(["distribuisci", "--file", str(cfg_file)])
+    assert codice == 1
+    catturato = capsys.readouterr()
+    assert "errore: GitHub Project non raggiungibile" in catturato.err
+    assert "Traceback" not in catturato.err
+
+
+
+
 
