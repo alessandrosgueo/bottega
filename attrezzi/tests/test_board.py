@@ -279,3 +279,26 @@ def test_board_finta_in_memoria() -> None:
 
     azioni = [r[0] for r in finta.registro]
     assert azioni == ["prendi", "stato", "consegna", "campo"]
+
+
+def test_board_in_corso() -> None:
+    # 1. BoardProject
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        return json.dumps(_PROGETTO_GRAPHQL_OK)
+
+    board_proj = BoardProject("proprietario", 1, repo="proprietario/repo", esegui=esegui_finto)
+    in_corso_proj = board_proj.in_corso()
+    assert len(in_corso_proj) == 1
+    assert in_corso_proj[0].numero == 30
+
+    # 2. BoardFinta
+    finta = BoardFinta(
+        [
+            Lavoro(numero=1, titolo="Compito 1", stato="pronto", repo="proprietario/repo"),
+            Lavoro(numero=2, titolo="Compito 2", stato="in corso", repo="proprietario/repo"),
+        ],
+        repo="proprietario/repo",
+    )
+    in_corso_finta = finta.in_corso()
+    assert len(in_corso_finta) == 1
+    assert in_corso_finta[0].numero == 2

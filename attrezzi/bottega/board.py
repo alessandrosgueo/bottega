@@ -30,6 +30,8 @@ class Board(Protocol):
 
     def pronti(self) -> list[Lavoro]: ...
 
+    def in_corso(self) -> list[Lavoro]: ...
+
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool: ...
 
     def stato(self, numero: int, stato: str, nota: str | None = None) -> None: ...
@@ -207,6 +209,10 @@ class BoardProject:
                 risultato.append(lav)
         return risultato
 
+    def in_corso(self) -> list[Lavoro]:
+        _, _, items = self._leggi_progetto()
+        return [lav for _, lav in items.values() if lav.stato == "in corso"]
+
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool:
         _, _, items = self._leggi_progetto()
         if numero not in items:
@@ -278,6 +284,11 @@ class BoardComando:
 
     def pronti(self) -> list[Lavoro]:
         out = self._esegui([*self._cmd, "pronti"])
+        dati = json.loads(out)
+        return [Lavoro(**d) for d in dati]
+
+    def in_corso(self) -> list[Lavoro]:
+        out = self._esegui([*self._cmd, "in-corso"])
         dati = json.loads(out)
         return [Lavoro(**d) for d in dati]
 

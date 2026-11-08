@@ -228,6 +228,15 @@ class BoardFinta:
                 risultato.append(self._a_lavoro(d))
         return risultato
 
+    def in_corso(self) -> list[Lavoro]:
+        risultato: list[Lavoro] = []
+        for (r, n), d in self._lavori.items():
+            if self.repo is not None and r is not None and r != self.repo:
+                continue
+            if d.get("stato") == "in corso":
+                risultato.append(self._a_lavoro(d))
+        return risultato
+
     def prendi(self, numero: int, esecutore: str, nota: str = "") -> bool:
         d = self._trova_lavoro(numero)
         if d is None:
