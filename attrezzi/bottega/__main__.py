@@ -36,7 +36,9 @@ class _Parser(argparse.ArgumentParser):
         self.opzioni.add_argument("-h", "--help", action="help", help="mostra questo aiuto ed esci")
 
     def add_argument(self, *args, **kwargs):
-        """Le opzioni, anche quelle dei sottocomandi, finiscono nel gruppo «opzioni»."""
+        """Le opzioni, anche quelle dei sottocomandi, finiscono nel gruppo «opzioni»; i posizionali restano fuori."""
+        if args and not args[0].startswith("-"):
+            return super().add_argument(*args, **kwargs)
         return self.opzioni.add_argument(*args, **kwargs)
 
 

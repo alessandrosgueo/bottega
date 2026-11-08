@@ -54,10 +54,21 @@ jobs:
       - name: Prove
         run: uv run pytest -q
 
+      # RICHIEDI_ELENCO (variabile di Actions) rende l'elenco obbligatorio sui push e sulle PR dello stesso repo: se il
+      # segreto si perde, la CI cade. I fork non hanno né segreto né variabile: lì il controllo gira sulle regole fisse.
       - name: Controllo dei dati personali
         env:
           PAROLE_VIETATE: ${{ secrets.PAROLE_VIETATE }}
-        run: uv run python -m bottega controlla-pubblico
+          RICHIEDI_ELENCO: ${{ vars.RICHIEDI_ELENCO }}
+          TESTA_NEL_REPO: >-
+            ${{ github.event_name == 'push' ||
+            github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          opzioni=()
+          if [ "$RICHIEDI_ELENCO" = "true" ] && [ "$TESTA_NEL_REPO" = "true" ]; then
+            opzioni+=(--richiedi-elenco)
+          fi
+          uv run python -m bottega controlla-pubblico "${opzioni[@]}"
 
       - name: Installa gitleaks 8.30.1
         run: |
