@@ -167,20 +167,23 @@ def _gestisci_evento_commento(
     if not isinstance(issue_data, dict) or not isinstance(comment_data, dict):
         return True, []
 
+    # C5: un evento di commento non distribuisce mai. Gira in un gruppo di concorrenza suo (un comando in coda non
+    # si perde), quindi non deve prendere lavori insieme al distributore vero: `riprova` lo rilancia e basta.
+
     num_issue = issue_data.get("number")
     if not isinstance(num_issue, int):
-        return True, []
+        return False, []
 
     corpo = str(comment_data.get("body") or "")
     user_data = comment_data.get("user")
     autore = user_data.get("login", "") if isinstance(user_data, dict) else ""
     if not autore:
-        return True, []
+        return False, []
 
     comandanti = configurazione.progetto.comandanti or [forgia.proprietario()]
     cmd = comando(corpo, autore, comandanti)
     if cmd is None:
-        return True, []
+        return False, []
 
     righe: list[str] = []
 
@@ -204,8 +207,14 @@ def _gestisci_evento_commento(
             riga = f"lavoro {num_issue}: rimesso a pronto su comando di «{autore}»"
             righe.append(riga)
             print(riga)
-        # RV13: riprova rimette pronto e distribuisce
-        return True, righe
+        # RV13 e C5: riprova rimette pronto e rilancia il distributore, che distribuisce nel suo gruppo.
+        try:
+            forgia.avvia_workflow("bottega-distributore.yml", {})
+        except Exception as e:
+            riga = f"lavoro {num_issue}: distributore non rilanciato ({e})"
+            righe.append(riga)
+            print(riga)
+        return False, righe
 
     if cmd.nome == "sospendi":
         motivo = cmd.argomento.strip() or f"sospeso su comando di @{autore}"
@@ -382,8 +391,13 @@ def distribuisci(
                 pass
 
         if scaduto:
-            board.stato(lav.numero, "pronto")
-            riga = f"lavoro {lav.numero}: in corso da oltre 7 ore, reimpostato a pronto"
+            # C5: un giro appeso conta un tentativo; al terzo il lavoro si blocca invece di ripartire per sempre.
+            tentativi = int(valori.get("tentativi", 0) or 0) + 1
+            valori["tentativi"] = str(tentativi)
+            valori["motivo"] = "in corso da oltre 7 ore"
+            stato_scaduto = "bloccato" if tentativi >= 3 else "pronto"
+            board.stato(lav.numero, stato_scaduto, nota=scrivi_nota(valori))
+            riga = f"lavoro {lav.numero}: in corso da oltre 7 ore, reimpostato a {stato_scaduto}"
             righe.append(riga)
             print(riga)
         else:
@@ -408,17 +422,18 @@ def distribuisci(
         if not (ha_comando_esplicito or ha_liberi):
             continue
 
-        # RV14: con liberi, solo issue il cui autore è un comandante
-        if not ha_comando_esplicito and ha_liberi:
-            comandanti = configurazione.progetto.comandanti or [forgia.proprietario()]
-            comandanti_cf = {c.strip().casefold() for c in comandanti}
-            try:
-                iss = forgia.issue(lav.numero)
-                autore = iss.autore.strip().casefold() if iss.autore else ""
-            except Exception:
-                autore = ""
-            if autore not in comandanti_cf:
-                continue
+        # RV14 e C5: solo issue il cui autore è un comandante (o il proprietario), con o senza etichetta: il corpo
+        # (brief e «Fatto quando») lo può cambiare il suo autore anche dopo l'etichetta.
+        comandanti_cf = {c.strip().casefold() for c in configurazione.progetto.comandanti} | {
+            forgia.proprietario().strip().casefold()
+        }
+        try:
+            iss = forgia.issue(lav.numero)
+            autore = iss.autore.strip().casefold() if iss.autore else ""
+        except Exception:
+            autore = ""
+        if autore not in comandanti_cf:
+            continue
 
         fq = _ricava_fatto_quando(lav.numero, forgia)
         if fq is None:

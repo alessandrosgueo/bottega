@@ -20,10 +20,16 @@ on:
         default: false
 
 concurrency:
+  # Tre gruppi. I commenti con un comando (o qualunque commento senza segno) hanno ognuno il suo, così un comando in
+  # coda non si perde: GitHub tiene una sola esecuzione in attesa per gruppo. Il rumore (commenti col segno, etichette
+  # che non sono comandi) ha un gruppo per esecuzione. Tutto il resto distribuisce in fila nel gruppo del distributore.
   group: >-
-    ${{ ((github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '<!-- bottega:')) ||
-        (github.event_name == 'issues' && github.event.label.name != 'bottega: fuori' && !startsWith(github.event.label.name, 'esegue:')))
-        && format('bottega-rumore-{0}', github.run_id) || 'bottega-distributore' }}
+    ${{ (github.event_name == 'issue_comment' &&
+        (startsWith(github.event.comment.body, '<!-- bottega:') && format('bottega-rumore-{0}', github.run_id) ||
+        format('bottega-comando-{0}', github.event.comment.id))) ||
+        ((github.event_name == 'issues' && github.event.label.name != 'bottega: fuori' &&
+        !startsWith(github.event.label.name, 'esegue:')) && format('bottega-rumore-{0}', github.run_id)) ||
+        'bottega-distributore' }}
   cancel-in-progress: false
 
 jobs:

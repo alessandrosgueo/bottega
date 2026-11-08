@@ -31,7 +31,7 @@ from bottega.configurazione import (
     leggi_configurazione,
 )
 from bottega.forgia import Commento, Forgia, ForgiaGh, Issue, _spoglia_segno
-from bottega.porte import Controllo, Lancio, Porta, ambiente_ripulito, porta as fabbrica_porte
+from bottega.porte import Controllo, Lancio, Porta, ambiente_ripulito, esegui_con_tetto, porta as fabbrica_porte
 from bottega.quota import nome_variabile, valore_esaurita
 from bottega.scelta import Compito, scegli
 from bottega.segni import nota, ruolo, scrivi_nota
@@ -43,6 +43,27 @@ OPZIONI_GIT_RUNNER: tuple[str, ...] = (
     "-c", "diff.external=",
     "-c", "core.quotePath=false",
 )
+
+# C5: ogni processo del giro ha un tetto (un `git` falso sul PATH dell'esecutore non tiene appeso il giro) e i byte
+# che non sono UTF-8 non lo fanno cadere.
+TEMPO_GIT = 600
+
+
+def _esegui(cmd: Sequence[str], **kw: Any) -> subprocess.CompletedProcess:
+    kw.setdefault("timeout", TEMPO_GIT)
+    if kw.get("text"):
+        kw.setdefault("errors", "replace")
+    kw.setdefault("stdin", subprocess.DEVNULL)
+    return subprocess.run(list(cmd), **kw)
+
+
+# Parole che chiudono un'issue quando il commit arriva nel ramo principale (anche dopo un'unione).
+_CHIUDE_ISSUE = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+/[\w.-]+)?#\d+", re.IGNORECASE
+)
+
+# File che cambiano come girano le prove anche quando sono nuovi.
+_CONFIGURAZIONE_PROVE = {"conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "noxfile.py"}
 
 # Il ramo viene dalla nota, che un umano può modificare: solo nomi semplici sotto bottega/.
 _RAMO_VALIDO = re.compile(r"bottega/[A-Za-z0-9][A-Za-z0-9._/-]*")
@@ -143,37 +164,20 @@ def esegui_oracolo(
     Se il tempo scade, uccide il gruppo di processi e restituisce (False, 124, messaggio).
     """
     completo = [*prefisso, "bash", "-c", cmd]
-    try:
-        proc = subprocess.Popen(
-            completo,
-            cwd=str(cartella),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-            start_new_session=True,
-        )
-    except Exception as exc:
-        return False, 1, f"errore avvio oracolo: {exc}"
-
-    try:
-        stdout, stderr = proc.communicate(timeout=tempo)
-        codice = proc.returncode
-        out = (stdout + "\n" + stderr).strip()
-        ultime_40 = "\n".join(out.splitlines()[-40:])
-        return (codice == 0), codice, ultime_40
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, OSError):
-            pass
-        proc.communicate()
-        return False, 124, f"tempo scaduto per l'oracolo dopo {tempo} secondi"
+    # C5: uscite su file, non su pipe; un orfano col `setsid` non fa aspettare il giro.
+    codice, stdout, stderr, scaduto, errore = esegui_con_tetto(completo, cwd=cartella, env=env, tempo=tempo)
+    if errore is not None:
+        return False, 1, f"errore avvio oracolo: {errore}"
+    out = (stdout + "\n" + stderr).strip()
+    ultime_40 = "\n".join(out.splitlines()[-40:])
+    if scaduto or codice is None:
+        return False, 124, f"tempo scaduto per l'oracolo dopo {tempo} secondi\n{ultime_40}".strip()
+    return (codice == 0), codice, ultime_40
 
 
 def _committa_lavoro_pendente(lavoro_dir: Path, prefisso: Sequence[str], env: dict[str, str], messaggio: str) -> None:
     """Esegue git add -A e git commit se vi sono modifiche non committate nell'albero di lavoro."""
-    st_proc = subprocess.run(
+    st_proc = _esegui(
         [*prefisso, "git", "status", "--porcelain"],
         cwd=str(lavoro_dir),
         capture_output=True,
@@ -181,8 +185,8 @@ def _committa_lavoro_pendente(lavoro_dir: Path, prefisso: Sequence[str], env: di
         env=env,
     )
     if st_proc.stdout.strip():
-        subprocess.run([*prefisso, "git", "add", "-A"], cwd=str(lavoro_dir), check=True, capture_output=True, env=env)
-        subprocess.run([*prefisso, "git", "commit", "-m", messaggio], cwd=str(lavoro_dir), check=True, capture_output=True, env=env)
+        _esegui([*prefisso, "git", "add", "-A"], cwd=str(lavoro_dir), check=True, capture_output=True, env=env)
+        _esegui([*prefisso, "git", "commit", "-m", messaggio], cwd=str(lavoro_dir), check=True, capture_output=True, env=env)
 
 
 def _trova_candidato(
@@ -273,8 +277,8 @@ def _prepara_fascicolo(
     (fascicolo_dir / "commenti.md").write_text("\n---\n".join(righe_comm), encoding="utf-8")
 
     # RV3: Costituzione letta con git show da origin/<principale>
-    res_cost = subprocess.run(
-        ["git", *OPZIONI_GIT_RUNNER, "show", f"origin/{ramo_principale}:docs/costituzione.md"],
+    res_cost = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "show", f"refs/remotes/origin/{ramo_principale}:docs/costituzione.md"],
         cwd=str(clone_progetto),
         capture_output=True,
         text=True,
@@ -293,8 +297,8 @@ def _prepara_fascicolo(
             testi_quaderno.append(q_bottega.read_text(encoding="utf-8"))
 
     # Quaderno del progetto letto con git show dal ramo principale
-    res_q_prog = subprocess.run(
-        ["git", *OPZIONI_GIT_RUNNER, "show", f"origin/{ramo_principale}:.github/bottega/quaderni/{modello_slug}.md"],
+    res_q_prog = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "show", f"refs/remotes/origin/{ramo_principale}:.github/bottega/quaderni/{modello_slug}.md"],
         cwd=str(clone_progetto),
         capture_output=True,
         text=True,
@@ -333,7 +337,7 @@ def _verifica_e_consegna_bundle(
         return False, []
 
     # 1. Verifica bundle col git del runner
-    subprocess.run(
+    _esegui(
         ["git", *OPZIONI_GIT_RUNNER, "bundle", "verify", str(bundle_file)],
         cwd=str(clone_progetto),
         check=True,
@@ -341,15 +345,15 @@ def _verifica_e_consegna_bundle(
     )
 
     # 2. Fetch nel refrefs/bottega/consegna
-    subprocess.run(
-        ["git", *OPZIONI_GIT_RUNNER, "fetch", str(bundle_file), f"+{nome_ramo}:refs/bottega/consegna"],
+    _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "fetch", "--no-tags", str(bundle_file), f"+refs/heads/{nome_ramo}:refs/bottega/consegna"],
         cwd=str(clone_progetto),
         check=True,
         capture_output=True,
     )
 
     # 3. Controllo che base sia antenato
-    res_anc = subprocess.run(
+    res_anc = _esegui(
         ["git", *OPZIONI_GIT_RUNNER, "merge-base", "--is-ancestor", base_commit, "refs/bottega/consegna"],
         cwd=str(clone_progetto),
         capture_output=True,
@@ -362,7 +366,7 @@ def _verifica_e_consegna_bundle(
         return False, []
 
     # 4. Diff raw -z -M tra base e refs/bottega/consegna letto a NUL
-    proc_diff = subprocess.run(
+    proc_diff = _esegui(
         ["git", *OPZIONI_GIT_RUNNER, "diff", "--raw", "-z", "-M", "--no-ext-diff", base_commit, "refs/bottega/consegna"],
         cwd=str(clone_progetto),
         check=True,
@@ -372,14 +376,14 @@ def _verifica_e_consegna_bundle(
 
     # 4b. La storia: niente commit di unione, e ogni commit passa gli stessi controlli del diff netto
     # (un file sotto .github/ aggiunto e poi tolto non compare nel diff netto, ma resta nella storia spinta).
-    unioni = subprocess.run(
+    unioni = _esegui(
         ["git", *OPZIONI_GIT_RUNNER, "rev-list", "--merges", f"{base_commit}..refs/bottega/consegna"],
         cwd=str(clone_progetto),
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
-    proc_storia = subprocess.run(
+    proc_storia = _esegui(
         [
             "git", *OPZIONI_GIT_RUNNER, "log", "--raw", "-z", "-M", "--no-ext-diff", "--no-merges", "--format=",
             f"{base_commit}..refs/bottega/consegna",
@@ -390,29 +394,48 @@ def _verifica_e_consegna_bundle(
     )
     entries_storia = analizza_diff_raw(proc_storia.stdout)
 
-    # 5. Controlli di sicurezza sui percorsi e sui modi
-    motivo_violazione = "commit di unione vietati" if unioni else controlla_violazioni_diff(entries_storia + entries)
+    messaggi = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "log", "--format=%B", f"{base_commit}..refs/bottega/consegna"],
+        cwd=str(clone_progetto),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    # 5. Controlli di sicurezza sui percorsi, sui modi e sui messaggi
+    if unioni:
+        motivo_violazione = "commit di unione vietati"
+    elif _CHIUDE_ISSUE.search(messaggi):
+        motivo_violazione = "messaggio di commit che chiude un'issue (Closes, Fixes, Resolves #N)"
+    else:
+        motivo_violazione = controlla_violazioni_diff(entries_storia + entries)
     if motivo_violazione:
-        msg = (
-            f"Consegna rifiutata: la patch tocca percorsi sotto .github/ ({motivo_violazione})"
-            if "github" in motivo_violazione
-            else f"Consegna rifiutata: {motivo_violazione}"
+        # Il motivo può contenere un nome di file del modello: va nel recinto, la categoria (testo nostro) fuori.
+        categoria = motivo_violazione.split(":", 1)[0]
+        intestazione = (
+            "Consegna rifiutata: la patch tocca percorsi sotto .github/"
+            if "github" in categoria
+            else f"Consegna rifiutata: {categoria}"
         )
-        forgia.commenta(compito_numero, msg, ruolo="esecutore")
-        d_nota["motivo"] = "modifica a .github vietata" if "github" in motivo_violazione else motivo_violazione
+        forgia.commenta(compito_numero, f"{intestazione}\n\n{recinta_testo_modello(motivo_violazione)}", ruolo="esecutore")
+        d_nota["motivo"] = "modifica a .github vietata" if "github" in categoria else categoria
         board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
         return False, []
 
-    # 6. Se vi sono modifiche, aggiorna il ramo locale su refs/bottega/consegna e spinge
+    # 6. Se vi sono modifiche, il ramo locale va su refs/bottega/consegna e si spinge. Niente checkout: l'albero del
+    # runner resta quello del ramo principale, e nessun file del modello (un adattatore, un modulo) ci entra (C5).
     if entries:
-        subprocess.run(
-            ["git", *OPZIONI_GIT_RUNNER, "checkout", "-B", nome_ramo, "refs/bottega/consegna"],
+        _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "update-ref", f"refs/heads/{nome_ramo}", "refs/bottega/consegna"],
             cwd=str(clone_progetto),
             check=True,
             capture_output=True,
         )
-        subprocess.run(
-            ["git", *OPZIONI_GIT_RUNNER, *OPZIONI_GIT_CRED, "push", "origin", nome_ramo],
+        _esegui(
+            [
+                "git", *OPZIONI_GIT_RUNNER, *OPZIONI_GIT_CRED, "push", "origin",
+                f"refs/bottega/consegna:refs/heads/{nome_ramo}",
+            ],
             cwd=str(clone_progetto),
             check=True,
             capture_output=True,
@@ -490,7 +513,7 @@ def _giro(
     chiave_avviso = f"porta_{porta_esecutore.nome}"
     titolo_avviso = f"Avviso della bottega: porta {porta_esecutore.nome}"
     if not controllo.ok:
-        forgia.avviso(chiave_avviso, titolo_avviso, controllo.motivo or "porta non pronta")
+        forgia.avviso(chiave_avviso, titolo_avviso, recinta_testo_modello(controllo.motivo or "porta non pronta"))
         board.stato(lavoro, "pronto")
         return EsitoGiro("porta_non_pronta", motivo=controllo.motivo)
     else:
@@ -527,7 +550,24 @@ def _giro(
     if compito_salvato and compito_salvato != str(compito.numero):
         d_nota.pop("tentativi", None)
         d_nota.pop("attese", None)
+        d_nota.pop("quote", None)
     d_nota["compito"] = str(compito.numero)
+
+    # C5: il brief lo può cambiare il suo autore anche dopo l'etichetta: solo issue di un comandante.
+    comandanti_ok = {c.strip().lower() for c in configurazione.progetto.comandanti} | {
+        forgia.proprietario().strip().lower()
+    }
+    for iss_controllo in (iss_madre, compito):
+        if iss_controllo.autore.strip().lower() not in comandanti_ok:
+            forgia.commenta(
+                compito.numero,
+                f"Lavoro non eseguito: l'issue #{iss_controllo.numero} non è di un comandante.",
+                ruolo="esecutore",
+            )
+            d_nota["motivo"] = "autore non comandante"
+            board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
+            _rilancia_distributore(forgia)
+            return EsitoGiro("bloccato", motivo="autore non comandante")
 
     ramo_principale = forgia.ramo_principale()
     if not _RAMO_VALIDO.fullmatch(nome_ramo) or ".." in nome_ramo or nome_ramo == ramo_principale:
@@ -561,73 +601,86 @@ def _giro(
     # RV5: try/except attorno a tutto il giro: nessuna eccezione deve uscire da giro()
     try:
         # RV2: Pulizia del clone del runner da giri precedenti e rebase-apply
-        subprocess.run(["git", *OPZIONI_GIT_RUNNER, "am", "--abort"], cwd=str(clone_progetto), capture_output=True)
+        _esegui(["git", *OPZIONI_GIT_RUNNER, "am", "--abort"], cwd=str(clone_progetto), capture_output=True)
         rebase_apply = clone_progetto / ".git" / "rebase-apply"
         if rebase_apply.exists():
             shutil.rmtree(rebase_apply, ignore_errors=True)
-        subprocess.run(["git", *OPZIONI_GIT_RUNNER, "reset", "--hard"], cwd=str(clone_progetto), capture_output=True)
-        subprocess.run(["git", *OPZIONI_GIT_RUNNER, "clean", "-fdx"], cwd=str(clone_progetto), capture_output=True)
+        _esegui(["git", *OPZIONI_GIT_RUNNER, "reset", "--hard"], cwd=str(clone_progetto), capture_output=True)
+        _esegui(["git", *OPZIONI_GIT_RUNNER, "clean", "-fdx"], cwd=str(clone_progetto), capture_output=True)
 
-        res_shallow = subprocess.run(
+        res_shallow = _esegui(
             ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--is-shallow-repository"],
             cwd=str(clone_progetto),
             capture_output=True,
             text=True,
         )
         if res_shallow.stdout.strip() == "true" or (clone_progetto / ".git" / "shallow").exists():
-            subprocess.run(
+            _esegui(
                 ["git", *OPZIONI_GIT_RUNNER, *OPZIONI_GIT_CRED, "fetch", "--unshallow"],
                 cwd=str(clone_progetto),
                 capture_output=True,
             )
 
         # Prepara il ramo in clone_progetto con credenziali gh
-        subprocess.run(
+        _esegui(
             ["git", *OPZIONI_GIT_RUNNER, *OPZIONI_GIT_CRED, "fetch", "origin"],
             cwd=str(clone_progetto),
             capture_output=True,
             text=True,
         )
-        res_verify = subprocess.run(
-            ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", f"origin/{nome_ramo}"],
+        # C5: niente checkout nel clone del runner. Il ramo del lavoro è solo un riferimento mosso con update-ref;
+        # se HEAD lo indica (un clone di prima), si stacca senza cambiare l'albero.
+        testa = _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "symbolic-ref", "-q", "HEAD"],
+            cwd=str(clone_progetto),
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if testa == f"refs/heads/{nome_ramo}":
+            _esegui(
+                ["git", *OPZIONI_GIT_RUNNER, "checkout", "-q", "--detach", f"refs/remotes/origin/{ramo_principale}"],
+                cwd=str(clone_progetto),
+                check=True,
+                capture_output=True,
+            )
+        res_verify = _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{nome_ramo}^{{commit}}"],
             cwd=str(clone_progetto),
             capture_output=True,
             text=True,
         )
         if res_verify.returncode == 0:
-            subprocess.run(
-                ["git", *OPZIONI_GIT_RUNNER, "checkout", "-B", nome_ramo, f"origin/{nome_ramo}"],
-                cwd=str(clone_progetto),
-                check=True,
-                capture_output=True,
-            )
+            base_commit = res_verify.stdout.strip()
         else:
-            res_main = subprocess.run(
-                ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", f"origin/{ramo_principale}"],
+            res_main = _esegui(
+                [
+                    "git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", "-q",
+                    f"refs/remotes/origin/{ramo_principale}^{{commit}}",
+                ],
                 cwd=str(clone_progetto),
                 capture_output=True,
                 text=True,
             )
-            base_ref = f"origin/{ramo_principale}" if res_main.returncode == 0 else ramo_principale
-            subprocess.run(
-                ["git", *OPZIONI_GIT_RUNNER, "checkout", "-B", nome_ramo, base_ref],
-                cwd=str(clone_progetto),
-                check=True,
-                capture_output=True,
-            )
-
-        base_commit = subprocess.run(
-            ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "HEAD"],
+            if res_main.returncode != 0:
+                res_main = _esegui(
+                    ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", f"refs/heads/{ramo_principale}^{{commit}}"],
+                    cwd=str(clone_progetto),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            base_commit = res_main.stdout.strip()
+        _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "update-ref", f"refs/heads/{nome_ramo}", base_commit],
             cwd=str(clone_progetto),
             check=True,
             capture_output=True,
-            text=True,
-        ).stdout.strip()
+        )
 
         # Bundle iniziale per clonare nella copia dell'esecutore
         bundle_file_iniziale = dir_giro / "ramo.bundle"
-        subprocess.run(
-            ["git", *OPZIONI_GIT_RUNNER, "bundle", "create", str(bundle_file_iniziale), nome_ramo],
+        _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "bundle", "create", str(bundle_file_iniziale), f"refs/heads/{nome_ramo}"],
             cwd=str(clone_progetto),
             check=True,
             capture_output=True,
@@ -635,15 +688,15 @@ def _giro(
 
         lavoro_dir = dir_giro / "lavoro"
         cmd_clone = [*prefisso, "git", "clone", str(bundle_file_iniziale), str(lavoro_dir), "-b", nome_ramo]
-        subprocess.run(cmd_clone, check=True, capture_output=True, env=env_rip)
-        subprocess.run(
+        _esegui(cmd_clone, check=True, capture_output=True, env=env_rip)
+        _esegui(
             [*prefisso, "git", "config", "user.name", "Bottega"],
             cwd=str(lavoro_dir),
             check=True,
             capture_output=True,
             env=env_rip,
         )
-        subprocess.run(
+        _esegui(
             [*prefisso, "git", "config", "user.email", "bottega@local"],
             cwd=str(lavoro_dir),
             check=True,
@@ -651,15 +704,16 @@ def _giro(
             env=env_rip,
         )
 
-        # RV3: Il fascicolo sta nella copia dell'esecutore in .bottega/fascicolo/, esclusa con .git/info/exclude
+        # RV3: Il fascicolo sta nella copia dell'esecutore in .bottega/fascicolo/, esclusa con .git/info/exclude.
+        # C5: il runner lo prepara nella sua cartella; nella copia lo mette l'esecutore, così un link piantato nella
+        # copia si segue coi permessi dell'esecutore, non del runner.
         exclude_path = lavoro_dir / ".git" / "info" / "exclude"
-        exclude_path.parent.mkdir(parents=True, exist_ok=True)
-        exclude_path.write_text(".bottega/\n", encoding="utf-8")
         fascicolo_dir = lavoro_dir / ".bottega" / "fascicolo"
+        fascicolo_runner = dir_giro / "fascicolo"
 
         pr_esistente = forgia.pr_del_ramo(nome_ramo)
         _prepara_fascicolo(
-            fascicolo_dir=fascicolo_dir,
+            fascicolo_dir=fascicolo_runner,
             compito=compito,
             iss_madre=iss_madre,
             forgia=forgia,
@@ -671,6 +725,20 @@ def _giro(
             d_nota=d_nota,
             ramo_principale=ramo_principale,
             comandanti=configurazione.progetto.comandanti,
+        )
+        _esegui(
+            [*prefisso, "sh", "-c", 'mkdir -p -- "$1" && printf \'.bottega/\\n\' >> "$2"', "sh",
+             str(exclude_path.parent), str(exclude_path)],
+            check=True,
+            capture_output=True,
+            env=env_rip,
+        )
+        _esegui([*prefisso, "mkdir", "-p", "--", str(lavoro_dir / ".bottega")], check=True, capture_output=True, env=env_rip)
+        _esegui(
+            [*prefisso, "cp", "-R", "--", str(fascicolo_runner), str(fascicolo_dir)],
+            check=True,
+            capture_output=True,
+            env=env_rip,
         )
 
         conversazione_id = d_nota.get("conversazione")
@@ -751,7 +819,7 @@ def _giro(
                 # RV7: Il consigliere lavora in una copia usa e getta
                 dir_cons = dir_giro / f"consigliere-{consulti_effettuati}"
                 # La copia la fa l'utente dell'esecutore: il runner non deve seguire link messi dal modello.
-                subprocess.run(
+                _esegui(
                     [*prefisso, "cp", "-a", "--", str(lavoro_dir), str(dir_cons)],
                     check=True,
                     capture_output=True,
@@ -767,7 +835,7 @@ def _giro(
                     )
                 finally:
                     if prefisso:
-                        subprocess.run([*prefisso, "rm", "-rf", "--", str(dir_cons)], capture_output=True)
+                        _esegui([*prefisso, "rm", "-rf", "--", str(dir_cons)], capture_output=True)
                     shutil.rmtree(dir_cons, ignore_errors=True)
 
                 if lancio_cons.esito == "quota":
@@ -819,7 +887,7 @@ def _giro(
             var_quota = nome_variabile(bottega_cfg.id)
             forgia.imposta_variabile(var_quota, valore_esaurita(rinnovo))
 
-            cur_head = subprocess.run(
+            cur_head = _esegui(
                 [*prefisso, "git", "rev-parse", "HEAD"],
                 cwd=str(lavoro_dir),
                 check=True,
@@ -830,7 +898,7 @@ def _giro(
 
             if cur_head != base_commit:
                 bundle_salv = dir_giro / "salvataggio.bundle"
-                subprocess.run(
+                _esegui(
                     [*prefisso, "git", "bundle", "create", str(bundle_salv), nome_ramo],
                     cwd=str(lavoro_dir),
                     check=True,
@@ -860,6 +928,15 @@ def _giro(
             # RV8: attese non viene cresciuta dal giro!
             if lancio.conversazione:
                 d_nota["conversazione"] = lancio.conversazione
+            # C5: la quota si può fingere (un messaggio scritto nello stderr della porta). Tre giri di fila finiti in
+            # quota sullo stesso compito bloccano il lavoro, che riparte con `/bottega riprova`.
+            quote = int(d_nota.get("quote", 0)) + 1
+            d_nota["quote"] = str(quote)
+            if quote >= 3:
+                d_nota["motivo"] = "quota ripetuta"
+                board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
+                _rilancia_distributore(forgia)
+                return EsitoGiro("bloccato", motivo="quota ripetuta")
             board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
             _rilancia_distributore(forgia)
             return EsitoGiro("quota", motivo="quota esaurita")
@@ -881,7 +958,7 @@ def _giro(
                 return EsitoGiro("errore", motivo=f"tentativo {tentativi} fallito ({lancio.esito})")
 
         # RV4: Niente commit nuovi -> nessuna PR nuova, il lavoro torna pronto con tentativi+1 e rapporto in commento
-        cur_head = subprocess.run(
+        cur_head = _esegui(
             [*prefisso, "git", "rev-parse", "HEAD"],
             cwd=str(lavoro_dir),
             check=True,
@@ -906,7 +983,7 @@ def _giro(
 
         # Genera bundle di consegna dall'esecutore (RV1)
         bundle_file = dir_giro / "consegna.bundle"
-        subprocess.run(
+        _esegui(
             [*prefisso, "git", "bundle", "create", str(bundle_file), nome_ramo],
             cwd=str(lavoro_dir),
             check=True,
@@ -948,14 +1025,14 @@ def _giro(
         # B3-R12: Oracolo su copia fresca
         dir_oracolo = dir_giro / "oracolo"
         bundle_oracolo = dir_giro / "oracolo.bundle"
-        subprocess.run(
-            ["git", *OPZIONI_GIT_RUNNER, "bundle", "create", str(bundle_oracolo), nome_ramo],
+        _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "bundle", "create", str(bundle_oracolo), f"refs/heads/{nome_ramo}"],
             cwd=str(clone_progetto),
             check=True,
             capture_output=True,
         )
         cmd_clone_oracolo = [*prefisso, "git", "clone", str(bundle_oracolo), str(dir_oracolo), "-b", nome_ramo]
-        subprocess.run(cmd_clone_oracolo, check=True, capture_output=True, env=env_rip)
+        _esegui(cmd_clone_oracolo, check=True, capture_output=True, env=env_rip)
 
         tempo_oracolo_env = os.environ.get("BOTTEGA_TEMPO_ORACOLO")
         tempo_oracolo = float(tempo_oracolo_env) if tempo_oracolo_env else 1800.0
@@ -995,12 +1072,13 @@ def _giro(
             forgia.commenta(pr_num, comm_rapporto, ruolo="esecutore")
 
         # RV8: «Prove cambiate»: ogni stato diverso da 'A' su un percorso di prova, dal diff a NUL
+        # C5: anche i file che cambiano come girano le prove (conftest.py, pyproject.toml…), nuovi o no.
         prove_cambiate = False
         for st, _sm, _dm, old_p, new_p in entries_diff:
-            if st != "A":
-                if "test" in old_p.lower() or "test" in new_p.lower():
-                    prove_cambiate = True
-                    break
+            nomi_base = {Path(old_p).name.lower(), Path(new_p).name.lower()}
+            if (st != "A" and ("test" in old_p.lower() or "test" in new_p.lower())) or nomi_base & _CONFIGURAZIONE_PROVE:
+                prove_cambiate = True
+                break
         if prove_cambiate:
             forgia.etichetta(pr_num, "bottega: prove cambiate", aggiungi=True)
 
@@ -1015,8 +1093,19 @@ def _giro(
             if segreti_trovati:
                 break
 
+        # C5: diff della consegna, letto una volta (serve qui e alla rilettura del consigliere).
+        diff_consegna = _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "diff", "--no-ext-diff", "--no-textconv", f"{base_commit}..refs/bottega/consegna"],
+            cwd=str(clone_progetto),
+            capture_output=True,
+            text=True,
+        ).stdout
+        # Una riga aggiunta con `gitleaks:allow` zittisce gitleaks: conta come segreto.
+        if any(r.startswith("+") and "gitleaks:allow" in r for r in diff_consegna.splitlines()):
+            segreti_trovati = True
+
         if not segreti_trovati and shutil.which("gitleaks"):
-            proc_gl = subprocess.run(
+            proc_gl = _esegui(
                 [
                     "gitleaks", "git", "--no-banner", "--redact",
                     f"--log-opts={base_commit}..refs/bottega/consegna", str(clone_progetto),
@@ -1044,12 +1133,7 @@ def _giro(
         if scelta_cons.candidato and not scelta_cons.aspetta:
             cand_cons = configurazione.candidati[scelta_cons.candidato]
             porta_cons = _ottieni_porta(cand_cons.porta, porte)
-            diff_testo = subprocess.run(
-                ["git", *OPZIONI_GIT_RUNNER, "diff", f"{base_commit}..refs/bottega/consegna"],
-                cwd=str(clone_progetto),
-                capture_output=True,
-                text=True,
-            ).stdout
+            diff_testo = diff_consegna
             if len(diff_testo) > 60000:
                 diff_testo = diff_testo[:60000] + "\n[diff troncato a 60 000 caratteri]"
             prompt_rev = f"Rileggi il seguente diff per il compito {compito.numero}:\n\n{diff_testo}"
@@ -1082,6 +1166,7 @@ def _giro(
             d_nota.pop("conversazione", None)
             d_nota.pop("tentativi", None)
             d_nota.pop("attese", None)
+            d_nota.pop("quote", None)
             board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
 
         _rilancia_distributore(forgia)
@@ -1111,7 +1196,7 @@ def _giro(
         # Pulizia completa dello spazio del giro
         if dir_giro.exists():
             if prefisso:
-                subprocess.run([*prefisso, "rm", "-rf", str(dir_giro)], capture_output=True)
+                _esegui([*prefisso, "rm", "-rf", str(dir_giro)], capture_output=True)
             shutil.rmtree(dir_giro, ignore_errors=True)
 
 
@@ -1133,7 +1218,7 @@ def comando_giro(args: argparse.Namespace) -> int:
 
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo:
-        res = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner"], capture_output=True, text=True)
+        res = _esegui(["gh", "repo", "view", "--json", "nameWithOwner"], capture_output=True, text=True)
         if res.returncode == 0:
             import json
 

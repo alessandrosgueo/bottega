@@ -1,6 +1,7 @@
 """La board: interfaccia e adattatori per GitHub Projects (BoardProject e BoardComando)."""
 
 import json
+import os
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
@@ -480,6 +481,10 @@ class BoardComando:
         esegui: Callable[[list[str], str | None], str] | None = None,
     ) -> None:
         cmd = list(comando)
+        # C5: un percorso relativo si fissa adesso, dall'albero di partenza (il ramo principale). Più tardi la
+        # cartella corrente potrebbe contenere file del modello.
+        if cmd and "/" in cmd[0] and not os.path.isabs(cmd[0]):
+            cmd[0] = os.path.abspath(cmd[0])
         if not cmd or cmd[-1] != "bottega":
             cmd.append("bottega")
         self._cmd = tuple(cmd)

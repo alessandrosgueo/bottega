@@ -13,6 +13,7 @@ from typing import Protocol
 import os
 import signal
 import subprocess
+import tempfile
 
 from bottega import configurazione
 
@@ -104,6 +105,7 @@ def controlla_eseguibile(
             completo,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=tempo,
             env=env,
         )
@@ -124,6 +126,62 @@ def controlla_eseguibile(
     return Controllo(ok=False, versione=None, motivo=motivo)
 
 
+# Quanto si legge al più di ogni uscita: un processo rimasto vivo può continuare a scrivere.
+LIMITE_USCITA = 50 * 1024 * 1024
+
+
+def esegui_con_tetto(
+    completo: Sequence[str],
+    *,
+    cwd: Path | str | None,
+    env: Mapping[str, str],
+    tempo: int | float,
+) -> tuple[int | None, str, str, bool, str | None]:
+    """Lancia un processo nel suo gruppo, con un tetto di tempo, e ne legge le uscite.
+
+    Le uscite vanno su file anonimi, non su pipe: un processo staccato (`setsid`) che le tiene aperte non fa aspettare
+    chi lancia. Si aspetta solo il processo; al tempo scaduto si uccide il gruppo. I byte che non sono UTF-8 si
+    sostituiscono. Restituisce (codice, stdout, stderr, scaduto, errore_di_avvio); il codice è None se è scaduto.
+    """
+    with tempfile.TemporaryFile() as f_out, tempfile.TemporaryFile() as f_err:
+        try:
+            proc = subprocess.Popen(
+                list(completo),
+                cwd=None if cwd is None else str(cwd),
+                stdin=subprocess.DEVNULL,
+                stdout=f_out,
+                stderr=f_err,
+                env=dict(env),
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            return None, "", "", False, f"eseguibile non trovato: {completo[0] if completo else ''}"
+        except PermissionError:
+            return None, "", "", False, f"permesso negato: {completo[0] if completo else ''}"
+        except OSError as e:
+            return None, "", "", False, f"errore di sistema: {e}"
+
+        scaduto = False
+        try:
+            proc.wait(timeout=tempo)
+        except subprocess.TimeoutExpired:
+            scaduto = True
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+
+        f_out.seek(0)
+        f_err.seek(0)
+        stdout = f_out.read(LIMITE_USCITA).decode("utf-8", errors="replace")
+        stderr = f_err.read(LIMITE_USCITA).decode("utf-8", errors="replace")
+        return (None if scaduto else proc.returncode), stdout, stderr, scaduto, None
+
+
 def esegui_porta(
     cmd: Sequence[str],
     cartella: Path | str,
@@ -135,38 +193,14 @@ def esegui_porta(
     Restituisce (codice_uscita, stdout, stderr, errore_eccezione).
     """
     completo = costruisci_comando(prefisso, cmd)
-    env = ambiente_ripulito()
-    try:
-        proc = subprocess.Popen(
-            completo,
-            cwd=str(cartella),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-            start_new_session=True,
-        )
-    except FileNotFoundError:
-        nome_cmd = completo[0] if completo else ""
-        return None, "", "", f"eseguibile non trovato: {nome_cmd}"
-    except PermissionError:
-        nome_cmd = completo[0] if completo else ""
-        return None, "", "", f"permesso negato: {nome_cmd}"
-    except OSError as e:
-        return None, "", "", f"errore di sistema: {e}"
-
-    try:
-        stdout, stderr = proc.communicate(timeout=tempo)
-        return proc.returncode, stdout, stderr, None
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, OSError):
-            pass
-        proc.communicate()
+    codice, stdout, stderr, scaduto, errore = esegui_con_tetto(
+        completo, cwd=cartella, env=ambiente_ripulito(), tempo=tempo
+    )
+    if errore is not None:
+        return None, "", "", errore
+    if scaduto:
         return None, "", "", f"tempo scaduto dopo {tempo} secondi"
-    except OSError as e:
-        return None, "", "", f"errore di sistema: {e}"
+    return codice, stdout, stderr, None
 
 
 def porta(nome: str, eseguibile: str | None = None) -> Porta:

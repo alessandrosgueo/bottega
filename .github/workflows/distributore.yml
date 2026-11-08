@@ -38,6 +38,8 @@ defaults:
 jobs:
   distributore:
     runs-on: ${{ fromJSON(inputs.runner) }}
+    # Il consulto lancia un modello: il tetto lo copre, un distributore appeso no.
+    timeout-minutes: 90
     steps:
       - name: Scarica il progetto
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,4 +69,4 @@ jobs:
           if [ "$NOTTE" = "true" ]; then
             opzioni+=(--notte)
           fi
-          python3 -m bottega distribuisci "${opzioni[@]}"
+          python3 -P -m bottega distribuisci "${opzioni[@]}"

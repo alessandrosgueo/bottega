@@ -158,7 +158,7 @@ def test_input_e_permessi_dei_riusabili():
     assert "permissions:\n  contents: read" in testo_dist or "permissions:\n    contents: read" in testo_dist
     assert "BOTTEGA_VARIABILI: ${{ toJSON(vars) }}" in testo_dist
     assert "PYTHONPATH:" in testo_dist
-    assert "python3 -m bottega distribuisci" in testo_dist
+    assert "python3 -P -m bottega distribuisci" in testo_dist
 
     testo_esec = ESECUTORE_RIUSABILE.read_text(encoding="utf-8")
     assert "bottega_repo:" in testo_esec
@@ -170,7 +170,7 @@ def test_input_e_permessi_dei_riusabili():
     assert "permissions:\n  contents: read" in testo_esec or "permissions:\n    contents: read" in testo_esec
     assert "BOTTEGA_VARIABILI: ${{ toJSON(vars) }}" in testo_esec
     assert "PYTHONPATH:" in testo_esec
-    assert "python3 -m bottega giro" in testo_esec
+    assert "python3 -P -m bottega giro" in testo_esec
     assert "--lavoro" in testo_esec
     assert "--bottega" in testo_esec
 

@@ -41,6 +41,9 @@ defaults:
 jobs:
   esecutore:
     runs-on: ${{ fromJSON(inputs.runner) }}
+    # Un giro appeso non tiene il runner per sei ore: oltre il tetto GitHub chiude il job, e il distributore conta
+    # un tentativo quando trova il lavoro in corso da più di 7 ore.
+    timeout-minutes: 300
     steps:
       - name: Scarica il progetto
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,4 +72,4 @@ jobs:
           LAVORO: ${{ inputs.lavoro }}
           BOTTEGA: ${{ inputs.bottega }}
         run: |
-          python3 -m bottega giro --lavoro "$LAVORO" --bottega "$BOTTEGA"
+          python3 -P -m bottega giro --lavoro "$LAVORO" --bottega "$BOTTEGA"

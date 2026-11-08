@@ -604,7 +604,8 @@ def test_rv14_liberi_solo_se_autore_comandante() -> None:
 
 
 def test_rv13_evento_riprova(tmp_path: Path) -> None:
-    """RV13: Un issue_comment con `/bottega riprova` di un comandante rimette a pronto e distribuisce."""
+    """RV13 e C5: `/bottega riprova` di un comandante rimette a pronto e rilancia il distributore, senza prendere
+    lavori in linea (l'evento di commento gira in un gruppo di concorrenza suo)."""
     cfg = _configurazione_base()
     fuso = ZoneInfo(cfg.progetto.fuso)
     adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
@@ -637,10 +638,11 @@ def test_rv13_evento_riprova(tmp_path: Path) -> None:
     # 1. Deve aver commentato il riprova col segno
     comms = forgia.commenti(1)
     assert any("<!-- bottega:distributore -->" in c.corpo and "pronto" in c.corpo.lower() for c in comms)
-    # 2. Deve aver rimesso a pronto e preso il lavoro
+    # 2. Deve aver rimesso a pronto, rilanciato il distributore e non preso niente in linea
     stati = [r for r in board.registro if r[0] == "stato"]
     assert any(s[1] == 1 and s[2] == "pronto" for s in stati)
-    assert any(r[0] == "prendi" and r[1] == 1 for r in board.registro)
+    assert not any(r[0] == "prendi" for r in board.registro)
+    assert ("avvia_workflow", "bottega-distributore.yml", {}) in forgia.registro
 
 
 def test_rv13_evento_riprova_gia_in_corso(tmp_path: Path) -> None:

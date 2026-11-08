@@ -1,6 +1,7 @@
 """Implementazioni finte in memoria di Forgia e Board per le prove e il giro finto."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from bottega.board import ErroreBoard, Lavoro
@@ -33,6 +34,8 @@ class ForgiaFinta:
 
         if issues:
             for iss in issues:
+                if not iss.autore:
+                    iss = replace(iss, autore=proprietario)
                 self._issues[iss.numero] = iss
                 if iss.numero > self._contatore_issue:
                     self._contatore_issue = iss.numero
@@ -125,7 +128,10 @@ class ForgiaFinta:
 
     def crea_issue(self, titolo: str, corpo: str, madre: int | None = None, autore: str = "") -> int:
         num = self._prossimo_num_issue()
-        iss = Issue(numero=num, titolo=titolo, corpo=corpo, stato="OPEN", etichette=[], autore=autore)
+        # Senza autore l'issue è del proprietario, come quelle che la bottega crea col suo token.
+        iss = Issue(
+            numero=num, titolo=titolo, corpo=corpo, stato="OPEN", etichette=[], autore=autore or self._proprietario
+        )
         self._issues[num] = iss
         if madre is not None:
             self._sotto_issue.setdefault(madre, []).append(num)
