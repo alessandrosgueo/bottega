@@ -188,3 +188,20 @@ crediti della sua bottega sono finiti, senza rapporto.
 senza un motivo, e la revisione di chi ha scritto le correzioni non è a mente fresca.
 **Esito:** tenuta la revisione Opus; la porta Antigravity ha imparato i crediti finiti (PORTE-2).
 **Fonte:** dal vivo 2026-11-08
+
+### CICLO-14. La prova che prepara lo stato a mano
+
+**Scenario:** la revisione trova un caso da correggere (un compito eseguito da due candidati). Il brief delle prove
+dice «il compito ha già il campo Esecutore di un altro candidato» e la prova, verde, lo imposta a mano. Nel flusso vero
+quel campo lo riscrive un altro passo (`prendi`) subito prima del giro.
+**Domanda:** come si scrive la prova di una correzione?
+**Opzioni:**
+- A) si prepara a mano lo stato che serve, è più semplice
+- B) si passa dal flusso vero che produce quello stato (gli stessi comandi, nello stesso ordine)
+- C) si scrivono tutte e due
+**Scelta:** B
+**Perché:** lo stato preparato a mano è quello che chi scrive la correzione immagina, non quello che il programma
+produce; la prova passa anche con la correzione sbagliata.
+**Esito:** la rilettura ha visto il buco; la correzione nuova (un campo scritto solo dal giro) ha la prova col
+`prendi` fra due giri, rossa senza la correzione.
+**Fonte:** dal vivo 2026-11-08
