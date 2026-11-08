@@ -10,6 +10,7 @@ from bottega.casi import argomenti_casi, comando_casi
 from bottega.configurazione import ErroreConfigurazione, argomenti_configurazione, comando_configurazione
 from bottega.distributore import argomenti_distribuisci, comando_distribuisci
 from bottega.dividi import argomenti_dividi, comando_dividi
+from bottega.firma import ErroreFirma, argomenti_firma, comando_firma
 from bottega.forgia import ErroreForgia
 from bottega.giro import argomenti_giro, comando_giro
 from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
@@ -24,6 +25,7 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "scegli": comando_scegli,
     "distribuisci": comando_distribuisci,
     "dividi": comando_dividi,
+    "firma": comando_firma,
 }
 # Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
@@ -34,6 +36,7 @@ ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "scegli": argomenti_scegli,
     "distribuisci": argomenti_distribuisci,
     "dividi": argomenti_dividi,
+    "firma": argomenti_firma,
 }
 
 
@@ -89,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         return COMANDI[args.comando](args)
-    except (ErroreBoard, ErroreConfigurazione, ErroreForgia, FileNotFoundError) as e:
+    except (ErroreBoard, ErroreConfigurazione, ErroreForgia, ErroreFirma, FileNotFoundError) as e:
         motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
         print(f"errore: {motivo}", file=sys.stderr)
         return 1

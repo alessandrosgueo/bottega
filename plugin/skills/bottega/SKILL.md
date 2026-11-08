@@ -142,9 +142,13 @@ piano lascia spazio, chi esegue decide e lo scrive come Ruling.
 2. **I rilievi** li pesa chi decide, per il loro effetto, e li conta per **origine**: piano, brief o esecuzione. I gravi
    si correggono con una prova che li fissa; i minori diventano issue del progetto. Un errore che torna va nella
    costituzione.
-3. **L'unione** nel ramo principale è di chi decide, `--no-ff`, **firmata**: è il sigillo. Un esecutore non unisce,
-   non chiude lavoro, non manda in produzione. Ciò che è irreversibile o esce verso l'esterno si chiede all'utente.
-   Una PR rifiutata la chiude chi decide, col motivo; il lavoro torna da rifare o si chiude.
+3. **L'unione** nel ramo principale è di chi decide, `--no-ff`, **firmata**: è il sigillo. Chi decide unisce in locale
+   (`git merge --no-ff`, firmata da `commit.gpgsign`) e spinge; un'unione dal sito di GitHub è firmata da GitHub e non
+   passa la verifica (un attrezzo di rilascio che scrive da sé sul ramo principale ha la sua chiave, ammessa anch'essa).
+   La chiave e il git che firma li prepara `bottega firma prepara`, una volta sulla macchina di chi decide; una
+   pipeline di rilascio chiama `bottega firma verifica --rilascio <ultimo rilascio> --avvisa` e si ferma se non è buona.
+   Un esecutore non unisce, non chiude lavoro, non manda in produzione. Ciò che è irreversibile o esce verso l'esterno si
+   chiede all'utente. Una PR rifiutata la chiude chi decide, col motivo; il lavoro torna da rifare o si chiude.
 4. **Se la quota di chi decide finisce** la revisione finale non si taglia: la tappa resta aperta. Un sostituto con
    quota può rivedere e segnare l'esito (`pronta per l'unione` o `correzioni`); non pianifica e non unisce. Al ritorno
    chi decide parte dalla sua revisione.
