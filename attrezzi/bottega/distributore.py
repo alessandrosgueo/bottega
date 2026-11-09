@@ -275,9 +275,10 @@ def _gestisci_evento_commento(
 
         spazio_env = os.environ.get("BOTTEGA_SPAZIO")
         kw_temp = {"dir": spazio_env} if spazio_env else {}
-        with tempfile.TemporaryDirectory(**kw_temp) as tmpdir:
+        # M10: un file dell'esecutore che il runner non può togliere non deve far perdere la risposta del consulto.
+        with tempfile.TemporaryDirectory(**kw_temp, ignore_cleanup_errors=True) as tmpdir:
             if spazio_env:
-                os.chmod(tmpdir, 0o770)
+                os.chmod(tmpdir, 0o2770)
             p_tmp = Path(tmpdir)
             try:
                 iss = forgia.issue(num_issue)
@@ -309,13 +310,19 @@ def _gestisci_evento_commento(
                 f"Nella cartella di lavoro è presente il fascicolo minimo (`fascicolo.md`).\n\n"
                 f"Domanda:\n{cmd.argomento}\n"
             )
-            lancio = adattatore_porta.lancia(
-                cartella=p_tmp,
-                prompt=prompt,
-                modello=cand.modello,
-                sola_lettura=True,
-                prefisso=prefisso,
-            )
+            try:
+                lancio = adattatore_porta.lancia(
+                    cartella=p_tmp,
+                    prompt=prompt,
+                    modello=cand.modello,
+                    sola_lettura=True,
+                    prefisso=prefisso,
+                )
+            finally:
+                # M3: niente processi dell'esecutore vivi dopo il consulto.
+                from bottega.giro import _uccidi_processi_esecutore
+
+                _uccidi_processi_esecutore(prefisso)
 
         testo_cons = lancio.testo if lancio.esito == "fatto" else f"Errore consulto ({lancio.esito}): {lancio.testo}"
         corpo_risposta = f"Risposta del consigliere ({cand.nome}):\n\n{_recinta(testo_cons)}"

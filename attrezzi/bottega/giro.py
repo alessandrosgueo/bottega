@@ -706,10 +706,15 @@ def _giro(
         d_nota["utente"] = "runner"
     board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
 
-    # Spazio del giro
-    timestamp_str = str(int(adesso.timestamp()))
-    dir_giro = spazio / f"{lavoro}-{timestamp_str}"
-    dir_giro.mkdir(parents=True, exist_ok=True)
+    # M3: un processo dell'esecutore sopravvissuto a un consulto o a un giro di prima non deve vedere questo giro.
+    _uccidi_processi_esecutore(prefisso)
+
+    # Spazio del giro. M4: nome imprevedibile (mkdtemp) in uno spazio dove scrive anche l'esecutore; 2770 perché
+    # l'esecutore ci crea il suo clone e il bit setgid tiene il gruppo comune su ciò che crea, così il runner lo legge
+    # e lo toglie.
+    spazio.mkdir(parents=True, exist_ok=True)
+    dir_giro = Path(tempfile.mkdtemp(prefix=f"{lavoro}-", dir=spazio))
+    dir_giro.chmod(0o2770)
     env_rip = ambiente_ripulito()
 
     # RV5: try/except attorno a tutto il giro: nessuna eccezione deve uscire da giro()

@@ -84,12 +84,26 @@ def _repo_della_bottega(scelto: str | None, esegui: Esecutore) -> str | None:
 
 
 def _sha_del_tag(esegui: Esecutore, repo_bottega: str, tag: str) -> str | None:
-    """Lo SHA del commit del tag nel repo della bottega, o None: mai un valore inventato."""
-    cod, out = esegui(["gh", "api", f"repos/{repo_bottega}/commits/{tag}", "--jq", ".sha"], None)
-    if cod != 0:
-        return None
-    sha = out.strip()
-    return sha.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", sha) else None
+    """Lo SHA del commit del tag nel repo della bottega, o None: mai un valore inventato.
+
+    Si legge `refs/tags/<tag>` (M2: `commits/<x>` risolverebbe anche un ramo o uno SHA, compresi i commit dei fork); un
+    tag annotato si segue fino al suo commit.
+    """
+    domanda = f"repos/{repo_bottega}/git/ref/tags/{tag}"
+    for _ in range(3):
+        cod, out = esegui(["gh", "api", domanda, "--jq", '.object.type + " " + .object.sha'], None)
+        if cod != 0:
+            return None
+        parti = out.split()
+        if len(parti) != 2 or not re.fullmatch(r"[0-9a-fA-F]{40}", parti[1]):
+            return None
+        tipo, sha = parti
+        if tipo == "commit":
+            return sha.lower()
+        if tipo != "tag":
+            return None
+        domanda = f"repos/{repo_bottega}/git/tags/{sha}"
+    return None
 
 
 def _architettura_di_serie() -> str | None:
@@ -191,6 +205,25 @@ def comando_runner(
     if not sha:
         print(f"errore: sha256 non trovato nella release per architettura linux-{arch}", file=sys.stderr)
         return 1
+
+    try:
+        passi_runner(
+            u=Utenti(
+                runner=getattr(args, "runner", "bottega-runner"),
+                esecutore=getattr(args, "esecutore", "bottega-esecutore"),
+                gruppo=getattr(args, "gruppo", "bottega"),
+            ),
+            repo=args.repo,
+            versione=versione_pulita,
+            arch=arch,
+            sha256=sha,
+            etichetta=args.etichetta,
+            nome=args.nome,
+            porte=porte,
+        )
+    except ValueError as e:
+        print(f"errore: {e}", file=sys.stderr)
+        return 2
 
     token = ""
     if not prova:
@@ -552,12 +585,15 @@ def comando_riparti(
         return 1
 
 
+_ORIGIN_GITHUB = re.compile(
+    r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?"
+)
+
+
 def _estrai_owner_repo(url: str) -> str | None:
-    """Estrae OWNER/REPO da un indirizzo remoto git."""
-    u = url.strip()
-    if u.endswith(".git"):
-        u = u[:-4]
-    m = re.search(r"[:/]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)$", u)
+    """OWNER/REPO da un origin di GitHub, o None: un origin su un'altra forgia o una cartella locale darebbero un nome
+    che su GitHub può essere di un altro (G8)."""
+    m = _ORIGIN_GITHUB.fullmatch(url.strip())
     return m.group(1) if m else None
 
 
@@ -603,7 +639,10 @@ def comando_aggiorna(
         return 1
 
     try:
-        nuovi = aggiorna_chiamanti(testi, sha, args.tag)
+        if repo_bottega.split("/", 1)[1] != "bottega":
+            print(f"errore: i workflow chiamano <proprietario>/bottega, e il repo è {repo_bottega}", file=sys.stderr)
+            return 2
+        nuovi = aggiorna_chiamanti(testi, sha, args.tag, repo_bottega)
     except ErroreProgetto as e:
         print(f"errore: {e}", file=sys.stderr)
         return 1

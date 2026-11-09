@@ -44,10 +44,10 @@ jobs:
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))) &&
       (github.event_name != 'issues' || github.event.label.name == 'bottega: fuori' ||
       startsWith(github.event.label.name, 'esegue:'))
-    uses: <proprietario>/bottega/.github/workflows/distributore.yml@<sha>
+    uses: <proprietario>/bottega/.github/workflows/distributore.yml@<sha> # <tag>
     with:
       bottega_repo: <proprietario>/bottega
-      bottega_ref: <tag>
+      bottega_ref: <sha>
       runner: '["<etichetta del runner>"]'
       notte: ${{ github.event_name == 'schedule' || inputs.notte == true }}
     secrets:

@@ -345,14 +345,31 @@ def riparti(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
 _SHA_REGEX = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
-def aggiorna_chiamanti(testi: Mapping[str, str], sha: str, tag: str) -> dict[str, str]:
-    """Aggiorna i riferimenti a uses: ...@sha e bottega_ref: tag nei workflow chiamanti."""
+_USES_DELLA_BOTTEGA = re.compile(
+    r"^(?P<testa>[ \t]*(?:-[ \t]+)?uses:[ \t]*)[A-Za-z0-9_.-]+/bottega/(?P<file>\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml)"
+    r"@[0-9A-Za-z._-]+(?:[ \t]+#[^\n]*)?$",
+    re.MULTILINE,
+)
+
+
+def aggiorna_chiamanti(testi: Mapping[str, str], sha: str, tag: str, repo_bottega: str) -> dict[str, str]:
+    """Porta i workflow chiamanti al commit `sha` del tag `tag` del repo della bottega.
+
+    Si riscrivono solo le righe `uses:` che chiamano un workflow della bottega (M1: le altre azioni restano com'erano),
+    con `@<sha> # <tag>`, e `bottega_ref:` diventa lo SHA (G3: il codice che gira è quello del commit fissato, non
+    quello di un tag che si può spostare). Un file senza una chiamata della bottega è un errore.
+    """
     if not isinstance(sha, str) or not _SHA_REGEX.match(sha):
         raise ErroreProgetto(f"SHA non valido (richieste 40 cifre esadecimali): {sha!r}")
 
     aggiornati: dict[str, str] = {}
     for percorso, testo in testi.items():
-        nuovo = re.sub(r"(uses:\s*[^@\n]+)@[0-9a-zA-Z._-]+", rf"\g<1>@{sha}", testo)
-        nuovo = re.sub(r"(bottega_ref:\s*)[^\s\n]+", rf"\g<1>{tag}", nuovo)
+        nuovo, quanti = _USES_DELLA_BOTTEGA.subn(
+            lambda m: f"{m.group('testa')}{repo_bottega}/{m.group('file')}@{sha} # {tag}", testo
+        )
+        if quanti == 0:
+            raise ErroreProgetto(f"{percorso}: nessuna chiamata a un workflow della bottega")
+        nuovo = re.sub(r"(?m)^([ \t]*bottega_ref:[ \t]*)\S+[^\n]*$", rf"\g<1>{sha}", nuovo)
+        nuovo = re.sub(r"(?m)^([ \t]*bottega_repo:[ \t]*)\S+[^\n]*$", rf"\g<1>{repo_bottega}", nuovo)
         aggiornati[percorso] = nuovo
     return aggiornati

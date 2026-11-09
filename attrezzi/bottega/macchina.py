@@ -167,7 +167,8 @@ def passi_macchina(u: Utenti) -> list[Passo]:
                 "--create-home",
                 "--shell",
                 "/usr/sbin/nologin",
-                "--gid",
+                "--user-group",
+                "--groups",
                 u.gruppo,
                 u.runner,
             ),
@@ -183,7 +184,8 @@ def passi_macchina(u: Utenti) -> list[Passo]:
                 "--create-home",
                 "--shell",
                 "/usr/sbin/nologin",
-                "--gid",
+                "--user-group",
+                "--groups",
                 u.gruppo,
                 u.esecutore,
             ),
@@ -251,6 +253,44 @@ def testo_env_runner(u: Utenti, etichetta: str, porte: Mapping[str, str]) -> str
 testo_env_runner.__test__ = False  # type: ignore[attr-defined]
 
 
+_NOME_RUNNER = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_VERSIONE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+_NOME_PORTA = re.compile(r"[a-z][a-z0-9-]{0,31}")
+_PERCORSO_PORTA = re.compile(r"/[A-Za-z0-9._/+-]{1,255}")
+_ARCHITETTURE = ("x64", "arm64", "arm")
+
+
+def nome_del_servizio(repo: str) -> str:
+    """Il nome dell'unità systemd del runner di un progetto, scelto da noi (non da `svc.sh`)."""
+    owner, nome = repo.split("/", 1)
+    return f"bottega-runner-{owner}-{nome}.service"
+
+
+def testo_unita_runner(u: Utenti, repo: str, cartella: str) -> str:
+    """L'unità systemd del runner, scritta da noi come root: `svc.sh` non gira mai come root (G7)."""
+    return (
+        "[Unit]\n"
+        f"Description=Runner della bottega per {repo}\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        f"ExecStart={cartella}/runsvc.sh\n"
+        f"User={u.runner}\n"
+        f"WorkingDirectory={cartella}\n"
+        "KillMode=process\n"
+        "KillSignal=SIGTERM\n"
+        "TimeoutStopSec=5min\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+testo_unita_runner.__test__ = False  # type: ignore[attr-defined]
+
+
 def passi_runner(
     u: Utenti,
     repo: str,
@@ -262,7 +302,29 @@ def passi_runner(
     porte: Mapping[str, str],
     token: str = "",
 ) -> list[Passo]:
-    """Genera i passi di installazione e registrazione del runner self-hosted di GitHub Actions."""
+    """Genera i passi di installazione e registrazione del runner self-hosted di GitHub Actions.
+
+    La cartella del runner è sua (`0750`, il suo gruppo): l'esecutore non ci entra. Root non esegue mai un file del
+    runner: l'unità systemd la scriviamo noi, e `svc.sh` non si usa. Il token di registrazione passa a `config.sh` solo
+    nell'ambiente (`ACTIONS_RUNNER_INPUT_TOKEN`, conservato da `sudo --preserve-env`), mai in un argomento.
+    """
+    if not _REPO.fullmatch(repo):
+        raise ValueError(f"repo non valido: {repo!r}")
+    for valore, regola, che in (
+        (nome, _NOME_RUNNER, "nome del runner"),
+        (etichetta, _NOME_RUNNER, "etichetta"),
+        (versione, _VERSIONE, "versione"),
+    ):
+        if not regola.fullmatch(valore):
+            raise ValueError(f"{che} non valido: {valore!r}")
+    if arch not in _ARCHITETTURE:
+        raise ValueError(f"architettura non valida: {arch!r}")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise ValueError("sha256 non valido")
+    for nome_porta, percorso in porte.items():
+        if not _NOME_PORTA.fullmatch(nome_porta) or not _PERCORSO_PORTA.fullmatch(percorso):
+            raise ValueError(f"porta non valida: {nome_porta!r}={percorso!r}")
+
     owner, repo_nome = repo.split("/", 1)
     prefisso_repo = f"{owner}-{repo_nome}"
     q = shlex.quote
@@ -272,48 +334,43 @@ def passi_runner(
     url = f"https://github.com/actions/runner/releases/download/v{versione}/{tar_nome}"
 
     tok = token or os.environ.get("BOTTEGA_TOKEN_REGISTRAZIONE", "")
-    ambiente_config = (("BOTTEGA_TOKEN_REGISTRAZIONE", tok),) if tok else ()
+    ambiente_config = (("ACTIONS_RUNNER_INPUT_TOKEN", tok),) if tok else ()
 
     file_env = f"{cartella}/.env"
+    servizio = nome_del_servizio(repo)
+    come_runner = ("sudo", "-n", "-u", u.runner, "-H")
 
-    servizio = f"actions.runner.{prefisso_repo}.{nome}.service"
-    dir_dropin = f"/etc/systemd/system/{servizio}.d"
-    file_dropin = f"{dir_dropin}/bottega.conf"
+    # M9: si scarica in un temporaneo e si rinomina solo dopo la verifica: un archivio troncato non resta mai.
+    scarica = (
+        f"set -e; t=$(mktemp -p {q(cartella)} .scarica-XXXXXX); trap 'rm -f \"$t\"' EXIT; "
+        f"curl -fsSL -o \"$t\" {q(url)}; echo {q(sha256)}\"  $t\" | sha256sum -c --status; mv \"$t\" {q(archivio)}"
+    )
 
     return [
         Passo(
             descrizione=f"cartella runner in {cartella}",
-            comando=("sudo", "-n", "install", "-d", "-o", u.runner, "-g", u.gruppo, "-m", "0755", cartella),
-            controllo=("test", "-d", cartella),
-        ),
-        Passo(
-            descrizione=f"scarica runner v{versione} ({arch})",
-            comando=("sudo", "-n", "-u", u.runner, "-H", "curl", "-fsSL", "-o", archivio, url),
-            controllo=("test", "-f", archivio),
-        ),
-        Passo(
-            descrizione=f"verifica sha256 runner v{versione}",
-            comando=(
-                "sudo",
-                "-n",
-                "-u",
-                u.runner,
-                "-H",
+            comando=("sudo", "-n", "install", "-d", "-o", u.runner, "-g", u.runner, "-m", "0750", cartella),
+            controllo=(
                 "sh",
                 "-c",
-                f"echo {q(sha256 + '  ' + archivio)} | sha256sum -c",
+                f"[ \"$(sudo -n stat -c '%U:%G:%a' {q(cartella)} 2>/dev/null)\" = \"{u.runner}:{u.runner}:750\" ]",
             ),
-            controllo=("test", "-f", f"{cartella}/config.sh"),
+        ),
+        Passo(
+            descrizione=f"scarica e verifica runner v{versione} ({arch})",
+            comando=(*come_runner, "sh", "-c", scarica),
+            controllo=(*come_runner, "sh", "-c", f"echo {q(sha256 + '  ' + archivio)} | sha256sum -c --status"),
         ),
         Passo(
             descrizione=f"estrai runner v{versione}",
-            comando=("sudo", "-n", "-u", u.runner, "-H", "tar", "xzf", archivio, "-C", cartella),
-            controllo=("test", "-f", f"{cartella}/config.sh"),
+            comando=(*come_runner, "tar", "xzf", archivio, "-C", cartella),
+            controllo=("sudo", "-n", "test", "-f", f"{cartella}/config.sh"),
         ),
         Passo(
             descrizione=f"configura runner {nome}",
             comando=(
                 "sudo",
+                "--preserve-env=ACTIONS_RUNNER_INPUT_TOKEN",
                 "-n",
                 "-u",
                 u.runner,
@@ -321,10 +378,9 @@ def passi_runner(
                 "sh",
                 "-c",
                 f"cd {q(cartella)} && ./config.sh --unattended --url {q('https://github.com/' + repo)} "
-                f"--token \"$BOTTEGA_TOKEN_REGISTRAZIONE\" --name {q(nome)} --labels {q(etichetta)} "
-                "--work _work --replace",
+                f"--name {q(nome)} --labels {q(etichetta)} --work _work --replace",
             ),
-            controllo=("test", "-f", f"{cartella}/.runner"),
+            controllo=("sudo", "-n", "test", "-f", f"{cartella}/.runner"),
             ambiente=ambiente_config,
         ),
         passo_file(
@@ -336,20 +392,25 @@ def passi_runner(
             gruppo=u.gruppo,
         ),
         Passo(
-            descrizione=f"servizio systemd per runner {nome}",
-            comando=("sudo", "-n", "sh", "-c", f"cd {q(cartella)} && ./svc.sh install {q(u.runner)}"),
-            controllo=("test", "-f", f"/etc/systemd/system/{servizio}"),
+            descrizione="lanciatore del servizio",
+            comando=(*come_runner, "install", "-m", "0755", f"{cartella}/bin/runsvc.sh", f"{cartella}/runsvc.sh"),
+            controllo=("sudo", "-n", "test", "-x", f"{cartella}/runsvc.sh"),
         ),
-        passo_file(f"drop-in systemd umask in {file_dropin}", "[Service]\nUMask=0007\n", file_dropin, "0644"),
+        passo_file(
+            f"unità systemd {servizio}",
+            testo_unita_runner(u, repo, cartella),
+            f"/etc/systemd/system/{servizio}",
+            "0644",
+        ),
         Passo(
             descrizione="ricarica configurazione systemd",
             comando=("sudo", "-n", "systemctl", "daemon-reload"),
-            controllo=("systemctl", "is-active", "--quiet", servizio),
+            controllo=("sh", "-c", f"[ \"$(systemctl show -p NeedDaemonReload --value {q(servizio)})\" = no ]"),
         ),
         Passo(
-            descrizione=f"avvia servizio runner {nome}",
-            comando=("sudo", "-n", "sh", "-c", f"cd {q(cartella)} && ./svc.sh start"),
-            controllo=("systemctl", "is-active", "--quiet", servizio),
+            descrizione=f"avvia servizio {servizio}",
+            comando=("sudo", "-n", "systemctl", "enable", "--now", servizio),
+            controllo=("sh", "-c", f"systemctl is-enabled --quiet {q(servizio)} && systemctl is-active --quiet {q(servizio)}"),
         ),
     ]
 
