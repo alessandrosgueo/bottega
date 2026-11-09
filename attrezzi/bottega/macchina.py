@@ -277,6 +277,7 @@ _VERSIONE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _NOME_PORTA = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _PERCORSO_PORTA = re.compile(r"/[A-Za-z0-9._/+-]{1,255}")
 _ARCHITETTURE = ("x64", "arm64", "arm")
+_TETTO = re.compile(r"[1-9][0-9]{0,5}[KMG]")
 
 
 def nome_del_servizio(repo: str) -> str:
@@ -285,8 +286,13 @@ def nome_del_servizio(repo: str) -> str:
     return f"bottega-runner-{owner}-{nome}.service"
 
 
-def testo_unita_runner(u: Utenti, repo: str, cartella: str) -> str:
-    """L'unità systemd del runner, scritta da noi come root: `svc.sh` non gira mai come root (G7)."""
+def testo_unita_runner(u: Utenti, repo: str, cartella: str, tetto: str | None = None) -> str:
+    """L'unità systemd del runner, scritta da noi come root: `svc.sh` non gira mai come root (G7).
+
+    Con `tetto` (per esempio `6G`) il servizio ha un tetto di memoria senza swap: l'esecutore, le sue porte e le sue
+    prove sono figli del runner e stanno nel suo cgroup, quindi una macchina che fa anche altro resta viva.
+    """
+    righe_tetto = f"MemoryMax={tetto}\nMemorySwapMax=0\n" if tetto else ""
     return (
         "[Unit]\n"
         f"Description=Runner della bottega per {repo}\n"
@@ -300,6 +306,7 @@ def testo_unita_runner(u: Utenti, repo: str, cartella: str) -> str:
         "KillMode=process\n"
         "KillSignal=SIGTERM\n"
         "TimeoutStopSec=5min\n"
+        f"{righe_tetto}"
         "\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
@@ -319,6 +326,7 @@ def passi_runner(
     nome: str,
     porte: Mapping[str, str],
     token: str = "",
+    tetto: str | None = None,
 ) -> list[Passo]:
     """Genera i passi di installazione e registrazione del runner self-hosted di GitHub Actions.
 
@@ -339,6 +347,8 @@ def passi_runner(
         raise ValueError(f"architettura non valida: {arch!r}")
     if not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise ValueError("sha256 non valido")
+    if tetto is not None and not _TETTO.fullmatch(tetto):
+        raise ValueError(f"tetto non valido (per esempio 6G): {tetto!r}")
     for nome_porta, percorso in porte.items():
         if not _NOME_PORTA.fullmatch(nome_porta) or not _PERCORSO_PORTA.fullmatch(percorso):
             raise ValueError(f"porta non valida: {nome_porta!r}={percorso!r}")
@@ -416,7 +426,7 @@ def passi_runner(
         ),
         passo_file(
             f"unità systemd {servizio}",
-            testo_unita_runner(u, repo, cartella),
+            testo_unita_runner(u, repo, cartella, tetto),
             f"/etc/systemd/system/{servizio}",
             "0644",
         ),

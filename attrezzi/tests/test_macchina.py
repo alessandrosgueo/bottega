@@ -639,3 +639,23 @@ def test_c3_case_chiuse_anche_se_c_erano() -> None:
         assert utente in p.controllo[2]
 
 
+
+
+def test_tetto_del_servizio_del_runner() -> None:
+    """Con un tetto, l'unità del runner ha MemoryMax senza swap: l'esecutore e le sue prove sono figli del runner."""
+    from bottega.macchina import testo_unita_runner
+
+    testo = testo_unita_runner(Utenti(), "o/r", "/var/lib/bottega/runner-o-r", "6G")
+    assert "MemoryMax=6G\n" in testo
+    assert "MemorySwapMax=0\n" in testo
+    assert "MemoryMax" not in testo_unita_runner(Utenti(), "o/r", "/var/lib/bottega/runner-o-r")
+    passi = passi_runner(Utenti(), "o/r", "2.320.0", "x64", "a" * 64, "e", "n", {}, tetto="6G")
+    unita = next(p for p in passi if p.descrizione.startswith("unità systemd"))
+    assert "MemoryMax=6G" in " ".join(unita.comando)
+
+
+@pytest.mark.parametrize("tetto", ["6", "6GB", "0G", "-1G", "6G\nUser=root", "6 G", "1234567G"])
+def test_tetto_storto_rifiutato(tetto: str) -> None:
+    """Il tetto entra in un'unità di root: solo un numero e un'unità di misura, mai altro testo."""
+    with pytest.raises(ValueError):
+        passi_runner(Utenti(), "o/r", "2.320.0", "x64", "a" * 64, "e", "n", {}, tetto=tetto)
