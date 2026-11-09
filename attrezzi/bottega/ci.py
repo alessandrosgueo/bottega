@@ -11,7 +11,20 @@ from pathlib import Path
 import re
 import subprocess
 
-_RUNNER_GITHUB = ("ubuntu-", "windows-", "macos-")
+RUNNER_GITHUB_ESATTI: frozenset[str] = frozenset({
+    "ubuntu-latest",
+    "ubuntu-24.04",
+    "ubuntu-22.04",
+    "ubuntu-24.04-arm",
+    "ubuntu-22.04-arm",
+    "windows-latest",
+    "windows-2025",
+    "windows-2022",
+    "macos-latest",
+    "macos-15",
+    "macos-14",
+    "macos-13",
+})
 
 
 @dataclass(frozen=True)
@@ -138,12 +151,29 @@ def _estrai_lista_inline(valore: str) -> list[str]:
 
 def _e_runner_github(etichetta: str) -> bool:
     et = etichetta.lower().strip("'\" ")
-    return et.startswith(_RUNNER_GITHUB)
+    return et in RUNNER_GITHUB_ESATTI
 
 
 def _trova_pericolo(righe_pulite: list[str]) -> str | None:
     """Verifica se il workflow ha qualcosa da dare: segreti o runner self-hosted."""
-    # 1. secrets. in qualsiasi punto
+    # 1. secrets: inherit
+    for riga in righe_pulite:
+        if re.search(r"\bsecrets\s*:\s*inherit\b", riga):
+            return "usa secrets: inherit"
+
+    # 2. secrets in espressione ${{ ... }}
+    testo_senza_commenti = "\n".join(righe_pulite)
+    for expr in re.findall(r"\$\{\{(.*?)\}\}", testo_senza_commenti, re.DOTALL):
+        if re.search(r"\bsecrets\b", expr):
+            m_dot = re.search(r"\bsecrets\.([A-Za-z0-9_]+)\b", expr)
+            if m_dot:
+                return f"usa secrets.{m_dot.group(1)}"
+            m_br = re.search(r"\bsecrets\s*\[\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*\]", expr)
+            if m_br:
+                return f"usa secrets['{m_br.group(1)}']"
+            return f"usa secrets ({expr.strip()})"
+
+    # 3. secrets. in qualsiasi punto (anche fuori da ${{ }})
     for riga in righe_pulite:
         m = re.search(r"\bsecrets\.([A-Za-z0-9_]+)\b", riga)
         if m:
@@ -151,12 +181,7 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
         if "secrets." in riga:
             return "usa secrets."
 
-    # 2. secrets: inherit
-    for riga in righe_pulite:
-        if re.search(r"\bsecrets\s*:\s*inherit\b", riga):
-            return "usa secrets: inherit"
-
-    # 3. un workflow riusabile (locale o di un altro repo): il chiamato può avere segreti o runner self-hosted, e
+    # 4. un workflow riusabile (locale o di un altro repo): il chiamato può avere segreti o runner self-hosted, e
     # qui non si vede. Nel dubbio è un rischio. Le azioni (`actions/checkout@…`) non passano da `.github/workflows/`.
     for riga in righe_pulite:
         m = re.match(r"^\s*(?:-\s*)?uses\s*:\s*['\"]?([^\s'\"]+)", riga)
@@ -174,8 +199,12 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
             if valore:
                 if "${{" in valore:
                     return f"usa runs-on con espressione ({valore})"
+                if valore.startswith("{"):
+                    return f"usa runs-on a mappa o forma non riconosciuta ({valore})"
                 if valore.startswith("["):
                     elementi = _estrai_lista_inline(valore)
+                    if not elementi:
+                        return "usa runs-on con lista vuota"
                     for el in elementi:
                         if "${{" in el:
                             return f"usa runs-on con espressione ({el})"
@@ -191,6 +220,7 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
                         return f"usa runner non GitHub ({el})"
             else:
                 j = i + 1
+                righe_figli: list[str] = []
                 while j < len(righe_pulite):
                     riga_sub = righe_pulite[j]
                     if not riga_sub.strip():
@@ -199,6 +229,16 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
                     indent_sub = len(riga_sub) - len(riga_sub.lstrip())
                     if indent_sub <= indent:
                         break
+                    righe_figli.append(riga_sub)
+                    j += 1
+
+                if not righe_figli:
+                    return "usa runs-on vuoto o non riconosciuto"
+
+                if not all(r_sub.lstrip().startswith("-") for r_sub in righe_figli):
+                    return "usa runs-on a mappa o forma non riconosciuta"
+
+                for riga_sub in righe_figli:
                     m_item = re.match(r"^\s*-\s*(.*)$", riga_sub)
                     if m_item:
                         el = m_item.group(1).strip().strip("'\"")
@@ -208,10 +248,93 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
                             return "usa runner self-hosted"
                         if not _e_runner_github(el):
                             return f"usa runner non GitHub ({el})"
-                    j += 1
         i += 1
 
     return None
+
+
+def _condizione_if_e_protetta(cond: str) -> bool:
+    """Verifica se la condizione if: protegge il job dai rami bottega/*.
+
+    Conta solo se la condizione è esattamente !startsWith(github.head_ref, 'bottega/')
+    (spazi a parte, con o senza ${{ }}) o se è unita al resto solo con && al livello più esterno;
+    con un || (o parentesi che non sai leggere) non protegge.
+    """
+    cond = cond.strip()
+    if (cond.startswith("'") and cond.endswith("'")) or (cond.startswith('"') and cond.endswith('"')):
+        cond = cond[1:-1].strip()
+    if cond.startswith("${{") and cond.endswith("}}"):
+        cond = cond[3:-2].strip()
+    if (cond.startswith("'") and cond.endswith("'")) or (cond.startswith('"') and cond.endswith('"')):
+        cond = cond[1:-1].strip()
+
+    if "||" in cond:
+        return False
+
+    clausole: list[str] = []
+    corrente: list[str] = []
+    in_apice: str | None = None
+    profondita = 0
+    i = 0
+    while i < len(cond):
+        c = cond[i]
+        if in_apice:
+            if c == in_apice:
+                in_apice = None
+            corrente.append(c)
+            i += 1
+            continue
+        if c in ("'", '"'):
+            in_apice = c
+            corrente.append(c)
+            i += 1
+            continue
+        if c == "(":
+            profondita += 1
+            corrente.append(c)
+            i += 1
+            continue
+        if c == ")":
+            profondita -= 1
+            if profondita < 0:
+                return False
+            corrente.append(c)
+            i += 1
+            continue
+        if profondita == 0 and cond[i : i + 2] == "&&":
+            clausole.append("".join(corrente).strip())
+            corrente = []
+            i += 2
+            continue
+        corrente.append(c)
+        i += 1
+
+    if in_apice or profondita != 0:
+        return False
+    if corrente:
+        clausole.append("".join(corrente).strip())
+
+    for cl in clausole:
+        cl_pulita = cl.strip()
+        while cl_pulita.startswith("(") and cl_pulita.endswith(")"):
+            p = 0
+            spezzata = False
+            for ch in cl_pulita[:-1]:
+                if ch == "(":
+                    p += 1
+                elif ch == ")":
+                    p -= 1
+                    if p == 0:
+                        spezzata = True
+                        break
+            if spezzata:
+                break
+            cl_pulita = cl_pulita[1:-1].strip()
+
+        if re.match(r"^!\s*startsWith\(\s*github\.head_ref\s*,\s*['\"]bottega/['\"]\s*\)$", cl_pulita):
+            return True
+
+    return False
 
 
 def _esamina_jobs_guardia(righe_pulite: list[str]) -> bool:
@@ -277,10 +400,7 @@ def _esamina_jobs_guardia(righe_pulite: list[str]) -> bool:
                                 break
                             cond += " " + r_k.strip()
                             k += 1
-                        if re.search(
-                            r"!startsWith\(\s*github\.head_ref\s*,\s*['\"]bottega/['\"]\s*\)",
-                            cond,
-                        ):
+                        if _condizione_if_e_protetta(cond):
                             protetto = True
                     j += 1
                 if protetto:
@@ -382,16 +502,16 @@ def _esamina_workflow(file: str, testo: str) -> list[Rischio]:
                 r = righe_on[idx_sub]
                 indent_r = len(r) - len(r.lstrip())
                 if indent_r != indent_ev:
-                    idx_sub += 1
-                    continue
+                    dubbio_on = True
+                    break
 
-                m_ev = re.match(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$", r)
+                m_ev = re.match(r"^\s*(?:'([^']+)'|\"([^\"]+)\"|([A-Za-z0-9_-]+))\s*:\s*(.*)$", r)
                 if not m_ev:
-                    idx_sub += 1
-                    continue
+                    dubbio_on = True
+                    break
 
-                ev_nome = m_ev.group(1)
-                ev_val = m_ev.group(2).strip()
+                ev_nome = m_ev.group(1) or m_ev.group(2) or m_ev.group(3)
+                ev_val = m_ev.group(4).strip()
 
                 sub_ev_righe: list[str] = []
                 k = idx_sub + 1
@@ -412,7 +532,7 @@ def _esamina_workflow(file: str, testo: str) -> list[Rischio]:
                         motivo_push = "parte su push in ogni ramo"
                     else:
                         for idx_p, r_p in enumerate(sub_ev_righe):
-                            m_br = re.match(r"^\s*branches\s*:\s*(.*)$", r_p)
+                            m_br = re.match(r"^\s*(?:'branches'|\"branches\"|branches)\s*:\s*(.*)$", r_p)
                             if m_br:
                                 val_br = m_br.group(1).strip()
                                 if val_br.startswith("["):
@@ -420,13 +540,13 @@ def _esamina_workflow(file: str, testo: str) -> list[Rischio]:
                                 else:
                                     modelli_branches = []
                                     for r_seq in sub_ev_righe[idx_p + 1 :]:
-                                        if re.match(r"^\s*[A-Za-z0-9_-]+\s*:", r_seq):
+                                        if re.match(r"^\s*(?:'[A-Za-z0-9_-]+'|\"[A-Za-z0-9_-]+\"|[A-Za-z0-9_-]+)\s*:", r_seq):
                                             break
                                         m_seq = re.match(r"^\s*-\s*(.*)$", r_seq)
                                         if m_seq:
                                             modelli_branches.append(m_seq.group(1).strip().strip("'\""))
 
-                            m_ign = re.match(r"^\s*branches-ignore\s*:\s*(.*)$", r_p)
+                            m_ign = re.match(r"^\s*(?:'branches-ignore'|\"branches-ignore\"|branches-ignore)\s*:\s*(.*)$", r_p)
                             if m_ign:
                                 val_ign = m_ign.group(1).strip()
                                 if val_ign.startswith("["):
@@ -434,7 +554,7 @@ def _esamina_workflow(file: str, testo: str) -> list[Rischio]:
                                 else:
                                     modelli_ignore = []
                                     for r_seq in sub_ev_righe[idx_p + 1 :]:
-                                        if re.match(r"^\s*[A-Za-z0-9_-]+\s*:", r_seq):
+                                        if re.match(r"^\s*(?:'[A-Za-z0-9_-]+'|\"[A-Za-z0-9_-]+\"|[A-Za-z0-9_-]+)\s*:", r_seq):
                                             break
                                         m_seq = re.match(r"^\s*-\s*(.*)$", r_seq)
                                         if m_seq:

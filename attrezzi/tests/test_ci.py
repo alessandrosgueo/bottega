@@ -700,3 +700,251 @@ def test_chiama_workflow_riusabile_locale_e_esterno() -> None:
     assert "riusabile" in trovati["locale.yml"]
     assert "riusabile" in trovati["esterno.yml"]
     assert "azione.yml" not in trovati
+
+
+def test_g6_chiave_quotata():
+    # Una chiave d'evento fra apici sotto on: ('push':, "pull_request":) si legge come quella senza apici;
+    # ogni riga sotto on: che non sai leggere è un dubbio, cioè un rischio.
+    wf_singoli = """
+on:
+  'push':
+    branches: ['**']
+jobs:
+  a:
+    runs-on: [self-hosted]
+    steps:
+      - run: make
+"""
+    r_singoli = rischi({"singoli.yml": wf_singoli})
+    assert len(r_singoli) == 1
+    assert "push" in r_singoli[0].motivo and "self-hosted" in r_singoli[0].motivo
+
+    wf_doppi = """
+on:
+  "push":
+    branches: ['**']
+jobs:
+  a:
+    runs-on: [self-hosted]
+    steps:
+      - run: make
+"""
+    r_doppi = rischi({"doppi.yml": wf_doppi})
+    assert len(r_doppi) == 1
+    assert "push" in r_doppi[0].motivo and "self-hosted" in r_doppi[0].motivo
+
+    wf_illeggibile = """
+on:
+  ??? riga strana
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make
+"""
+    r_dubbio = rischi({"dubbio.yml": wf_illeggibile})
+    assert len(r_dubbio) == 1
+    assert "dubbio" in r_dubbio[0].motivo or "non riconosciuto" in r_dubbio[0].motivo
+
+
+def test_g6_secrets_in_ogni_forma():
+    # È un rischio ogni uso di secrets in un'espressione ${{ … }}, in qualunque forma:
+    # secrets.X, secrets['X'], toJSON(secrets), secrets[format(...)], e anche secrets: inherit.
+    # Fuori dai commenti YAML.
+    wf_tojson = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '${{ toJSON(secrets) }}' > s; make
+"""
+    r_tojson = rischi({"tojson.yml": wf_tojson})
+    assert len(r_tojson) == 1
+    assert "secrets" in r_tojson[0].motivo
+
+    wf_parentesi = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets['TOKEN'] }}
+    steps:
+      - run: make
+"""
+    r_parentesi = rischi({"parentesi.yml": wf_parentesi})
+    assert len(r_parentesi) == 1
+    assert "secrets" in r_parentesi[0].motivo
+
+    wf_format = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ secrets[format('{0}', 'KEY')] }}
+"""
+    r_format = rischi({"format.yml": wf_format})
+    assert len(r_format) == 1
+    assert "secrets" in r_format[0].motivo
+
+    # Commento YAML non deve attivare il rischio se non ci sono altri segreti
+    wf_commento = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      # ${{ toJSON(secrets) }} nel commento
+      - run: echo ok
+"""
+    assert rischi({"commento.yml": wf_commento}) == []
+
+
+def test_g6_runs_on_a_mappa():
+    # runs-on: scritto come mappa (group:/labels:) o in una forma che non è una stringa né una lista è un dubbio.
+    wf_gruppo = """
+on: push
+jobs:
+  a:
+    runs-on:
+      group: casa
+      labels: bottega
+    steps:
+      - run: make
+"""
+    r_gruppo = rischi({"gruppo.yml": wf_gruppo})
+    assert len(r_gruppo) == 1
+    assert "runs-on" in r_gruppo[0].motivo
+
+    wf_inline_map = """
+on: push
+jobs:
+  a:
+    runs-on: { group: 'casa', labels: 'bottega' }
+    steps:
+      - run: make
+"""
+    r_inline = rischi({"inline.yml": wf_inline_map})
+    assert len(r_inline) == 1
+    assert "runs-on" in r_inline[0].motivo
+
+
+def test_g6_etichette_di_github_esatte():
+    # Un runner è di GitHub solo con un'etichetta di questo elenco esatto:
+    # ubuntu-latest, ubuntu-24.04, ubuntu-22.04, ubuntu-24.04-arm, ubuntu-22.04-arm,
+    # windows-latest, windows-2025, windows-2022, macos-latest, macos-15, macos-14, macos-13.
+    # Ogni altra (anche ubuntu-bottega) è self-hosted. Un'espressione ${{ … }} in runs-on è un dubbio.
+    etichette_valide = [
+        "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-24.04-arm", "ubuntu-22.04-arm",
+        "windows-latest", "windows-2025", "windows-2022", "macos-latest", "macos-15", "macos-14", "macos-13",
+    ]
+    for et in etichette_valide:
+        wf_ok = f"""
+on: push
+jobs:
+  a:
+    runs-on: {et}
+    steps:
+      - run: make
+"""
+        assert rischi({f"{et}.yml": wf_ok}) == [], f"Dovrebbe essere valido: {et}"
+
+    wf_ubuntu_bottega = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-bottega
+    steps:
+      - run: make
+"""
+    r_bottega = rischi({"bottega.yml": wf_ubuntu_bottega})
+    assert len(r_bottega) == 1
+    assert "ubuntu-bottega" in r_bottega[0].motivo or "non GitHub" in r_bottega[0].motivo or "self-hosted" in r_bottega[0].motivo
+
+    wf_espressione = """
+on: push
+jobs:
+  a:
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - run: make
+"""
+    r_expr = rischi({"expr.yml": wf_espressione})
+    assert len(r_expr) == 1
+    assert "runs-on con espressione" in r_expr[0].motivo
+
+
+def test_g6_guardia_in_or_non_protegge():
+    # La guardia !startsWith(github.head_ref, 'bottega/') conta solo se la condizione if: è esattamente quella
+    # (spazi a parte, con o senza ${{ }}) o se è unita al resto solo con && al livello più esterno;
+    # con un || (o parentesi che non sai leggere) non protegge.
+    wf_or = """
+on: pull_request
+jobs:
+  a:
+    if: github.actor == 'me' || !startsWith(github.head_ref, 'bottega/')
+    runs-on: [self-hosted]
+    steps:
+      - run: make
+"""
+    r_or = rischi({"or.yml": wf_or})
+    assert len(r_or) == 1
+    assert "pull_request" in r_or[0].motivo
+
+    wf_and_ok = """
+on: pull_request
+jobs:
+  a:
+    if: "!startsWith(github.head_ref, 'bottega/') && github.event_name == 'pull_request'"
+    runs-on: [self-hosted]
+    steps:
+      - run: make
+"""
+    assert rischi({"and_ok.yml": wf_and_ok}) == []
+
+    wf_expr_ok = """
+on: pull_request
+jobs:
+  a:
+    if: ${{ !startsWith(github.head_ref, 'bottega/') }}
+    runs-on: [self-hosted]
+    steps:
+      - run: make
+"""
+    assert rischi({"expr_ok.yml": wf_expr_ok}) == []
+
+    wf_or_dentro = """
+on: pull_request
+jobs:
+  a:
+    if: "!startsWith(github.head_ref, 'bottega/') || false"
+    runs-on: [self-hosted]
+    steps:
+      - run: make
+"""
+    r_or_dentro = rischi({"or_dentro.yml": wf_or_dentro})
+    assert len(r_or_dentro) == 1
+
+
+CASI_REVISORE = {
+    "chiave_quotata": "on:\n  'push':\n    branches: ['**']\njobs:\n  a:\n    runs-on: [self-hosted, x]\n    steps:\n      - run: make\n",
+    "tojson_secrets": "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo '${{ toJSON(secrets) }}' > s; make\n",
+    "secrets_parentesi": "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    env:\n      T: ${{ secrets['TOKEN'] }}\n    steps:\n      - run: make\n",
+    "runs_on_gruppo": "on: push\njobs:\n  a:\n    runs-on:\n      group: casa\n      labels: bottega\n    steps:\n      - run: make\n",
+    "etichetta_ubuntu": "on: push\njobs:\n  a:\n    runs-on: ubuntu-bottega\n    steps:\n      - run: make\n",
+    "guardia_or": "on: pull_request\njobs:\n  a:\n    if: github.actor == 'me' || !startsWith(github.head_ref, 'bottega/')\n    runs-on: [self-hosted]\n    steps:\n      - run: make\n",
+}
+
+
+@pytest.mark.parametrize("nome", list(CASI_REVISORE))
+def test_g6_casi_del_revisore(nome: str):
+    r = rischi({nome: CASI_REVISORE[nome]})
+    assert bool(r), f"Caso del revisore {nome} non ha prodotto rischi"
+
+
+
+
+
+

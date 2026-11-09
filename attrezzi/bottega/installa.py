@@ -560,6 +560,9 @@ def comando_ferma(
     esegui_gh = _adatta_esegui_gh(esegui_fn)
     try:
         wfs = ferma(esegui_gh, args.repo)
+        if not wfs:
+            print(f"errore: nessun workflow bottega-*.yml in {args.repo}", file=sys.stderr)
+            return 1
         for wf in wfs:
             print(f"fermato: {wf}")
         return 0
@@ -577,6 +580,9 @@ def comando_riparti(
     esegui_gh = _adatta_esegui_gh(esegui_fn)
     try:
         wfs = riparti(esegui_gh, args.repo)
+        if not wfs:
+            print(f"errore: nessun workflow bottega-*.yml in {args.repo}", file=sys.stderr)
+            return 1
         for wf in wfs:
             print(f"ripartito: {wf}")
         return 0

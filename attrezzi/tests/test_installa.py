@@ -511,7 +511,7 @@ def test_ferma_e_riparti(capsys: pytest.CaptureFixture[str]) -> None:
     ])
     esecutore = EsecutoreRegistratore(
         {
-            "gh workflow list --repo owner/repo --json path": (0, wf_risposta),
+            "gh workflow list --all --repo owner/repo --json path,state": (0, wf_risposta),
         }
     )
 
@@ -535,6 +535,29 @@ def test_ferma_e_riparti(capsys: pytest.CaptureFixture[str]) -> None:
     assert "bottega-distributore.yml" in catturato_r.out
     assert "bottega-esecutore-principale.yml" in catturato_r.out
     assert "ci.yml" not in catturato_r.out
+
+
+def test_g5_nessun_workflow_e_un_errore(capsys: pytest.CaptureFixture[str]) -> None:
+    # comando_ferma e comando_riparti escono 1 con errore: nessun workflow bottega-*.yml in <repo> se l'elenco è vuoto.
+    esecutore = EsecutoreRegistratore(
+        {
+            "gh workflow list --all --repo owner/repo --json path,state": (0, "[]"),
+        }
+    )
+    p_f = _parser_ferma()
+    args_f = p_f.parse_args(["--repo", "owner/repo"])
+    codice_f = comando_ferma(args_f, esegui=esecutore)
+    assert codice_f == 1
+    catturato_f = capsys.readouterr()
+    assert "errore: nessun workflow bottega-*.yml in owner/repo" in catturato_f.err
+
+    p_r = _parser_riparti()
+    args_r = p_r.parse_args(["--repo", "owner/repo"])
+    codice_r = comando_riparti(args_r, esegui=esecutore)
+    assert codice_r == 1
+    catturato_r = capsys.readouterr()
+    assert "errore: nessun workflow bottega-*.yml in owner/repo" in catturato_r.err
+
 
 
 def test_aggiorna(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

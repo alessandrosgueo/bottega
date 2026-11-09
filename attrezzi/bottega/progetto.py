@@ -313,7 +313,7 @@ def imposta_segreto(
 
 def workflow_della_bottega(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
     """Elenco dei workflow della bottega (.github/workflows/bottega-*.yml) nel repository."""
-    out = esegui_gh(["workflow", "list", "--repo", repo, "--json", "path"])
+    out = esegui_gh(["workflow", "list", "--all", "--repo", repo, "--json", "path,state"])
     dati = json.loads(out) if out else []
     trovati: list[str] = []
     for item in dati:

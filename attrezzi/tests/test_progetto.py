@@ -273,7 +273,7 @@ def test_ferma_e_riparti() -> None:
 
     def esegui_gh(args: list[str]) -> str:
         chiamate.append(args)
-        if args[:3] == ["workflow", "list", "--repo"]:
+        if args[:2] == ["workflow", "list"]:
             return risposta_wf
         return ""
 
@@ -398,3 +398,31 @@ def test_m1_aggiorna_senza_chiamata_e_un_errore() -> None:
     testo = "jobs:\n  a:\n    uses: actions/checkout@v4\n"
     with pytest.raises(ErroreProgetto, match="nessuna chiamata a un workflow della bottega"):
         aggiorna_chiamanti({"wf.yml": testo}, "6" * 40, "v4.0.0", "mio/bottega")
+
+
+def test_g5_riparti_vede_i_disabilitati() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_gh(args: list[str]) -> str:
+        chiamate.append(args)
+        # Il finto risponde coi workflow disabled_manually solo se il comando ha --all
+        if "--all" in args and args[:2] == ["workflow", "list"]:
+            return json.dumps([
+                {"path": ".github/workflows/bottega-distributore.yml", "state": "disabled_manually"},
+                {"path": ".github/workflows/bottega-esecutore-principale.yml", "state": "disabled_manually"},
+            ])
+        if args[:2] == ["workflow", "list"]:
+            # Senza --all non compaiono i disabilitati
+            return json.dumps([])
+        return ""
+
+    wfs = riparti(esegui_gh, "owner/repo")
+    assert wfs == [
+        ".github/workflows/bottega-distributore.yml",
+        ".github/workflows/bottega-esecutore-principale.yml",
+    ]
+    assert any(
+        c == ["workflow", "list", "--all", "--repo", "owner/repo", "--json", "path,state"]
+        for c in chiamate
+    )
+
