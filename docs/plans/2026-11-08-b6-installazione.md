@@ -80,6 +80,18 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
   una macchina usa `bottega-esecutore`; un secondo progetto riceve un utente suo (`bottega-esecutore-<repo>`), col
   suo `sudoers` e il suo `.env`. Il runner resta uno per progetto (B6-R3).
 
+- **B6-R13. I workflow chiamanti puntano alla bottega, mai al progetto** (dalla revisione di B6.5: il primo codice
+  inventava il tag `v1.0.0` e prendeva lo SHA dal `HEAD` del progetto, o 40 zeri). `installa progetto` vuole
+  `--tag T` (facoltativo solo con `--solo-sessione`) e prende il repo della bottega da `--bottega OWNER/REPO` o
+  dall'`origin` del clone della bottega da cui gira, mai dalla cartella del progetto; il nome del repo è `bottega`
+  (i modelli dicono `<proprietario>/bottega`); lo SHA viene da `gh api repos/<bottega>/commits/<tag>`, 40
+  esadecimali, altrimenti si ferma. `--valore` non può dare `proprietario`, `tag` né `sha`. Il tag passa da
+  `[0-9A-Za-z][0-9A-Za-z._-]{0,99}`: finisce nell'indirizzo dell'API, nel nome di un ramo e nel YAML. `aggiorna`
+  trova la bottega allo stesso modo.
+- **B6-R14. `kill -1` solo verso un altro utente** (dalla revisione di B6.4, dopo due crash): il giro chiede `id -u`
+  attraverso il prefisso e lancia `kill -KILL -1` solo se l'uid è diverso dal suo e diverso da 0; ogni dubbio vuol
+  dire non uccidere (`_uccidi_processi_esecutore`).
+
 ## Review Focus
 
 1. **`sudoers` sbagliato** che chiude fuori chi installa: si controlla con `visudo -c -f` su un temporaneo, mai
