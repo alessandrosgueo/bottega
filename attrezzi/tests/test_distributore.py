@@ -1034,6 +1034,74 @@ def test_c4_consulta_col_prefisso(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert chiamate_porta[0]["prefisso"] == ("env",)
 
 
+def test_b6_consulto_nello_spazio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6-R6: la cartella temporanea del consulto sta in BOTTEGA_SPAZIO con modo 0770."""
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    spazio = tmp_path / "mio-spazio"
+    spazio.mkdir()
+    monkeypatch.setenv("BOTTEGA_SPAZIO", str(spazio))
+
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Dove sta il fascicolo?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    cartelle_viste: list[tuple[Path, int]] = []
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self, prefisso=()): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            p = Path(cartella)
+            cartelle_viste.append((p, p.stat().st_mode & 0o777))
+            return Lancio(esito="fatto", testo="Risposta consiglio")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+    )
+
+    assert len(cartelle_viste) == 1
+    cartella, modo = cartelle_viste[0]
+    assert cartella.parent.resolve() == spazio.resolve()
+    assert modo == 0o770
+
+
 def test_c5_autore_estraneo_anche_con_etichetta() -> None:
     cfg = _configurazione_base()
     fuso = ZoneInfo(cfg.progetto.fuso)

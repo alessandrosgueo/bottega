@@ -252,6 +252,9 @@ def porta(nome: str, eseguibile: str | None = None) -> Porta:
     """Restituisce l'adattatore della porta richiesta. Accetta solo i nomi di `configurazione.PORTE`."""
     if nome not in configurazione.PORTE:
         raise ValueError(f"porta sconosciuta: {nome}")
+    if eseguibile is None:
+        var_env = f"BOTTEGA_PORTA_{nome.upper().replace('-', '_')}"
+        eseguibile = os.environ.get(var_env)
     if nome == "claude-code":
         from bottega.porte.claude_code import ClaudeCode
 

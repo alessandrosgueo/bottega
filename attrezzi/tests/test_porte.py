@@ -69,6 +69,30 @@ def test_porta_nomi_validi_e_sconosciuti(tmp_path: Path) -> None:
         porta("porta-non-esistente")
 
 
+def test_b6_porta_dalla_variabile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6: se manca eseguibile, la fabbrica legge BOTTEGA_PORTA_<NOME> dall'ambiente."""
+    monkeypatch.setenv("BOTTEGA_PORTA_CLAUDE_CODE", "/opt/bin/mio-claude")
+    monkeypatch.setenv("BOTTEGA_PORTA_ANTIGRAVITY", "/opt/bin/mio-agy")
+    monkeypatch.setenv("BOTTEGA_PORTA_PI", "/opt/bin/mio-pi")
+    monkeypatch.setenv("BOTTEGA_PORTA_COPILOT_CLI", "/opt/bin/mio-copilot")
+
+    p1 = porta("claude-code")
+    assert p1.eseguibile == "/opt/bin/mio-claude"
+
+    p2 = porta("antigravity")
+    assert p2.eseguibile == "/opt/bin/mio-agy"
+
+    p3 = porta("pi")
+    assert p3.eseguibile == "/opt/bin/mio-pi"
+
+    p4 = porta("copilot-cli")
+    assert p4.eseguibile == "/opt/bin/mio-copilot"
+
+    # L'argomento esplicito vince sulla variabile d'ambiente
+    p_espl = porta("claude-code", eseguibile="/usr/bin/claude-esplicito")
+    assert p_espl.eseguibile == "/usr/bin/claude-esplicito"
+
+
 def test_controlla_eseguibile_assente(tmp_path: Path) -> None:
     """`controlla()` con l'eseguibile assente restituisce ok=False col motivo, mai eccezioni."""
     assente = str(tmp_path / "non_esiste_affatto")

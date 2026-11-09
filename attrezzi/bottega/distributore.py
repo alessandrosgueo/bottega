@@ -273,7 +273,11 @@ def _gestisci_evento_commento(
         else:
             adattatore_porta = porta_fabbrica(cand.porta)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        spazio_env = os.environ.get("BOTTEGA_SPAZIO")
+        kw_temp = {"dir": spazio_env} if spazio_env else {}
+        with tempfile.TemporaryDirectory(**kw_temp) as tmpdir:
+            if spazio_env:
+                os.chmod(tmpdir, 0o770)
             p_tmp = Path(tmpdir)
             try:
                 iss = forgia.issue(num_issue)

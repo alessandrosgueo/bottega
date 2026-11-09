@@ -3324,6 +3324,11 @@ def test_c5_fascicolo_scritto_dall_esecutore(tmp_path: Path):
     prefisso_sh.write_text(
         f'#!/bin/sh\n'
         f'printf "%s\\n" "$*" >> "{registro}"\n'
+        f'case "$1" in\n'
+        f'    kill|pkill|killall)\n'
+        f'        exit 0\n'
+        f'        ;;\n'
+        f'esac\n'
         f'exec "$@"\n',
         encoding="utf-8",
     )

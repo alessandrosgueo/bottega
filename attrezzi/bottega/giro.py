@@ -25,6 +25,7 @@ import time
 
 from bottega.board import Board, BoardComando, BoardProject
 from bottega.brief import fatto_quando, ramo
+from bottega import ci
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
     Candidato,
@@ -239,6 +240,29 @@ def _ottieni_porta(
     raise TypeError(f"Argomento 'porte' non valido: {porte!r}")
 
 
+def _uccidi_processi_esecutore(prefisso: Sequence[str]) -> None:
+    """B6-R6: uccide i processi lasciati dall'utente dell'esecutore, con `kill -KILL -1` lanciato attraverso il prefisso.
+
+    `kill -1` colpisce tutti i processi dell'utente che lo lancia. Si lancia solo se il prefisso porta davvero a un
+    altro utente: un prefisso finto o sbagliato, che resta su chi esegue il giro, ucciderebbe il runner e tutta la
+    sessione; come root ucciderebbe la macchina. Per questo prima si chiede `id -u` attraverso lo stesso prefisso, e
+    ogni dubbio (errore, uscita illeggibile, uid uguale al nostro o 0) vuol dire non uccidere.
+    """
+    if not prefisso:
+        return
+    try:
+        res = _esegui([*prefisso, "id", "-u"], capture_output=True, text=True)
+        uid = int(res.stdout.strip()) if res.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return
+    if uid is None or uid == 0 or uid == os.getuid():
+        return
+    try:
+        _esegui([*prefisso, "kill", "-KILL", "-1"], capture_output=True)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _rilancia_distributore(forgia: Forgia) -> None:
     """Rilancia il distributore a fine giro; gli errori non bloccano il giro."""
     try:
@@ -314,6 +338,7 @@ def _prepara_fascicolo(
 ) -> None:
     """Prepara tutti i documenti del fascicolo prima del lancio dell'esecutore."""
     fascicolo_dir.mkdir(parents=True, exist_ok=True)
+    fascicolo_dir.chmod(0o750)
     (fascicolo_dir / "brief.md").write_text(compito.corpo, encoding="utf-8")
 
     if compito.numero != iss_madre.numero or forgia.sotto_issue(iss_madre.numero):
@@ -717,6 +742,20 @@ def _giro(
             capture_output=True,
             text=True,
         )
+
+        # B6-R7: Controllo rischi della CI del progetto sul ramo principale prima di lavorare
+        elenco_rischi = ci.rischi_del_ramo(clone_progetto, ramo_principale)
+        chiave_avviso_ci = "ci"
+        titolo_avviso_ci = "Avviso della bottega: la CI del progetto parte sui rami bottega/*"
+        if elenco_rischi:
+            testo_rischi = "\n".join(f"{r.file}: {r.motivo}" for r in elenco_rischi)
+            forgia.avviso(chiave_avviso_ci, titolo_avviso_ci, recinta_testo_modello(testo_rischi))
+            d_nota["motivo"] = "ci del progetto"
+            board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
+            return EsitoGiro("in_attesa", motivo="ci del progetto")
+        else:
+            forgia.avviso(chiave_avviso_ci, titolo_avviso_ci, None)
+
         # C5: niente checkout nel clone del runner. Il ramo del lavoro è solo un riferimento mosso con update-ref;
         # se HEAD lo indica (un clone di prima), si stacca senza cambiare l'albero.
         testa = _esegui(
@@ -1129,6 +1168,7 @@ def _giro(
             check=True,
             capture_output=True,
         )
+        _uccidi_processi_esecutore(prefisso)
         cmd_clone_oracolo = [*prefisso, "git", "clone", str(bundle_oracolo), str(dir_oracolo), "-b", nome_ramo]
         _esegui(cmd_clone_oracolo, check=True, capture_output=True, env=env_rip)
 
@@ -1316,6 +1356,8 @@ def _giro(
                 )
             except Exception as exc:
                 print(f"misure: errore in _scrivi_misure: {exc}", file=sys.stderr)
+
+        _uccidi_processi_esecutore(prefisso)
 
         # Pulizia completa dello spazio del giro. C6: un errore qui (un `rm` che supera il tetto) non deve sostituire
         # l'esito già scritto sulla board.
