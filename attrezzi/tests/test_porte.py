@@ -69,6 +69,30 @@ def test_porta_nomi_validi_e_sconosciuti(tmp_path: Path) -> None:
         porta("porta-non-esistente")
 
 
+def test_b6_porta_dalla_variabile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6: se manca eseguibile, la fabbrica legge BOTTEGA_PORTA_<NOME> dall'ambiente."""
+    monkeypatch.setenv("BOTTEGA_PORTA_CLAUDE_CODE", "/opt/bin/mio-claude")
+    monkeypatch.setenv("BOTTEGA_PORTA_ANTIGRAVITY", "/opt/bin/mio-agy")
+    monkeypatch.setenv("BOTTEGA_PORTA_PI", "/opt/bin/mio-pi")
+    monkeypatch.setenv("BOTTEGA_PORTA_COPILOT_CLI", "/opt/bin/mio-copilot")
+
+    p1 = porta("claude-code")
+    assert p1.eseguibile == "/opt/bin/mio-claude"
+
+    p2 = porta("antigravity")
+    assert p2.eseguibile == "/opt/bin/mio-agy"
+
+    p3 = porta("pi")
+    assert p3.eseguibile == "/opt/bin/mio-pi"
+
+    p4 = porta("copilot-cli")
+    assert p4.eseguibile == "/opt/bin/mio-copilot"
+
+    # L'argomento esplicito vince sulla variabile d'ambiente
+    p_espl = porta("claude-code", eseguibile="/usr/bin/claude-esplicito")
+    assert p_espl.eseguibile == "/usr/bin/claude-esplicito"
+
+
 def test_controlla_eseguibile_assente(tmp_path: Path) -> None:
     """`controlla()` con l'eseguibile assente restituisce ok=False col motivo, mai eccezioni."""
     assente = str(tmp_path / "non_esiste_affatto")
@@ -1051,6 +1075,24 @@ sys.exit(0)
     p = porta("copilot-cli", eseguibile=str(script))
     res = p.lancia(tmp_path, "esegui", "model")
     assert res.contatori == {"inputTokens": 300, "outputTokens": 100}
+
+
+def test_r22_controlla_dalla_radice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6-R22: controlla_eseguibile lancia con cwd='/'."""
+    import subprocess
+    from bottega.porte import controlla_eseguibile
+
+    cwd_ricevuta: list[str | None] = []
+
+    def finto_run(cmd, **kwargs):
+        cwd_ricevuta.append(kwargs.get("cwd"))
+        return subprocess.CompletedProcess(cmd, 0, stdout="1.0.0\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", finto_run)
+    res = controlla_eseguibile("eseguibile-finto")
+    assert res.ok is True
+    assert cwd_ricevuta == ["/"]
+
 
 
 

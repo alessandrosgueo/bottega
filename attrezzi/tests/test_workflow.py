@@ -219,7 +219,8 @@ def test_rv15_workflow():
         assert "path: progetto" in testo
         assert "working-directory: progetto" in testo
         assert "path: .bottega" not in testo
-    assert "BOTTEGA_SPAZIO: ${{ runner.temp }}/bottega-spazio" in testo_esec_riu
+    assert "BOTTEGA_SPAZIO: ${{ runner.temp }}/bottega-spazio" not in testo_esec_riu
+    assert 'export BOTTEGA_SPAZIO="${BOTTEGA_SPAZIO:-$RUNNER_TEMP/bottega-spazio}"' in testo_esec_riu
 
     for mod in (DISTRIBUTORE_MODELLO, ESECUTORE_MODELLO):
         testo = mod.read_text(encoding="utf-8")
@@ -268,3 +269,12 @@ def test_c6_commenti_solo_da_chi_ha_accesso():
     assert "contains(github.event.comment.body, '/bottega')" in testo
     assert "author_association" in testo
     assert '"COLLABORATOR"' in testo
+
+
+def test_g2_spazio_dal_env_del_runner():
+    """G2: esecutore.yml non imposta BOTTEGA_SPAZIO nell'env del passo (coprirebbe il .env del runner); lo esporta nel run col ripiego."""
+    testo = ESECUTORE_RIUSABILE.read_text(encoding="utf-8")
+    env_blocco = re.search(r"env:\s*\n((?:\s+[A-Z0-9_]+:[^\n]*\n)+)", testo)
+    assert env_blocco is not None
+    assert "BOTTEGA_SPAZIO" not in env_blocco.group(1)
+    assert 'export BOTTEGA_SPAZIO="${BOTTEGA_SPAZIO:-$RUNNER_TEMP/bottega-spazio}"' in testo

@@ -185,6 +185,9 @@ piano lascia spazio, chi esegue decide e lo scrive come Ruling.
   principale rosso = niente lavori nuovi; una porta che non risponde lascia un solo avviso e nessun lavoro toccato.
 - **L'interruttore**, dalla macchina di chi decide: `bottega ferma` spegne tutti i workflow della bottega del progetto,
   `bottega riparti` li riaccende.
+- **L'installazione** la fa la CLI seguendo `INSTALLA.md` del clone della bottega: `bottega installa macchina`,
+  `runner` e `progetto`, ognuno prima con `--prova`. `bottega aggiorna --tag <tag>` porta i workflow del progetto a un
+  rilascio nuovo della bottega, con una PR.
 
 ## Le misure
 

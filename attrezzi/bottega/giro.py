@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ import time
 
 from bottega.board import Board, BoardComando, BoardProject
 from bottega.brief import fatto_quando, ramo
+from bottega import ci
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
     Candidato,
@@ -239,6 +241,103 @@ def _ottieni_porta(
     raise TypeError(f"Argomento 'porte' non valido: {porte!r}")
 
 
+# Il tetto di un bundle dell'esecutore copiato dal runner: oltre, il disco del runner non si riempie.
+TETTO_COPIA = 1024 * 1024 * 1024
+
+
+def prepara_cartelle_del_giro(spazio: Path, lavoro: int) -> tuple[Path, Path]:
+    """Crea la cartella del giro (del runner, 2750) e dentro `esecutore/` (2770) (B6-R22).
+
+    Il bit setgid su tutte e due tiene il gruppo dello spazio su ciò che vi nasce: l'esecutore legge ciò che il runner
+    prepara nella cartella del giro (bundle, fascicolo) ma non ci crea niente, e il runner legge e toglie ciò che
+    l'esecutore crea in `esecutore/`. Il `chmod` di Python toglie il setgid se il modo non lo nomina: va scritto.
+    """
+    spazio.mkdir(parents=True, exist_ok=True)
+    dir_giro = Path(tempfile.mkdtemp(prefix=f"{lavoro}-", dir=spazio))
+    dir_esec = dir_giro / "esecutore"
+    try:
+        dir_esec.mkdir()
+        gid_comune = spazio.stat().st_gid
+        for cartella in (dir_giro, dir_esec):
+            if cartella.stat().st_gid != gid_comune:
+                os.chown(cartella, -1, gid_comune)
+        dir_giro.chmod(0o2750)
+        dir_esec.chmod(0o2770)
+    except BaseException:
+        # Una cartella a metà non resta nello spazio: il chiamante non la conosce ancora.
+        shutil.rmtree(dir_giro, ignore_errors=True)
+        raise
+    return dir_giro, dir_esec
+
+
+def prepara_cartella_del_fascicolo(fascicolo_dir: Path) -> None:
+    """La cartella del fascicolo del runner: 2750, così i file che vi scrive prendono il gruppo comune e l'esecutore
+    li legge (e li copia), ma non li cambia."""
+    fascicolo_dir.mkdir(parents=True, exist_ok=True)
+    fascicolo_dir.chmod(0o2750)
+
+
+def chiudi_file_del_fascicolo(fascicolo_dir: Path) -> None:
+    """I file del fascicolo a 0640: leggibili dal gruppo comune senza dipendere dall'umask del runner."""
+    for f in fascicolo_dir.iterdir():
+        if f.is_file() and not f.is_symlink():
+            f.chmod(0o640)
+
+
+def _copia_dall_esecutore(origine: Path, destinazione: Path) -> None:
+    """Copia nella cartella del runner un file scritto dall'esecutore, senza seguire link.
+
+    Al posto del file l'esecutore può aver messo un link a un file del runner o una FIFO: si apre con `O_NOFOLLOW` e
+    si accetta solo un file normale. La destinazione è nella cartella del runner, dove l'esecutore non scrive.
+    """
+    fd = os.open(origine, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as sorgente:
+        if not stat.S_ISREG(os.fstat(sorgente.fileno()).st_mode):
+            raise ValueError(f"{origine.name} non è un file normale")
+        copiati = 0
+        with open(destinazione, "xb") as copia:
+            while blocco := sorgente.read(1024 * 1024):
+                copiati += len(blocco)
+                if copiati > TETTO_COPIA:
+                    raise ValueError(f"{origine.name} supera {TETTO_COPIA} byte")
+                copia.write(blocco)
+
+
+def togli_come_esecutore(prefisso: Sequence[str], cartella: Path) -> None:
+    """L'esecutore toglie ciò che ha creato in `cartella`, anche le sue cartelle chiuse (`chmod -R` ignora i link
+    che incontra). Dalla radice: la cartella corrente del runner è chiusa all'esecutore."""
+    if not prefisso:
+        return
+    try:
+        _esegui([*prefisso, "chmod", "-R", "u+rwX", "--", str(cartella)], capture_output=True, cwd="/")
+        _esegui([*prefisso, "rm", "-rf", "--", str(cartella)], capture_output=True, cwd="/")
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _uccidi_processi_esecutore(prefisso: Sequence[str]) -> None:
+    """B6-R6: uccide i processi lasciati dall'utente dell'esecutore, con `kill -KILL -1` lanciato attraverso il prefisso.
+
+    `kill -1` colpisce tutti i processi dell'utente che lo lancia. Si lancia solo se il prefisso porta davvero a un
+    altro utente: un prefisso finto o sbagliato, che resta su chi esegue il giro, ucciderebbe il runner e tutta la
+    sessione; come root ucciderebbe la macchina. Per questo prima si chiede `id -u` attraverso lo stesso prefisso, e
+    ogni dubbio (errore, uscita illeggibile, uid uguale al nostro o 0) vuol dire non uccidere.
+    """
+    if not prefisso:
+        return
+    try:
+        res = _esegui([*prefisso, "id", "-u"], capture_output=True, text=True, cwd="/")
+        uid = int(res.stdout.strip()) if res.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return
+    if uid is None or uid == 0 or uid == os.getuid():
+        return
+    try:
+        _esegui([*prefisso, "kill", "-KILL", "-1"], capture_output=True, cwd="/")
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _rilancia_distributore(forgia: Forgia) -> None:
     """Rilancia il distributore a fine giro; gli errori non bloccano il giro."""
     try:
@@ -313,7 +412,7 @@ def _prepara_fascicolo(
     comandanti: Sequence[str],
 ) -> None:
     """Prepara tutti i documenti del fascicolo prima del lancio dell'esecutore."""
-    fascicolo_dir.mkdir(parents=True, exist_ok=True)
+    prepara_cartella_del_fascicolo(fascicolo_dir)
     (fascicolo_dir / "brief.md").write_text(compito.corpo, encoding="utf-8")
 
     if compito.numero != iss_madre.numero or forgia.sotto_issue(iss_madre.numero):
@@ -681,14 +780,16 @@ def _giro(
         d_nota["utente"] = "runner"
     board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
 
-    # Spazio del giro
-    timestamp_str = str(int(adesso.timestamp()))
-    dir_giro = spazio / f"{lavoro}-{timestamp_str}"
-    dir_giro.mkdir(parents=True, exist_ok=True)
+    # M3: un processo dell'esecutore sopravvissuto a un consulto o a un giro di prima non deve vedere questo giro.
+    _uccidi_processi_esecutore(prefisso)
+
     env_rip = ambiente_ripulito()
 
     # RV5: try/except attorno a tutto il giro: nessuna eccezione deve uscire da giro()
     try:
+        # Spazio del giro (B6-R22): la cartella del giro è del runner, l'esecutore lavora in `esecutore/`. Dentro il
+        # try: un errore qui non lascia il lavoro «in corso».
+        dir_giro, dir_esec = prepara_cartelle_del_giro(spazio, lavoro)
         # RV2: Pulizia del clone del runner da giri precedenti e rebase-apply
         _esegui(["git", *OPZIONI_GIT_RUNNER, "am", "--abort"], cwd=str(clone_progetto), capture_output=True)
         rebase_apply = clone_progetto / ".git" / "rebase-apply"
@@ -717,6 +818,20 @@ def _giro(
             capture_output=True,
             text=True,
         )
+
+        # B6-R7: Controllo rischi della CI del progetto sul ramo principale prima di lavorare
+        elenco_rischi = ci.rischi_del_ramo(clone_progetto, ramo_principale)
+        chiave_avviso_ci = "ci"
+        titolo_avviso_ci = "Avviso della bottega: la CI del progetto parte sui rami bottega/*"
+        if elenco_rischi:
+            testo_rischi = "\n".join(f"{r.file}: {r.motivo}" for r in elenco_rischi)
+            forgia.avviso(chiave_avviso_ci, titolo_avviso_ci, recinta_testo_modello(testo_rischi))
+            d_nota["motivo"] = "ci del progetto"
+            board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
+            return EsitoGiro("in_attesa", motivo="ci del progetto")
+        else:
+            forgia.avviso(chiave_avviso_ci, titolo_avviso_ci, None)
+
         # C5: niente checkout nel clone del runner. Il ramo del lavoro è solo un riferimento mosso con update-ref;
         # se HEAD lo indica (un clone di prima), si stacca senza cambiare l'albero.
         testa = _esegui(
@@ -774,10 +889,11 @@ def _giro(
             check=True,
             capture_output=True,
         )
+        bundle_file_iniziale.chmod(0o640)
 
-        lavoro_dir = dir_giro / "lavoro"
+        lavoro_dir = dir_esec / "lavoro"
         cmd_clone = [*prefisso, "git", "clone", str(bundle_file_iniziale), str(lavoro_dir), "-b", nome_ramo]
-        _esegui(cmd_clone, check=True, capture_output=True, env=env_rip)
+        _esegui(cmd_clone, check=True, capture_output=True, env=env_rip, cwd=str(dir_esec))
         _esegui(
             [*prefisso, "git", "config", "user.name", "Bottega"],
             cwd=str(lavoro_dir),
@@ -815,19 +931,28 @@ def _giro(
             ramo_principale=ramo_principale,
             comandanti=configurazione.progetto.comandanti,
         )
+        chiudi_file_del_fascicolo(fascicolo_runner)
         _esegui(
             [*prefisso, "sh", "-c", 'mkdir -p -- "$1" && printf \'.bottega/\\n\' >> "$2"', "sh",
              str(exclude_path.parent), str(exclude_path)],
             check=True,
             capture_output=True,
             env=env_rip,
+            cwd=str(lavoro_dir),
         )
-        _esegui([*prefisso, "mkdir", "-p", "--", str(lavoro_dir / ".bottega")], check=True, capture_output=True, env=env_rip)
+        _esegui(
+            [*prefisso, "mkdir", "-p", "--", str(lavoro_dir / ".bottega")],
+            check=True,
+            capture_output=True,
+            env=env_rip,
+            cwd=str(lavoro_dir),
+        )
         _esegui(
             [*prefisso, "cp", "-R", "--", str(fascicolo_runner), str(fascicolo_dir)],
             check=True,
             capture_output=True,
             env=env_rip,
+            cwd=str(lavoro_dir),
         )
 
         conversazione_id = d_nota.get("conversazione")
@@ -915,10 +1040,11 @@ def _giro(
                 )
 
                 # RV7: Il consigliere lavora in una copia usa e getta
-                dir_cons = dir_giro / f"consigliere-{consulti_effettuati}"
+                dir_cons = dir_esec / f"consigliere-{consulti_effettuati}"
                 # La copia la fa l'utente dell'esecutore: il runner non deve seguire link messi dal modello.
                 _esegui(
                     [*prefisso, "cp", "-a", "--", str(lavoro_dir), str(dir_cons)],
+                    cwd=str(dir_esec),
                     check=True,
                     capture_output=True,
                     env=env_rip,
@@ -933,7 +1059,7 @@ def _giro(
                     )
                 finally:
                     if prefisso:
-                        _esegui([*prefisso, "rm", "-rf", "--", str(dir_cons)], capture_output=True)
+                        _esegui([*prefisso, "rm", "-rf", "--", str(dir_cons)], capture_output=True, cwd=str(dir_esec))
                     shutil.rmtree(dir_cons, ignore_errors=True)
 
                 if lancio_cons.esito == "quota":
@@ -995,14 +1121,16 @@ def _giro(
             ).stdout.strip()
 
             if cur_head != base_commit:
-                bundle_salv = dir_giro / "salvataggio.bundle"
+                bundle_salv_esec = dir_esec / "salvataggio.bundle"
                 _esegui(
-                    [*prefisso, "git", "bundle", "create", str(bundle_salv), nome_ramo],
+                    [*prefisso, "git", "bundle", "create", str(bundle_salv_esec), nome_ramo],
                     cwd=str(lavoro_dir),
                     check=True,
                     capture_output=True,
                     env=env_rip,
                 )
+                bundle_salv = dir_giro / "salvataggio.bundle"
+                _copia_dall_esecutore(bundle_salv_esec, bundle_salv)
                 ok_salv, entries_salv = _verifica_e_consegna_bundle(
                     clone_progetto=clone_progetto,
                     bundle_file=bundle_salv,
@@ -1080,14 +1208,16 @@ def _giro(
             return EsitoGiro(stato_dest, motivo="nessun commit")
 
         # Genera bundle di consegna dall'esecutore (RV1)
-        bundle_file = dir_giro / "consegna.bundle"
+        bundle_esec = dir_esec / "consegna.bundle"
         _esegui(
-            [*prefisso, "git", "bundle", "create", str(bundle_file), nome_ramo],
+            [*prefisso, "git", "bundle", "create", str(bundle_esec), nome_ramo],
             cwd=str(lavoro_dir),
             check=True,
             capture_output=True,
             env=env_rip,
         )
+        bundle_file = dir_giro / "consegna.bundle"
+        _copia_dall_esecutore(bundle_esec, bundle_file)
 
         # Controlli, verifica e applicazione eseguiti ESCLUSIVAMENTE dal runner col suo git
         ok_consegna, entries_diff = _verifica_e_consegna_bundle(
@@ -1121,7 +1251,7 @@ def _giro(
             return EsitoGiro(stato_dest, motivo="commit vuoto")
 
         # B3-R12: Oracolo su copia fresca
-        dir_oracolo = dir_giro / "oracolo"
+        dir_oracolo = dir_esec / "oracolo"
         bundle_oracolo = dir_giro / "oracolo.bundle"
         _esegui(
             ["git", *OPZIONI_GIT_RUNNER, "bundle", "create", str(bundle_oracolo), f"refs/heads/{nome_ramo}"],
@@ -1129,8 +1259,10 @@ def _giro(
             check=True,
             capture_output=True,
         )
+        bundle_oracolo.chmod(0o640)
+        _uccidi_processi_esecutore(prefisso)
         cmd_clone_oracolo = [*prefisso, "git", "clone", str(bundle_oracolo), str(dir_oracolo), "-b", nome_ramo]
-        _esegui(cmd_clone_oracolo, check=True, capture_output=True, env=env_rip)
+        _esegui(cmd_clone_oracolo, check=True, capture_output=True, env=env_rip, cwd=str(dir_esec))
 
         tempo_oracolo_env = os.environ.get("BOTTEGA_TEMPO_ORACOLO")
         tempo_oracolo = float(tempo_oracolo_env) if tempo_oracolo_env else 1800.0
@@ -1246,8 +1378,10 @@ def _giro(
             if len(diff_testo) > 60000:
                 diff_testo = diff_testo[:60000] + "\n[diff troncato a 60 000 caratteri]"
             prompt_rev = f"Rileggi il seguente diff per il compito {compito.numero}:\n\n{diff_testo}"
-            dir_rev = dir_giro / "revisione"
-            dir_rev.mkdir(exist_ok=True)
+            dir_rev = dir_esec / "revisione"
+            # La crea l'esecutore: il runner non crea né cambia niente in `esecutore/` (un link al posto della cartella
+            # porterebbe un chmod del runner fuori dal giro).
+            _esegui([*prefisso, "mkdir", "-p", "--", str(dir_rev)], check=True, capture_output=True, cwd=str(dir_esec))
             lancio_rev = porta_cons.lancia(
                 cartella=dir_rev,
                 prompt=prompt_rev,
@@ -1317,12 +1451,13 @@ def _giro(
             except Exception as exc:
                 print(f"misure: errore in _scrivi_misure: {exc}", file=sys.stderr)
 
+        _uccidi_processi_esecutore(prefisso)
+
         # Pulizia completa dello spazio del giro. C6: un errore qui (un `rm` che supera il tetto) non deve sostituire
         # l'esito già scritto sulla board.
         try:
             if "dir_giro" in locals() and dir_giro.exists():
-                if prefisso:
-                    _esegui([*prefisso, "rm", "-rf", "--", str(dir_giro)], capture_output=True)
+                togli_come_esecutore(prefisso, dir_esec)
                 shutil.rmtree(dir_giro, ignore_errors=True)
         except Exception:
             pass

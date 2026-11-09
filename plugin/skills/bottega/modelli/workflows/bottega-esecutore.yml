@@ -17,10 +17,10 @@ concurrency:
 
 jobs:
   esecutore:
-    uses: <proprietario>/bottega/.github/workflows/esecutore.yml@<sha>
+    uses: <proprietario>/bottega/.github/workflows/esecutore.yml@<sha> # <tag>
     with:
       bottega_repo: <proprietario>/bottega
-      bottega_ref: <tag>
+      bottega_ref: <sha>
       runner: '["<etichetta del runner>"]'
       bottega: <id>
       lavoro: ${{ inputs.lavoro }}

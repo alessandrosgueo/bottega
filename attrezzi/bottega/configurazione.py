@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from bottega.ci import rischi
+
 PERCORSO_PREDEFINITO = ".github/bottega/bottega.toml"
 PREFISSO = "bottega.toml"
 VERSIONE_FORMATO = 1
@@ -112,6 +114,7 @@ def comando_configurazione(args: argparse.Namespace) -> int:
     """Controlla la configurazione: esce 1 con gli errori, 0 con il conteggio, 2 se il file non si legge.
 
     Gli errori vanno tutti su stdout; un file che non si legge dà il suo errore su stderr.
+    Se c'è .github/workflows/ controlla i rischi della CI sui rami bottega/* e se ce ne sono esce 1.
     """
     percorso = Path(args.file)
     try:
@@ -122,6 +125,39 @@ def comando_configurazione(args: argparse.Namespace) -> int:
     if configurazione is None:
         print("\n".join(errori))
         return 1
+
+    cartella_wf: Path | None = None
+    if percorso == Path(PERCORSO_PREDEFINITO):
+        possibile = Path(".github/workflows")
+        if possibile.is_dir():
+            cartella_wf = possibile
+    elif (percorso.parent / ".github" / "workflows").is_dir():
+        cartella_wf = percorso.parent / ".github" / "workflows"
+    elif (
+        percorso.parent.name == "bottega"
+        and percorso.parent.parent.name == ".github"
+        and (percorso.parent.parent / "workflows").is_dir()
+    ):
+        cartella_wf = percorso.parent.parent / "workflows"
+
+    if cartella_wf is not None:
+        testi: dict[str, str] = {}
+        for p in sorted(cartella_wf.iterdir()):
+            if p.is_file() and p.suffix in (".yml", ".yaml"):
+                try:
+                    nome = str(p.relative_to(Path.cwd()))
+                except ValueError:
+                    nome = str(p)
+                try:
+                    testi[nome] = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
+        avvisi = rischi(testi)
+        if avvisi:
+            for r in avvisi:
+                print(f"avviso: {r.file}: {r.motivo}")
+            return 1
+
     print(
         f"{PREFISSO}: botteghe {len(configurazione.botteghe)}, "
         f"candidati {len(configurazione.candidati)}, nessun errore"

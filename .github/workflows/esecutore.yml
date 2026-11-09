@@ -67,9 +67,11 @@ jobs:
           GH_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}
           BOTTEGA_VARIABILI: ${{ toJSON(vars) }}
           BOTTEGA_CLONE: ${{ github.workspace }}/bottega
-          BOTTEGA_SPAZIO: ${{ runner.temp }}/bottega-spazio
           PYTHONPATH: ${{ github.workspace }}/bottega/attrezzi
           LAVORO: ${{ inputs.lavoro }}
           BOTTEGA: ${{ inputs.bottega }}
+        # Lo spazio è quello del `.env` del runner (B6-R1): un `env` del passo lo coprirebbe. Senza `.env` (un runner
+        # senza esecutore separato) si usa la cartella temporanea del runner.
         run: |
+          export BOTTEGA_SPAZIO="${BOTTEGA_SPAZIO:-$RUNNER_TEMP/bottega-spazio}"
           python3 -P -m bottega giro --lavoro "$LAVORO" --bottega "$BOTTEGA"
