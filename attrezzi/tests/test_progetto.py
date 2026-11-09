@@ -265,16 +265,21 @@ def test_imposta_segreto_fallisce() -> None:
 
 def test_ferma_e_riparti() -> None:
     chiamate: list[list[str]] = []
-    risposta_wf = json.dumps([
-        {"path": ".github/workflows/bottega-distributore.yml"},
-        {"path": ".github/workflows/bottega-esecutore-principale.yml"},
-        {"path": ".github/workflows/ci.yml"},
-    ])
+    stato_wf = {
+        ".github/workflows/bottega-distributore.yml": "active",
+        ".github/workflows/bottega-esecutore-principale.yml": "active",
+        ".github/workflows/ci.yml": "active",
+    }
 
     def esegui_gh(args: list[str]) -> str:
         chiamate.append(args)
         if args[:2] == ["workflow", "list"]:
-            return risposta_wf
+            return json.dumps([{"path": p, "state": s} for p, s in stato_wf.items()])
+        if len(args) >= 3 and args[0] == "workflow":
+            if args[1] == "disable":
+                stato_wf[args[2]] = "disabled_manually"
+            elif args[1] == "enable":
+                stato_wf[args[2]] = "active"
         return ""
 
     # Ferma
@@ -422,7 +427,46 @@ def test_g5_riparti_vede_i_disabilitati() -> None:
         ".github/workflows/bottega-esecutore-principale.yml",
     ]
     assert any(
-        c == ["workflow", "list", "--all", "--repo", "owner/repo", "--json", "path,state"]
+        c == ["workflow", "list", "--all", "--limit", "200", "--repo", "owner/repo", "--json", "path,state"]
         for c in chiamate
     )
+
+
+def test_g5_ferma_e_riparti_guardano_lo_stato() -> None:
+    """G5: ferma disabilita solo workflow active, riparti abilita solo workflow con state != active."""
+    chiamate: list[list[str]] = []
+
+    # Un workflow è active, l'altro è disabled_manually, ci.yml non è bottega
+    risposta_wf = json.dumps([
+        {"path": ".github/workflows/bottega-distributore.yml", "state": "active"},
+        {"path": ".github/workflows/bottega-esecutore-principale.yml", "state": "disabled_manually"},
+        {"path": ".github/workflows/ci.yml", "state": "active"},
+    ])
+
+    def esegui_gh(args: list[str]) -> str:
+        chiamate.append(args)
+        if args[:2] == ["workflow", "list"]:
+            return risposta_wf
+        return ""
+
+    # 1. ferma disabilita SOLO quello active
+    toccati_ferma = ferma(esegui_gh, "owner/repo")
+    assert toccati_ferma == [".github/workflows/bottega-distributore.yml"]
+    cmd_list_atteso = ["workflow", "list", "--all", "--limit", "200", "--repo", "owner/repo", "--json", "path,state"]
+    assert cmd_list_atteso in chiamate
+    assert ["workflow", "disable", ".github/workflows/bottega-distributore.yml", "--repo", "owner/repo"] in chiamate
+    # NON deve disabilitare quello già spento né ci.yml
+    assert not any(c[0] == "workflow" and c[1] == "disable" and "bottega-esecutore" in c[2] for c in chiamate)
+    assert not any(c[0] == "workflow" and c[1] == "disable" and "ci.yml" in c[2] for c in chiamate)
+
+    # 2. riparti abilita SOLO quello con state != active
+    chiamate.clear()
+    toccati_riparti = riparti(esegui_gh, "owner/repo")
+    assert toccati_riparti == [".github/workflows/bottega-esecutore-principale.yml"]
+    assert cmd_list_atteso in chiamate
+    assert ["workflow", "enable", ".github/workflows/bottega-esecutore-principale.yml", "--repo", "owner/repo"] in chiamate
+    # NON deve abilitare quello già attivo né ci.yml
+    assert not any(c[0] == "workflow" and c[1] == "enable" and "bottega-distributore" in c[2] for c in chiamate)
+    assert not any(c[0] == "workflow" and c[1] == "enable" and "ci.yml" in c[2] for c in chiamate)
+
 

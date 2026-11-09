@@ -158,27 +158,27 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
     """Verifica se il workflow ha qualcosa da dare: segreti o runner self-hosted."""
     # 1. secrets: inherit
     for riga in righe_pulite:
-        if re.search(r"\bsecrets\s*:\s*inherit\b", riga):
+        if re.search(r"\bsecrets\s*:\s*inherit\b", riga, re.IGNORECASE):
             return "usa secrets: inherit"
 
     # 2. secrets in espressione ${{ ... }}
     testo_senza_commenti = "\n".join(righe_pulite)
     for expr in re.findall(r"\$\{\{(.*?)\}\}", testo_senza_commenti, re.DOTALL):
-        if re.search(r"\bsecrets\b", expr):
-            m_dot = re.search(r"\bsecrets\.([A-Za-z0-9_]+)\b", expr)
+        if re.search(r"\bsecrets\b", expr, re.IGNORECASE):
+            m_dot = re.search(r"\bsecrets\.([A-Za-z0-9_]+)\b", expr, re.IGNORECASE)
             if m_dot:
                 return f"usa secrets.{m_dot.group(1)}"
-            m_br = re.search(r"\bsecrets\s*\[\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*\]", expr)
+            m_br = re.search(r"\bsecrets\s*\[\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*\]", expr, re.IGNORECASE)
             if m_br:
                 return f"usa secrets['{m_br.group(1)}']"
             return f"usa secrets ({expr.strip()})"
 
     # 3. secrets. in qualsiasi punto (anche fuori da ${{ }})
     for riga in righe_pulite:
-        m = re.search(r"\bsecrets\.([A-Za-z0-9_]+)\b", riga)
+        m = re.search(r"\bsecrets\.([A-Za-z0-9_]+)\b", riga, re.IGNORECASE)
         if m:
             return f"usa secrets.{m.group(1)}"
-        if "secrets." in riga:
+        if re.search(r"\bsecrets\.", riga, re.IGNORECASE):
             return "usa secrets."
 
     # 4. un workflow riusabile (locale o di un altro repo): il chiamato può avere segreti o runner self-hosted, e
@@ -188,12 +188,14 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
         if m and ".github/workflows/" in m.group(1):
             return f"chiama il workflow riusabile {m.group(1)}"
 
-    # 4. runs-on
+    # 5. runs-on
     i = 0
+    righe_chiave_runs_on: set[int] = set()
     while i < len(righe_pulite):
         riga = righe_pulite[i]
-        m = re.match(r"^(\s*)runs-on\s*:\s*(.*)$", riga)
+        m = re.match(r"^(\s*)(?:'runs-on'|\"runs-on\"|runs-on)\s*:\s*(.*)$", riga)
         if m:
+            righe_chiave_runs_on.add(i)
             indent = len(m.group(1))
             valore = m.group(2).strip()
             if valore:
@@ -249,6 +251,12 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
                         if not _e_runner_github(el):
                             return f"usa runner non GitHub ({el})"
         i += 1
+
+    # 6. ogni comparsa di runs-on nel testo (fuori dai commenti) che la lettura riga per riga non ha letto come chiave di un job è un dubbio
+    for idx, riga in enumerate(righe_pulite):
+        if "runs-on" in riga:
+            if idx not in righe_chiave_runs_on or riga.count("runs-on") > 1:
+                return f"runs-on non riconosciuto o dubbio ({riga.strip()})"
 
     return None
 

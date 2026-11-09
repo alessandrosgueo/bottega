@@ -167,6 +167,23 @@ di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove,
     repo; un token a grana fine o una GitHub App per il solo progetto è la scelta da proporre al signore.
   - M12: `bottega-esecutore-<repo>` sta nei 32 caratteri solo con nomi corti; `INSTALLA.md` consiglia un suffisso
     breve.
+- **B6-R22 (dalla rilettura delle correzioni). Il runner non scrive dove scrive l'esecutore.** La cartella del giro è
+  del runner, `0750`: lì stanno solo ciò che il runner prepara (`ramo.bundle`, `fascicolo`, `oracolo.bundle`) e le
+  copie dei bundle dell'esecutore. Tutto ciò che crea l'esecutore sta in `esecutore/` (`2770`, setgid): il clone di
+  lavoro, le copie del consigliere, la revisione, l'oracolo, i bundle di consegna e di salvataggio. Il runner non
+  scrive mai in `esecutore/`, e i bundle che ne legge li copia prima nella sua cartella senza seguire link
+  (`O_NOFOLLOW`, solo file normali). Prima la cartella del giro era `2770`, e un link piantato dall'esecutore al posto di
+  `oracolo.bundle` faceva sovrascrivere al runner un suo file. Lo spazio è `3770` (sticky): l'esecutore non rinomina
+  le cartelle dei giri. Il consulto apre la sua cartella all'esecutore solo dopo averci scritto. Ogni comando col
+  prefisso ha una cartella di lavoro sua (quella del processo è nel runner, chiusa all'esecutore). Le case degli utenti
+  sono `0700` (`HOME_MODE`). `ci.rischi` legge anche `runs-on` in flusso o fra apici e `secrets` in maiuscolo;
+  `ferma` e `riparti` toccano solo i workflow nello stato da cambiare (`--limit 200`).
+- **Minori aperti della rilettura:**
+  - il passo «ricarica configurazione systemd» risulta già fatto alla prima installazione (`NeedDaemonReload` è `no`
+    per un'unità mai caricata); `systemctl enable --now` ricarica da sé, quindi non fa danni;
+  - `_uccidi_processi_esecutore` uccide anche i processi di un secondo progetto che usasse lo stesso utente
+    dell'esecutore: `INSTALLA.md` lo sconsiglia (B6-R12);
+  - lo spazio non ha una pulizia dei giri rimasti per un errore: la palestra di B7 dirà se serve.
 
 ## Misure
 
@@ -186,3 +203,6 @@ di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove,
 | B6.C1 correzioni di root, sudo, token e pin | maestro | | | | | il cancello in contenitore prova G1 e G4 dal vero |
 | B6.C1-ci `ci.rischi` e `riparti` | Lavorante Gemini 3.8 Flash, in gabbia | 363 832 (Google) | 11 min 33 s | 0 | 0 | 8 prove rosse sul codice di prima |
 | B6.C1-prove | Lavorante Gemini 3.8 Flash, in gabbia | 710 009 (Google) | 23 min 8 s | 0 | 0 | 17 prove rimesse al passo, 21 d'attacco rosse sul codice di prima |
+| rilettura delle correzioni | capobottega Sonnet high | 212 445 | 8 min 41 s | | | 1 grave (link piantato nella cartella del giro, B6-R22) + 8 minori |
+| B6.C2 correzioni | maestro | | | | | il cancello in contenitore prova link, sticky e case dal vero |
+| B6.C2 prove e `ci.rischi` | Lavorante Gemini 3.8 Flash, in gabbia | 620 952 (Google) | 21 min 32 s | 0 | 0 | 14 prove rosse sul codice di prima; `ferma` due volte di fila dava errore (corretto dal maestro); nessuna prova vedeva il runner scrivere in `esecutore/` (aggiunta dal maestro, mutazione uccisa) |

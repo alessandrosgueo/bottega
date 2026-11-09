@@ -58,6 +58,8 @@ class EsecutoreRegistratore:
             return 1, ""
         if "stat -c" in cmd_str:
             return 1, ""
+        if "id -gn" in cmd_str:
+            return 1, ""
         if "sha256sum" in cmd_str and "curl" not in cmd_str:
             return 1, ""
         if "cmp" in cmd_str:
@@ -175,8 +177,8 @@ def test_macchina_prova(capsys: pytest.CaptureFixture[str]) -> None:
         {
             "systemctl is-system-running": (0, "running\n"),
             "getent group bottega": (1, ""),
-            "id -u bottega-runner": (1, ""),
-            "id -u bottega-esecutore": (1, ""),
+            'sh -c [ "$(id -gn bottega-runner 2>/dev/null)" = bottega-runner ]': (1, ""),
+            'sh -c [ "$(id -gn bottega-esecutore 2>/dev/null)" = bottega-esecutore ]': (1, ""),
         }
     )
     p = _parser_installa()
@@ -504,14 +506,20 @@ def test_progetto_completo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
 
 def test_ferma_e_riparti(capsys: pytest.CaptureFixture[str]) -> None:
     """Verifica comandi bottega ferma e bottega riparti con output di una riga per workflow."""
-    wf_risposta = json.dumps([
-        {"path": ".github/workflows/bottega-distributore.yml"},
-        {"path": ".github/workflows/bottega-esecutore-principale.yml"},
-        {"path": ".github/workflows/ci.yml"},
+    wf_attivi = json.dumps([
+        {"path": ".github/workflows/bottega-distributore.yml", "state": "active"},
+        {"path": ".github/workflows/bottega-esecutore-principale.yml", "state": "active"},
+        {"path": ".github/workflows/ci.yml", "state": "active"},
     ])
+    wf_spenti = json.dumps([
+        {"path": ".github/workflows/bottega-distributore.yml", "state": "disabled_manually"},
+        {"path": ".github/workflows/bottega-esecutore-principale.yml", "state": "disabled_manually"},
+        {"path": ".github/workflows/ci.yml", "state": "active"},
+    ])
+    cmd_wf_list = "gh workflow list --all --limit 200 --repo owner/repo --json path,state"
     esecutore = EsecutoreRegistratore(
         {
-            "gh workflow list --all --repo owner/repo --json path,state": (0, wf_risposta),
+            cmd_wf_list: (0, wf_attivi),
         }
     )
 
@@ -526,6 +534,7 @@ def test_ferma_e_riparti(capsys: pytest.CaptureFixture[str]) -> None:
     assert "ci.yml" not in catturato_f.out
 
     # Riparti
+    esecutore.risposte[cmd_wf_list] = (0, wf_spenti)
     p_r = _parser_riparti()
     args_r = p_r.parse_args(["--repo", "owner/repo"])
     codice_r = comando_riparti(args_r, esegui=esecutore)
@@ -541,7 +550,7 @@ def test_g5_nessun_workflow_e_un_errore(capsys: pytest.CaptureFixture[str]) -> N
     # comando_ferma e comando_riparti escono 1 con errore: nessun workflow bottega-*.yml in <repo> se l'elenco è vuoto.
     esecutore = EsecutoreRegistratore(
         {
-            "gh workflow list --all --repo owner/repo --json path,state": (0, "[]"),
+            "gh workflow list --all --limit 200 --repo owner/repo --json path,state": (0, "[]"),
         }
     )
     p_f = _parser_ferma()
@@ -557,6 +566,23 @@ def test_g5_nessun_workflow_e_un_errore(capsys: pytest.CaptureFixture[str]) -> N
     assert codice_r == 1
     catturato_r = capsys.readouterr()
     assert "errore: nessun workflow bottega-*.yml in owner/repo" in catturato_r.err
+
+
+def test_g5_gia_nello_stato_giusto_non_e_un_errore(capsys: pytest.CaptureFixture[str]) -> None:
+    """Un secondo ferma (tutto già spento) e un secondo riparti (tutto già acceso) escono 0 senza toccare niente."""
+    spenti = json.dumps([{"path": ".github/workflows/bottega-distributore.yml", "state": "disabled_manually"}])
+    accesi = json.dumps([{"path": ".github/workflows/bottega-distributore.yml", "state": "active"}])
+    elenco = "gh workflow list --all --limit 200 --repo owner/repo --json path,state"
+
+    esecutore_f = EsecutoreRegistratore({elenco: (0, spenti)})
+    assert comando_ferma(_parser_ferma().parse_args(["--repo", "owner/repo"]), esegui=esecutore_f) == 0
+    assert "già spenti" in capsys.readouterr().out
+    assert not any("disable" in " ".join(c) for c, *_ in esecutore_f.chiamate)
+
+    esecutore_r = EsecutoreRegistratore({elenco: (0, accesi)})
+    assert comando_riparti(_parser_riparti().parse_args(["--repo", "owner/repo"]), esegui=esecutore_r) == 0
+    assert "già accesi" in capsys.readouterr().out
+    assert not any("enable" in " ".join(c) for c, *_ in esecutore_r.chiamate)
 
 
 

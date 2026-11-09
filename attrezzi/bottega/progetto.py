@@ -311,35 +311,51 @@ def imposta_segreto(
         return False
 
 
-def workflow_della_bottega(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
+def workflow_della_bottega(esegui_gh: Callable[[list[str]], str], repo: str) -> list[dict[str, str]]:
     """Elenco dei workflow della bottega (.github/workflows/bottega-*.yml) nel repository."""
-    out = esegui_gh(["workflow", "list", "--all", "--repo", repo, "--json", "path,state"])
+    out = esegui_gh(["workflow", "list", "--all", "--limit", "200", "--repo", repo, "--json", "path,state"])
     dati = json.loads(out) if out else []
-    trovati: list[str] = []
+    trovati: list[dict[str, str]] = []
     for item in dati:
         path = item.get("path", "")
         if (
             (path.startswith(".github/workflows/bottega-") or path.startswith("bottega-"))
             and path.endswith(".yml")
         ):
-            trovati.append(path)
+            trovati.append({"path": path, "state": item.get("state", "")})
     return trovati
 
 
 def ferma(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
-    """Disabilita tutti i workflow bottega-*.yml nel repository."""
+    """Disabilita solo i workflow bottega-*.yml attivi nel repository; restituisce quelli toccati (vuoto: erano già
+    tutti spenti). ErroreProgetto se il repository non ha workflow della bottega."""
     wfs = workflow_della_bottega(esegui_gh, repo)
-    for wf in wfs:
-        esegui_gh(["workflow", "disable", wf, "--repo", repo])
-    return wfs
+    if not wfs:
+        raise ErroreProgetto(f"nessun workflow bottega-*.yml in {repo}")
+    toccati: list[str] = []
+    for item in wfs:
+        path = item["path"] if isinstance(item, dict) else item
+        state = item.get("state", "") if isinstance(item, dict) else ""
+        if state == "active":
+            esegui_gh(["workflow", "disable", path, "--repo", repo])
+            toccati.append(path)
+    return toccati
 
 
 def riparti(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
-    """Abilita tutti i workflow bottega-*.yml nel repository."""
+    """Abilita solo i workflow bottega-*.yml non attivi nel repository; restituisce quelli toccati (vuoto: erano già
+    tutti accesi). ErroreProgetto se il repository non ha workflow della bottega."""
     wfs = workflow_della_bottega(esegui_gh, repo)
-    for wf in wfs:
-        esegui_gh(["workflow", "enable", wf, "--repo", repo])
-    return wfs
+    if not wfs:
+        raise ErroreProgetto(f"nessun workflow bottega-*.yml in {repo}")
+    toccati: list[str] = []
+    for item in wfs:
+        path = item["path"] if isinstance(item, dict) else item
+        state = item.get("state", "") if isinstance(item, dict) else ""
+        if state != "active":
+            esegui_gh(["workflow", "enable", path, "--repo", repo])
+            toccati.append(path)
+    return toccati
 
 
 _SHA_REGEX = re.compile(r"^[0-9a-fA-F]{40}$")

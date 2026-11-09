@@ -1499,3 +1499,79 @@ def test_m10_pulizia_del_consulto_non_cade(tmp_path: Path, monkeypatch: pytest.M
     comm = forgia.commenti(1)
     assert any("Risposta anche con cartella bloccata" in c.corpo for c in comm)
 
+
+def test_r22_consulto_apre_dopo_aver_scritto(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6-R22: la cartella del consulto riceve chmod 2770 solo dopo la scrittura di fascicolo.md."""
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    spazio = tmp_path / "spazio"
+    spazio.mkdir()
+    monkeypatch.setenv("BOTTEGA_SPAZIO", str(spazio))
+
+    fuso = ZoneInfo(cfg.progetto.fuso)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=fuso)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Dove sta il fascicolo?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    chmod_chiamate: list[tuple[str, int, bool]] = []
+    chmod_orig = os.chmod
+
+    def spia_chmod(path, mode, *args, **kwargs):
+        p = Path(path)
+        if (mode & 0o7777) == 0o2770:
+            cera_fascicolo = (p / "fascicolo.md").is_file()
+            chmod_chiamate.append((str(path), mode, cera_fascicolo))
+        return chmod_orig(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chmod", spia_chmod)
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self, prefisso=()): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            return Lancio(esito="fatto", testo="Risposta consiglio")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+    )
+
+    assert len(chmod_chiamate) == 1
+    assert (chmod_chiamate[0][1] & 0o7777) == 0o2770
+    assert chmod_chiamate[0][2] is True, "fascicolo.md deve essere già scritto prima del chmod 2770"
+
+

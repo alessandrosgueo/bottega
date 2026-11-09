@@ -58,6 +58,11 @@ class EsecutoreFinto:
             return (0, "1001\n") if cmd[2] in self.utenti else (1, "")
         if len(cmd) >= 3 and "sh" in cmd and "-c" in cmd:
             script = cmd[cmd.index("-c") + 1]
+            if "id -gn" in script:
+                for u in self.utenti:
+                    if f"id -gn {u}" in script:
+                        return (0, "")
+                return (1, "")
             if "id -Gn" in script:
                 for u, g in self.appartenenze:
                     if f"id -Gn {u}" in script and g in script:
@@ -217,14 +222,14 @@ def test_passi_macchina_ordine() -> None:
     testo_tutto = "\n".join(nomi_comandi)
     pos_group = testo_tutto.index("groupadd")
     pos_u_runner = testo_tutto.index(
-        f"useradd --system --create-home --shell /usr/sbin/nologin --user-group --groups {u.gruppo} {u.runner}"
+        f"useradd --system --create-home -K HOME_MODE=0700 --shell /usr/sbin/nologin --user-group --groups {u.gruppo} {u.runner}"
     )
     pos_u_esec = testo_tutto.index(
-        f"useradd --system --create-home --shell /usr/sbin/nologin --user-group --groups {u.gruppo} {u.esecutore}"
+        f"useradd --system --create-home -K HOME_MODE=0700 --shell /usr/sbin/nologin --user-group --groups {u.gruppo} {u.esecutore}"
     )
     pos_usermod_r = testo_tutto.index(f"usermod -a -G {u.gruppo} {u.runner}")
     pos_usermod_e = testo_tutto.index(f"usermod -a -G {u.gruppo} {u.esecutore}")
-    pos_spazio = testo_tutto.index(f"install -d -o {u.runner} -g {u.gruppo} -m 2770 {u.spazio}")
+    pos_spazio = testo_tutto.index(f"install -d -o {u.runner} -g {u.gruppo} -m 3770 {u.spazio}")
     pos_visudo = testo_tutto.index("visudo -c -q -f")
     pos_sudoers = testo_tutto.index("install -m 0440 -o root -g root")
 
@@ -581,3 +586,35 @@ def test_m13_argomenti_del_runner_controllati(
             nome=nome,
             porte={porta: percorso},
         )
+
+
+def test_r22_spazio_sticky() -> None:
+    """B6-R22: lo spazio è 3770 (bit sticky contro rinomina delle cartelle del runner)."""
+    u = Utenti()
+    passi = passi_macchina(u)
+    p_spazio = next(p for p in passi if p.descrizione == f"spazio {u.spazio}")
+    assert "-m" in p_spazio.comando
+    assert p_spazio.comando[p_spazio.comando.index("-m") + 1] == "3770"
+    assert "3770" in p_spazio.controllo[2]
+
+
+def test_r22_case_0700() -> None:
+    """B6-R22: le case degli utenti si creano con 0700 (-K HOME_MODE=0700)."""
+    u = Utenti()
+    passi = passi_macchina(u)
+    for desc in (f"utente runner {u.runner}", f"utente esecutore {u.esecutore}"):
+        p = next(p for p in passi if p.descrizione == desc)
+        assert "-K" in p.comando
+        assert p.comando[p.comando.index("-K") + 1] == "HOME_MODE=0700"
+
+
+def test_r22_utente_gia_fatto_col_suo_gruppo() -> None:
+    """B6-R22: il controllo 'già fatto' dell'utente verifica il suo gruppo principale (id -gn)."""
+    u = Utenti()
+    passi = passi_macchina(u)
+    for desc, utente in ((f"utente runner {u.runner}", u.runner), (f"utente esecutore {u.esecutore}", u.esecutore)):
+        p = next(p for p in passi if p.descrizione == desc)
+        assert p.controllo[0] == "sh" and p.controllo[1] == "-c"
+        assert f'id -gn {utente}' in p.controllo[2]
+        assert f'= {utente}' in p.controllo[2]
+

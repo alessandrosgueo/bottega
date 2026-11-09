@@ -944,6 +944,82 @@ def test_g6_casi_del_revisore(nome: str):
     assert bool(r), f"Caso del revisore {nome} non ha prodotto rischi"
 
 
+def test_g6_runs_on_in_flusso():
+    # runs-on scritto dentro un flusso YAML (es. jobs: {b: {runs-on: self-hosted}} o b: {runs-on: self-hosted})
+    # non letto come chiave di riga è un dubbio, quindi un rischio.
+    wf1 = """
+on: push
+jobs: {b: {runs-on: self-hosted}}
+"""
+    r1 = rischi({"flusso1.yml": wf1})
+    assert len(r1) == 1
+    assert "runs-on" in r1[0].motivo
+
+    wf2 = """
+on: push
+jobs:
+  b: {runs-on: self-hosted}
+"""
+    r2 = rischi({"flusso2.yml": wf2})
+    assert len(r2) == 1
+    assert "runs-on" in r2[0].motivo
+
+
+def test_g6_runs_on_fra_apici():
+    # runs-on fra apici singoli o doppi con runner pericoloso è un rischio.
+    wf_doppi = """
+on: push
+jobs:
+  a:
+    "runs-on": self-hosted
+    steps:
+      - run: make
+"""
+    r_doppi = rischi({"doppi.yml": wf_doppi})
+    assert len(r_doppi) == 1
+    assert "self-hosted" in r_doppi[0].motivo
+
+    wf_singoli = """
+on: push
+jobs:
+  a:
+    'runs-on': [self-hosted]
+    steps:
+      - run: make
+"""
+    r_singoli = rischi({"singoli.yml": wf_singoli})
+    assert len(r_singoli) == 1
+    assert "self-hosted" in r_singoli[0].motivo
+
+
+def test_g6_secrets_maiuscole():
+    # I contesti di GitHub Actions non distinguono maiuscole: Secrets e SECRETS sono rischi.
+    wf_cap = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ Secrets.CHIAVE }}
+"""
+    r_cap = rischi({"cap.yml": wf_cap})
+    assert len(r_cap) == 1
+    assert "secrets" in r_cap[0].motivo.lower()
+
+    wf_upper = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ SECRETS.CHIAVE }}
+"""
+    r_upper = rischi({"upper.yml": wf_upper})
+    assert len(r_upper) == 1
+    assert "secrets" in r_upper[0].motivo.lower()
+
+
+
 
 
 

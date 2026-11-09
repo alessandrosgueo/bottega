@@ -561,8 +561,7 @@ def comando_ferma(
     try:
         wfs = ferma(esegui_gh, args.repo)
         if not wfs:
-            print(f"errore: nessun workflow bottega-*.yml in {args.repo}", file=sys.stderr)
-            return 1
+            print(f"i workflow della bottega in {args.repo} erano già spenti")
         for wf in wfs:
             print(f"fermato: {wf}")
         return 0
@@ -581,8 +580,7 @@ def comando_riparti(
     try:
         wfs = riparti(esegui_gh, args.repo)
         if not wfs:
-            print(f"errore: nessun workflow bottega-*.yml in {args.repo}", file=sys.stderr)
-            return 1
+            print(f"i workflow della bottega in {args.repo} erano già accesi")
         for wf in wfs:
             print(f"ripartito: {wf}")
         return 0

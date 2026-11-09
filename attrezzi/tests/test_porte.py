@@ -1077,6 +1077,24 @@ sys.exit(0)
     assert res.contatori == {"inputTokens": 300, "outputTokens": 100}
 
 
+def test_r22_controlla_dalla_radice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6-R22: controlla_eseguibile lancia con cwd='/'."""
+    import subprocess
+    from bottega.porte import controlla_eseguibile
+
+    cwd_ricevuta: list[str | None] = []
+
+    def finto_run(cmd, **kwargs):
+        cwd_ricevuta.append(kwargs.get("cwd"))
+        return subprocess.CompletedProcess(cmd, 0, stdout="1.0.0\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", finto_run)
+    res = controlla_eseguibile("eseguibile-finto")
+    assert res.ok is True
+    assert cwd_ricevuta == ["/"]
+
+
+
 
 
 
