@@ -29,7 +29,7 @@ def main() -> int:
     esiti.append(("la seconda non cambia niente", all(r.startswith("già fatto:") for r in seconda)))
 
     codice, uscita = sh("stat -c '%U:%G:%a' /var/lib/bottega/spazio")
-    esiti.append((f"spazio runner:gruppo 2770 ({uscita})", uscita == "bottega-runner:bottega:2770"))
+    esiti.append((f"spazio runner:gruppo 3770 ({uscita})", uscita == "bottega-runner:bottega:3770"))
 
     codice, uscita = sh("stat -c '%U:%G:%a' /etc/sudoers.d/bottega-esecutore")
     esiti.append((f"sudoers root:root 440 ({uscita})", uscita == "root:root:440"))
@@ -68,13 +68,26 @@ def main() -> int:
         )
     )
 
-    # Il giro: il runner crea la cartella del giro (2770), l'esecutore ci lavora, il runner legge e toglie tutto.
-    codice, uscita = sh(
-        "sudo -u bottega-runner sh -c 'd=$(mktemp -d -p /var/lib/bottega/spazio) && chmod 2770 \"$d\" && "
-        "sudo -n -H -u bottega-esecutore -- sh -c \"mkdir $d/lavoro && echo dentro > $d/lavoro/f\" && "
-        "cat \"$d/lavoro/f\" && rm -rf \"$d\"'"
+    # Le case: 0700, l'altro utente non ci entra.
+    _, uscita = sh("stat -c '%a' $(getent passwd bottega-runner bottega-esecutore | cut -d: -f6)")
+    esiti.append((f"case 700 ({' '.join(uscita.split())})", uscita.split() == ["700", "700"]))
+
+    # Il giro (B6-R22): la cartella del giro è del runner, 0750; l'esecutore lavora in esecutore/ (2770).
+    giro = (
+        "d=$(mktemp -d -p /var/lib/bottega/spazio) && mkdir \"$d/esecutore\" && "
+        "chgrp bottega \"$d\" \"$d/esecutore\" && chmod 750 \"$d\" && chmod 2770 \"$d/esecutore\" && echo \"$d\""
     )
-    esiti.append((f"il runner legge e toglie ciò che l'esecutore crea nel giro ({uscita})", codice == 0 and uscita == "dentro"))
+    _, d = sh(f"sudo -u bottega-runner sh -c '{giro}'")
+    esec = "sudo -u bottega-runner sudo -n -H -u bottega-esecutore --"
+    codice, uscita = sh(f"{esec} sh -c 'mkdir {d}/esecutore/lavoro && echo dentro > {d}/esecutore/lavoro/f'")
+    codice2, uscita2 = sh(f"sudo -u bottega-runner cat {d}/esecutore/lavoro/f")
+    esiti.append((f"il runner legge ciò che l'esecutore crea nel giro ({uscita2})", codice == 0 and uscita2 == "dentro"))
+    codice, _ = sh(f"{esec} ln -s /var/lib/bottega/runner-o-r/.runner {d}/oracolo.bundle")
+    esiti.append(("l'esecutore NON pianta un link nella cartella del runner", codice != 0))
+    codice, _ = sh(f"{esec} mv {d} /var/lib/bottega/spazio/rubata")
+    esiti.append(("l'esecutore NON rinomina la cartella del giro (sticky)", codice != 0))
+    codice, _ = sh(f"sudo -u bottega-runner rm -rf {d}")
+    esiti.append(("il runner toglie tutto il giro", codice == 0 and sh(f"test -e {d}")[0] != 0))
 
     # La cartella del runner: sua, 0750, l'esecutore non ci entra.
     passi = passi_runner(

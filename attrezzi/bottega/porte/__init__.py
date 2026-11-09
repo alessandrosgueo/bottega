@@ -153,6 +153,8 @@ def controlla_eseguibile(
             errors="replace",
             timeout=tempo,
             env=env,
+            # La cartella corrente del runner può essere chiusa all'esecutore: il controllo non ne dipende.
+            cwd="/",
         )
     except FileNotFoundError:
         nome_cmd = completo[0] if completo else eseguibile

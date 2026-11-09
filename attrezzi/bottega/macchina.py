@@ -165,6 +165,8 @@ def passi_macchina(u: Utenti) -> list[Passo]:
                 "useradd",
                 "--system",
                 "--create-home",
+                "-K",
+                "HOME_MODE=0700",
                 "--shell",
                 "/usr/sbin/nologin",
                 "--user-group",
@@ -172,7 +174,8 @@ def passi_macchina(u: Utenti) -> list[Passo]:
                 u.gruppo,
                 u.runner,
             ),
-            controllo=("id", "-u", u.runner),
+            # Già fatto solo col gruppo principale suo: un utente creato col gruppo comune come principale non basta.
+            controllo=("sh", "-c", f"[ \"$(id -gn {u.runner} 2>/dev/null)\" = {u.runner} ]"),
         ),
         Passo(
             descrizione=f"utente esecutore {u.esecutore}",
@@ -182,6 +185,8 @@ def passi_macchina(u: Utenti) -> list[Passo]:
                 "useradd",
                 "--system",
                 "--create-home",
+                "-K",
+                "HOME_MODE=0700",
                 "--shell",
                 "/usr/sbin/nologin",
                 "--user-group",
@@ -189,7 +194,7 @@ def passi_macchina(u: Utenti) -> list[Passo]:
                 u.gruppo,
                 u.esecutore,
             ),
-            controllo=("id", "-u", u.esecutore),
+            controllo=("sh", "-c", f"[ \"$(id -gn {u.esecutore} 2>/dev/null)\" = {u.esecutore} ]"),
         ),
         Passo(
             descrizione=f"appartenenza di {u.runner} al gruppo {u.gruppo}",
@@ -203,11 +208,12 @@ def passi_macchina(u: Utenti) -> list[Passo]:
         ),
         Passo(
             descrizione=f"spazio {u.spazio}",
-            comando=("sudo", "-n", "install", "-d", "-o", u.runner, "-g", u.gruppo, "-m", "2770", u.spazio),
+            # 3770: il bit sticky impedisce all'esecutore di rinominare o togliere le cartelle dei giri del runner.
+            comando=("sudo", "-n", "install", "-d", "-o", u.runner, "-g", u.gruppo, "-m", "3770", u.spazio),
             controllo=(
                 "sh",
                 "-c",
-                f"[ \"$(stat -c '%U:%G:%a' {u.spazio} 2>/dev/null)\" = \"{u.runner}:{u.gruppo}:2770\" ]",
+                f"[ \"$(stat -c '%U:%G:%a' {u.spazio} 2>/dev/null)\" = \"{u.runner}:{u.gruppo}:3770\" ]",
             ),
         ),
         passo_file(

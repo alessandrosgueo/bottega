@@ -277,8 +277,6 @@ def _gestisci_evento_commento(
         kw_temp = {"dir": spazio_env} if spazio_env else {}
         # M10: un file dell'esecutore che il runner non può togliere non deve far perdere la risposta del consulto.
         with tempfile.TemporaryDirectory(**kw_temp, ignore_cleanup_errors=True) as tmpdir:
-            if spazio_env:
-                os.chmod(tmpdir, 0o2770)
             p_tmp = Path(tmpdir)
             try:
                 iss = forgia.issue(num_issue)
@@ -304,6 +302,10 @@ def _gestisci_evento_commento(
                 f"## Domanda di consulto\n{cmd.argomento}\n"
             )
             (p_tmp / "fascicolo.md").write_text(fascicolo_md, encoding="utf-8")
+            # La cartella si apre all'esecutore solo dopo che il runner vi ha scritto: prima, un link messo al posto
+            # di `fascicolo.md` porterebbe la scrittura del runner fuori dal consulto.
+            if spazio_env:
+                os.chmod(tmpdir, 0o2770)
 
             prompt = (
                 f"Sei il consigliere della bottega. Rispondi alla seguente domanda sul compito #{num_issue}.\n"
