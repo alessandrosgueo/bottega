@@ -15,6 +15,16 @@ from bottega.dividi import argomenti_dividi, comando_dividi
 from bottega.firma import ErroreFirma, argomenti_firma, comando_firma
 from bottega.forgia import ErroreForgia
 from bottega.giro import argomenti_giro, comando_giro
+from bottega.installa import (
+    argomenti_aggiorna,
+    argomenti_ferma,
+    argomenti_installa,
+    argomenti_riparti,
+    comando_aggiorna,
+    comando_ferma,
+    comando_installa,
+    comando_riparti,
+)
 from bottega.misura import argomenti_misura, comando_misura
 from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
 from bottega.scelta import argomenti_scegli, comando_scegli
@@ -34,6 +44,10 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "firma": comando_firma,
     "segno": comando_segno,
     "misura": comando_misura,
+    "installa": comando_installa,
+    "ferma": comando_ferma,
+    "riparti": comando_riparti,
+    "aggiorna": comando_aggiorna,
 }
 # Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
@@ -49,6 +63,10 @@ ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "firma": argomenti_firma,
     "segno": argomenti_segno,
     "misura": argomenti_misura,
+    "installa": argomenti_installa,
+    "ferma": argomenti_ferma,
+    "riparti": argomenti_riparti,
+    "aggiorna": argomenti_aggiorna,
 }
 
 
