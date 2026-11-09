@@ -121,7 +121,11 @@ def comando_macchina(
     runner = getattr(args, "runner", "bottega-runner")
     esecutore = getattr(args, "esecutore", "bottega-esecutore")
     gruppo = getattr(args, "gruppo", "bottega")
-    u = Utenti(runner=runner, esecutore=esecutore, gruppo=gruppo)
+    try:
+        u = Utenti(runner=runner, esecutore=esecutore, gruppo=gruppo)
+    except ValueError as e:
+        print(f"errore: {e}", file=sys.stderr)
+        return 2
     passi = passi_macchina(u)
     prova = getattr(args, "prova", False)
 
@@ -211,7 +215,11 @@ def comando_runner(
     runner_utente = getattr(args, "runner", "bottega-runner")
     esecutore_utente = getattr(args, "esecutore", "bottega-esecutore")
     gruppo = getattr(args, "gruppo", "bottega")
-    u = Utenti(runner=runner_utente, esecutore=esecutore_utente, gruppo=gruppo)
+    try:
+        u = Utenti(runner=runner_utente, esecutore=esecutore_utente, gruppo=gruppo)
+    except ValueError as e:
+        print(f"errore: {e}", file=sys.stderr)
+        return 2
 
     passi = passi_runner(
         u=u,

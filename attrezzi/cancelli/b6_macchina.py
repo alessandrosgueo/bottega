@@ -29,7 +29,7 @@ def main() -> int:
     codice, uscita = sh("stat -c '%U:%G:%a' /var/lib/bottega/spazio")
     esiti.append((f"spazio runner:gruppo 2770 ({uscita})", uscita == "bottega-runner:bottega:2770"))
 
-    codice, uscita = sh("stat -c '%U:%G:%a' /etc/sudoers.d/bottega")
+    codice, uscita = sh("stat -c '%U:%G:%a' /etc/sudoers.d/bottega-esecutore")
     esiti.append((f"sudoers root:root 440 ({uscita})", uscita == "root:root:440"))
 
     codice, uscita = sh("visudo -c")

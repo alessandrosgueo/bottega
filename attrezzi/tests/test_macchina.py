@@ -425,3 +425,23 @@ def test_errore_si_ferma() -> None:
     assert ("echo", "1") in comandi_lanciati
     assert ("echo", "passo2") in comandi_lanciati
     assert ("echo", "3") not in comandi_lanciati
+
+
+def test_sudoers_un_file_per_esecutore() -> None:
+    """B6-R12: il secondo esecutore ha il suo file di sudoers, il primo resta com'era."""
+    primo = passi_macchina(Utenti())
+    secondo = passi_macchina(Utenti(esecutore="bottega-esecutore-due"))
+
+    def destinazione(passi: list[Passo]) -> str:
+        script = next(p.comando[-1] for p in passi if "visudo" in p.comando[-1])
+        return script.rsplit(" ", 1)[-1]
+
+    assert destinazione(primo) == "/etc/sudoers.d/bottega-esecutore"
+    assert destinazione(secondo) == "/etc/sudoers.d/bottega-esecutore-due"
+
+
+@pytest.mark.parametrize("nome", ["bottega.esecutore", "Bottega", "a b", "x\nroot ALL=(ALL) ALL", "", "-x", "a" * 33])
+def test_utenti_nome_non_valido(nome: str) -> None:
+    """Un nome con un punto (sudo salterebbe il file) o con caratteri che cambiano il sudoers è rifiutato."""
+    with pytest.raises(ValueError):
+        Utenti(esecutore=nome)

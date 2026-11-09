@@ -13,6 +13,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 
+_NOME_DI_SISTEMA = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+
+
 @dataclass(frozen=True)
 class Utenti:
     """Configurazione degli utenti e dello spazio di macchina."""
@@ -23,6 +26,13 @@ class Utenti:
     spazio: str = "/var/lib/bottega/spazio"
     # I runner dei progetti: fuori dalle case, accanto allo spazio.
     radice_runner: str = "/var/lib/bottega"
+
+    def __post_init__(self) -> None:
+        # I nomi finiscono in useradd, nel sudoers e nel nome del suo file: sudo salta in silenzio i file di
+        # /etc/sudoers.d con un punto nel nome, e un nome strano nel sudoers cambierebbe la regola.
+        for nome in (self.runner, self.esecutore, self.gruppo):
+            if not _NOME_DI_SISTEMA.fullmatch(nome):
+                raise ValueError(f"nome di utente o gruppo non valido: {nome!r}")
 
 
 @dataclass(frozen=True)
@@ -138,7 +148,8 @@ testo_sudoers.__test__ = False  # type: ignore[attr-defined]
 
 def passi_macchina(u: Utenti) -> list[Passo]:
     """Genera i passi di configurazione della macchina: gruppo, utenti, spazio e sudoers."""
-    dest_sudoers = "/etc/sudoers.d/bottega"
+    # Un file per utente dell'esecutore (B6-R12): un secondo progetto aggiunge il suo, non riscrive quello del primo.
+    dest_sudoers = f"/etc/sudoers.d/{u.esecutore}"
 
     return [
         Passo(
