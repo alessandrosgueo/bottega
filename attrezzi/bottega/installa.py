@@ -220,6 +220,7 @@ def comando_runner(
             etichetta=args.etichetta,
             nome=args.nome,
             porte=porte,
+            tetto=getattr(args, "tetto", None),
         )
     except ValueError as e:
         print(f"errore: {e}", file=sys.stderr)
@@ -264,6 +265,7 @@ def comando_runner(
         nome=args.nome,
         porte=porte,
         token=token,
+        tetto=getattr(args, "tetto", None),
     )
 
     try:
@@ -744,6 +746,9 @@ def argomenti_installa(parser: argparse.ArgumentParser) -> None:
     p_runner.add_argument("--arch", default=None, metavar="A", help="architettura di macchina")
     p_runner.add_argument(
         "--porta", action="append", default=[], metavar="NOME=PERCORSO", help="porta dell'esecutore (ripetibile)"
+    )
+    p_runner.add_argument(
+        "--tetto", default=None, metavar="T", help="tetto di memoria del servizio del runner (per esempio 6G)"
     )
     p_runner.add_argument("--prova", action="store_true", help="mostra i passi senza scaricare né registrare")
     p_runner.add_argument("--runner", default="bottega-runner", help=argparse.SUPPRESS)

@@ -66,6 +66,8 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
 4. **Il runner:** `bottega installa runner --repo <owner>/<repo> --etichetta <etichetta> --nome <nome> --porta
    <porta>=<percorso assoluto> … --prova`, poi senza `--prova`. L'etichetta è quella del `runner` dei candidati
    nella configurazione.
+   Su una macchina che fa anche altro, `--tetto 6G` (o quanto vuole l'utente) dà al servizio del runner un tetto di
+   memoria senza swap: l'esecutore, le sue porte e le sue prove ci stanno dentro.
 
 Un secondo progetto sulla stessa macchina vuole un suo utente dell'esecutore: `bottega installa macchina --esecutore
 bottega-esecutore-<repo>` (aggiunge l'utente e il suo file in `/etc/sudoers.d/`, il primo resta com'era) e lo stesso
