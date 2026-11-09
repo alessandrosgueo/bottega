@@ -22,7 +22,7 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
 - **B6-R1. La macchina.** Due utenti di sistema senza login: `bottega-runner` (il runner, le chiavi di GitHub) e
   `bottega-esecutore` (le porte, nessuna chiave di GitHub), un gruppo `bottega` con tutti e due. Lo spazio dei giri è
   `/var/lib/bottega/spazio`, di `bottega-runner:bottega`, `2770`. I nomi si cambiano con le opzioni di `installa`.
-- **B6-R2. Il `sudo` stretto,** in `/etc/sudoers.d/bottega` (`0440`, `root:root`, controllato con
+- **B6-R2. Il `sudo` stretto,** in `/etc/sudoers.d/<utente dell'esecutore>` (un file per esecutore, B6-R12; `0440`, `root:root`, controllato con
   `visudo -c -f` su un file temporaneo prima di spostarlo):
   `Defaults:bottega-runner umask=0007, umask_override` e
   `bottega-runner ALL=(bottega-esecutore) NOPASSWD: ALL`. Il runner diventa solo l'esecutore, mai root; l'esecutore
@@ -78,7 +78,10 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
 - **B6-R12. Un utente dell'esecutore per runner** (cioè per progetto): `kill -KILL -1` come quell'utente uccide tutti
   i suoi processi, e due giri dello stesso utente potrebbero comunque toccarsi i file a vicenda. Il primo progetto su
   una macchina usa `bottega-esecutore`; un secondo progetto riceve un utente suo (`bottega-esecutore-<repo>`), col
-  suo `sudoers` e il suo `.env`. Il runner resta uno per progetto (B6-R3).
+  suo `sudoers` e il suo `.env`. Il runner resta uno per progetto (B6-R3). Il sudoers di ogni esecutore sta nel suo
+  file, `/etc/sudoers.d/<esecutore>`: un file solo per tutti avrebbe tolto al primo progetto il suo permesso alla
+  seconda installazione. I nomi di utenti e gruppo passano da `[a-z_][a-z0-9_-]{0,31}` (sudo salta in silenzio i file
+  con un punto nel nome).
 
 - **B6-R13. I workflow chiamanti puntano alla bottega, mai al progetto** (dalla revisione di B6.5: il primo codice
   inventava il tag `v1.0.0` e prendeva lo SHA dal `HEAD` del progetto, o 40 zeri). `installa progetto` vuole
@@ -127,3 +130,12 @@ uv run pytest -q
 | Compito | Chi | Token | Durata | Giri | Consulti | Rilievi dopo |
 |---|---|---|---|---|---|---|
 | ricognizione installazione | Lavorante Gemini 3.8 Flash | 300 648 (Google) | 8 min 52 s | 0 | 0 | |
+| B6.1 la CI del progetto | Lavorante Gemini 3.8 Flash | 315 720 (Google) | 14 min 5 s | 0 | 0 | un `uses:` verso un workflow riusabile del repo non era un rischio (corretto dal maestro) |
+| B6.2 i passi di macchina | Lavorante Gemini 3.8 Flash | 323 902 (Google) | 12 min 14 s | 0 | 0 | stato ERROR coi file a posto; percorso della casa offuscato per il controllo pubblico, file di sistema in `/tmp` con nomi fissi già a tempo di piano, finto troppo stretto (corretti dal maestro, B6-R11) |
+| B6.3 i passi del progetto | Lavorante Gemini 3.8 Flash | 303 851 (Google) | 9 min 37 s | 0 | 0 | |
+| B6.6 il cancello in un contenitore | maestro | | | | | verde |
+| B6.4 l'esecutore a tempo di giro | Lavorante Gemini 3.8 Flash | (perso nel crash) | | 1 | 0 | `kill -KILL -1` passato da un prefisso finto con `exec "$@"`: ha ucciso tutti i processi dell'utente due volte, la seconda dalla suite del maestro (brief: il maestro non aveva previsto il finto; B6-R14, prove in un namespace PID) |
+| B6.4 bis le prove del blocco | Lavorante Gemini 3.8 Flash, in gabbia | 185 099 (Google) | 8 min 33 s | 0 | 0 | 7 mutazioni del maestro uccise |
+| B6.5 i comandi | Lavorante Gemini 3.8 Flash, in gabbia | 340 871 (Google) | 22 min 53 s | 0 | 0 | tag inventato e SHA del progetto nei workflow, pipe del segreto spezzata in due comandi, bottega cercata nell'origin del progetto (brief: non diceva da dove venissero; corretti dal maestro, B6-R13) |
+| B6.5 bis prove e aggiunte | Lavorante Gemini 3.8 Flash, in gabbia | 473 736 (Google) | 14 min 41 s | 0 | 0 | 9 prove d'attacco rosse sul codice di prima; mutazione dello SHA uccisa |
+| B6 sudoers per esecutore | maestro | | | | | un file solo per tutti gli esecutori: la seconda installazione toglieva il permesso al primo progetto (piano, B6-R12) |
