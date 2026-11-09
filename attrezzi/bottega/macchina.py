@@ -391,7 +391,9 @@ def passi_runner(
         ),
         Passo(
             descrizione=f"estrai runner v{versione}",
-            comando=(*come_runner, "tar", "xzf", archivio, "-C", cartella),
+            # --no-overwrite-dir: la voce `./` dell'archivio (0755) non deve riaprire la cartella del runner (dal
+            # vivo, 2026-11-09: dopo l'estrazione era 755 e l'esecutore ci entrava).
+            comando=(*come_runner, "tar", "xzf", archivio, "--no-overwrite-dir", "-C", cartella),
             controllo=("sudo", "-n", "test", "-f", f"{cartella}/config.sh"),
         ),
         Passo(
@@ -429,6 +431,15 @@ def passi_runner(
             testo_unita_runner(u, repo, cartella, tetto),
             f"/etc/systemd/system/{servizio}",
             "0644",
+        ),
+        Passo(
+            descrizione=f"cartella runner chiusa (0750) in {cartella}",
+            comando=("sudo", "-n", "chmod", "0750", cartella),
+            controllo=(
+                "sh",
+                "-c",
+                f"[ \"$(sudo -n stat -c '%a' {q(cartella)} 2>/dev/null)\" = 750 ]",
+            ),
         ),
         Passo(
             descrizione="ricarica configurazione systemd",
