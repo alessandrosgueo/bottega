@@ -217,10 +217,10 @@ def test_passi_macchina_ordine() -> None:
     testo_tutto = "\n".join(nomi_comandi)
     pos_group = testo_tutto.index("groupadd")
     pos_u_runner = testo_tutto.index(
-        f"useradd --system --create-home --shell /usr/sbin/nologin --gid {u.gruppo} {u.runner}"
+        f"useradd --system --create-home --shell /usr/sbin/nologin --user-group --groups {u.gruppo} {u.runner}"
     )
     pos_u_esec = testo_tutto.index(
-        f"useradd --system --create-home --shell /usr/sbin/nologin --gid {u.gruppo} {u.esecutore}"
+        f"useradd --system --create-home --shell /usr/sbin/nologin --user-group --groups {u.gruppo} {u.esecutore}"
     )
     pos_usermod_r = testo_tutto.index(f"usermod -a -G {u.gruppo} {u.runner}")
     pos_usermod_e = testo_tutto.index(f"usermod -a -G {u.gruppo} {u.esecutore}")
@@ -345,10 +345,14 @@ def test_passi_runner_comandi() -> None:
     assert "--labels etichetta-1" in tutto
     assert "--work _work" in tutto
     assert "--replace" in tutto
-    assert "svc.sh install" in tutto
-    assert "actions.runner.proprietario-mio-progetto.runner-1.service.d/bottega.conf" in tutto
+    assert "--preserve-env=ACTIONS_RUNNER_INPUT_TOKEN" in tutto
+    assert "runsvc.sh" in tutto
+    assert "bottega-runner-proprietario-mio-progetto.service" in tutto
     assert "systemctl daemon-reload" in tutto
-    assert "svc.sh start" in tutto
+    assert "systemctl enable --now bottega-runner-proprietario-mio-progetto.service" in tutto
+    assert "svc.sh install" not in tutto
+    assert "svc.sh start" not in tutto
+    assert "./svc.sh" not in tutto
 
 
 def test_token_mai_stampato() -> None:
@@ -385,7 +389,7 @@ def test_token_mai_stampato() -> None:
 
     # 4. Token nell'ambiente del passo config.sh
     passo_config = next(p for p in passi if "config.sh" in " ".join(p.comando))
-    assert dict(passo_config.ambiente).get("BOTTEGA_TOKEN_REGISTRAZIONE") == token_segreto
+    assert dict(passo_config.ambiente).get("ACTIONS_RUNNER_INPUT_TOKEN") == token_segreto
 
 
 def test_systemd_attivo() -> None:
@@ -445,3 +449,135 @@ def test_utenti_nome_non_valido(nome: str) -> None:
     """Un nome con un punto (sudo salterebbe il file) o con caratteri che cambiano il sudoers è rifiutato."""
     with pytest.raises(ValueError):
         Utenti(esecutore=nome)
+
+
+def test_g1_utenti_col_loro_gruppo() -> None:
+    """G1: useradd usa --user-group e --groups bottega, mai --gid."""
+    u = Utenti()
+    passi = passi_macchina(u)
+    useradd_passi = [p for p in passi if "useradd" in p.comando]
+    assert len(useradd_passi) == 2
+    for p in useradd_passi:
+        assert "--user-group" in p.comando
+        assert "--groups" in p.comando
+        assert u.gruppo in p.comando
+        assert "--gid" not in p.comando
+
+
+def test_g1_niente_umask_nel_servizio() -> None:
+    """G1: nessun passo del runner scrive UMask nel servizio o nei file."""
+    u = Utenti()
+    passi = passi_runner(u, "o/r", "2.320.0", "x64", "0" * 64, "bottega", "r1", {})
+    for p in passi:
+        assert not any("UMask" in arg for arg in p.comando)
+        if p.controllo:
+            assert not any("UMask" in arg for arg in p.controllo)
+
+
+def test_g1_cartella_runner_sua_0750() -> None:
+    """G1: la cartella del runner è del runner (suo gruppo) e con modo 0750."""
+    u = Utenti()
+    passi = passi_runner(u, "o/r", "2.320.0", "x64", "0" * 64, "bottega", "r1", {})
+    passo_c = next(p for p in passi if p.descrizione.startswith("cartella runner"))
+    cmd = passo_c.comando
+    assert "-o" in cmd and cmd[cmd.index("-o") + 1] == u.runner
+    assert "-g" in cmd and cmd[cmd.index("-g") + 1] == u.runner
+    assert "-m" in cmd and cmd[cmd.index("-m") + 1] == "0750"
+    ctl = " ".join(passo_c.controllo)
+    assert f"{u.runner}:{u.runner}:750" in ctl
+
+
+def test_g4_token_solo_nell_ambiente() -> None:
+    """G4: configurazione del runner usa ACTIONS_RUNNER_INPUT_TOKEN e mai argomenti né BOTTEGA_TOKEN_REGISTRAZIONE."""
+    u = Utenti()
+    token = "token-segreto-xyz"
+    passi = passi_runner(u, "o/r", "2.320.0", "x64", "0" * 64, "bottega", "r1", {}, token=token)
+    passo_cfg = next(p for p in passi if "config.sh" in " ".join(p.comando))
+    assert "--preserve-env=ACTIONS_RUNNER_INPUT_TOKEN" in passo_cfg.comando
+    assert dict(passo_cfg.ambiente).get("ACTIONS_RUNNER_INPUT_TOKEN") == token
+    for p in passi:
+        for c in p.comando:
+            assert token not in c
+            assert "BOTTEGA_TOKEN_REGISTRAZIONE" not in c
+
+
+def test_g7_root_non_esegue_file_del_runner() -> None:
+    """G7: root non esegue file nella cartella del runner (niente svc.sh, niente cd <cartella>)."""
+    u = Utenti()
+    passi = passi_runner(u, "o/r", "2.320.0", "x64", "0" * 64, "bottega", "r1", {})
+    cartella = f"{u.radice_runner}/runner-o-r"
+    for p in passi:
+        cmd = p.comando
+        if cmd[0] == "sudo" and "-u" not in cmd:
+            cmd_str = " ".join(cmd)
+            assert "./svc.sh" not in cmd_str
+            assert "svc.sh install" not in cmd_str
+            assert "svc.sh start" not in cmd_str
+            assert f"{cartella}/svc.sh" not in cmd_str
+            assert f"cd {cartella}" not in cmd_str
+            assert cmd[1] == "-n" and cmd[2] in ("install", "sh", "systemctl"), f"Comando root non consentito: {cmd}"
+
+
+def test_g7_unita_scritta_da_noi() -> None:
+    """G7: l'unità systemd del runner è scritta da noi con ExecStart, User, WorkingDirectory e niente UMask."""
+    from bottega.macchina import nome_del_servizio, testo_unita_runner
+    u = Utenti()
+    repo = "o/r"
+    cartella = f"{u.radice_runner}/runner-o-r"
+    testo = testo_unita_runner(u, repo, cartella)
+    assert f"ExecStart={cartella}/runsvc.sh" in testo
+    assert f"User={u.runner}" in testo
+    assert f"WorkingDirectory={cartella}" in testo
+    assert "UMask" not in testo
+
+
+def test_m9_scarica_in_un_temporaneo() -> None:
+    """M9: scarica in un file temporaneo con mktemp, verifica sha256 prima di mv, controllo con sha256sum."""
+    u = Utenti()
+    passi = passi_runner(u, "o/r", "2.320.0", "x64", "0" * 64, "bottega", "r1", {})
+    passo_s = next(p for p in passi if p.descrizione.startswith("scarica e verifica"))
+    script = passo_s.comando[-1]
+    assert "mktemp -p" in script
+    assert "sha256sum -c --status" in script
+    assert "mv " in script
+    assert script.index("sha256sum -c --status") < script.index("mv ")
+    ctl = " ".join(passo_s.controllo)
+    assert "sha256sum -c" in ctl
+    assert "test -f" not in ctl
+
+
+@pytest.mark.parametrize(
+    ("nome", "etichetta", "porta", "percorso", "versione", "sha256", "arch"),
+    [
+        ("nome/storto", "etichetta", "porta", "/usr/bin/p", "2.320.0", "0" * 64, "x64"),
+        ("nome", "con spazio", "porta", "/usr/bin/p", "2.320.0", "0" * 64, "x64"),
+        ("nome", "etichetta", "porta\n", "/usr/bin/p", "2.320.0", "0" * 64, "x64"),
+        ("nome", "etichetta", "porta", "relativo/p", "2.320.0", "0" * 64, "x64"),
+        ("nome", "etichetta", "porta", "/usr/bin/p", "1.2", "0" * 64, "x64"),
+        ("nome", "etichetta", "porta", "/usr/bin/p", "2.320.0", "A" * 64, "x64"),
+        ("nome", "etichetta", "porta", "/usr/bin/p", "2.320.0", "0" * 63, "x64"),
+        ("nome", "etichetta", "porta", "/usr/bin/p", "2.320.0", "0" * 64, "riscv"),
+    ],
+)
+def test_m13_argomenti_del_runner_controllati(
+    nome: str,
+    etichetta: str,
+    porta: str,
+    percorso: str,
+    versione: str,
+    sha256: str,
+    arch: str,
+) -> None:
+    """M13: argomenti invalidi per passi_runner sollevano ValueError."""
+    u = Utenti()
+    with pytest.raises(ValueError):
+        passi_runner(
+            u,
+            repo="o/r",
+            versione=versione,
+            arch=arch,
+            sha256=sha256,
+            etichetta=etichetta,
+            nome=nome,
+            porte={porta: percorso},
+        )

@@ -50,11 +50,17 @@ class EsecutoreRegistratore:
         # Predefiniti generici per controlli comuni
         if len(comando) >= 2 and comando[0] == "systemctl" and comando[1] == "is-system-running":
             return 0, "running\n"
-        if len(comando) >= 2 and comando[0] == "systemctl" and comando[1] == "is-active":
+        if "is-active" in cmd_str or "is-enabled" in cmd_str:
             return 1, ""
-        if comando[0] == "test":
+        if "NeedDaemonReload" in cmd_str:
             return 1, ""
-        if len(comando) >= 2 and comando[0] == "sh" and "cmp" in " ".join(comando):
+        if "test" in comando:
+            return 1, ""
+        if "stat -c" in cmd_str:
+            return 1, ""
+        if "sha256sum" in cmd_str and "curl" not in cmd_str:
+            return 1, ""
+        if "cmp" in cmd_str:
             return 1, ""
         if len(comando) >= 2 and comando[0] == "git" and "rev-parse" in comando:
             return 1, "fatal: not a valid object name\n"
@@ -64,8 +70,8 @@ class EsecutoreRegistratore:
             return 0, "https://github.com/owner/bottega.git\n"
         if len(comando) >= 2 and comando[0] == "gh" and "repo" in comando and "view" in comando:
             return 0, json.dumps({"defaultBranchRef": {"name": "main"}})
-        if len(comando) >= 2 and comando[0] == "gh" and "commits" in " ".join(comando):
-            return 0, ("1" * 40) + "\n"
+        if len(comando) >= 2 and comando[0] == "gh" and ("commits" in cmd_str or "git/ref/tags" in cmd_str):
+            return 0, f"commit {'1' * 40}\n"
 
         return 0, ""
 
@@ -268,7 +274,7 @@ def test_runner_token_solo_nell_ambiente(capsys: pytest.CaptureFixture[str]) -> 
     ]
     assert len(passi_config) >= 1
     assert any(
-        env and env.get("BOTTEGA_TOKEN_REGISTRAZIONE") == token_segreto
+        env and env.get("ACTIONS_RUNNER_INPUT_TOKEN") == token_segreto
         for _, env in passi_config
     )
 
@@ -458,8 +464,8 @@ def test_progetto_completo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
                 return 0, query_user_resp
             if "repo" in cmd_l and "view" in cmd_l:
                 return 0, json.dumps({"defaultBranchRef": {"name": "main"}})
-            if "commits" in " ".join(cmd_l):
-                return 0, ("1" * 40) + "\n"
+            if "git/ref/tags" in " ".join(cmd_l) or "commits" in " ".join(cmd_l):
+                return 0, f"commit {'1' * 40}\n"
             if "pr" in cmd_l and "create" in cmd_l:
                 return 0, "https://github.com/owner/repo/pull/101\n"
         return 0, ""
@@ -555,8 +561,8 @@ def test_aggiorna(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
             res = subprocess.run(cmd_l, capture_output=True, text=True, cwd=str(clone))
             return res.returncode, res.stdout + res.stderr
         if cmd_l[0] == "gh":
-            if "commits" in " ".join(cmd_l):
-                return 0, f"{nuovo_sha}\n"
+            if "git/ref/tags" in " ".join(cmd_l) or "commits" in " ".join(cmd_l):
+                return 0, f"commit {nuovo_sha}\n"
             if "pr" in cmd_l and "create" in cmd_l:
                 return 0, "https://github.com/owner/repo/pull/202\n"
         return 0, ""
@@ -574,8 +580,8 @@ def test_aggiorna(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
 
     # Verifica file aggiornato su disco
     testo_aggiornato = wf_dist.read_text(encoding="utf-8")
-    assert f"@{nuovo_sha}" in testo_aggiornato
-    assert "bottega_ref: v0.2.0" in testo_aggiornato
+    assert f"@{nuovo_sha} # v0.2.0" in testo_aggiornato
+    assert f"bottega_ref: {nuovo_sha}" in testo_aggiornato
 
     # Verifica ramo creato e presente
     rami = subprocess.check_output(["git", "branch"], cwd=str(clone), text=True)
@@ -650,7 +656,7 @@ def test_progetto_senza_sha_si_ferma(
     cfg_file.write_text(_CONFIGURAZIONE_BASE, encoding="utf-8")
 
     esecutore = EsecutoreRegistratore({
-        "gh api repos/owner/bottega/commits/v1.0.0 --jq .sha": risposta_gh,
+        "gh api repos/owner/bottega/git/ref/tags/v1.0.0 --jq .object.type + \" \" + .object.sha": risposta_gh,
     })
     p = _parser_installa()
     args = p.parse_args([
@@ -752,8 +758,8 @@ def test_progetto_workflow_puntano_alla_bottega(tmp_path: Path) -> None:
                 return 0, json.dumps({"data": {"user": {"projectV2": {"id": "P_1", "fields": {"nodes": []}}}}})
             if "repo" in cmd_l and "view" in cmd_l:
                 return 0, json.dumps({"defaultBranchRef": {"name": "main"}})
-            if "commits" in " ".join(cmd_l):
-                return 0, f"{sha_finto}\n"
+            if "git/ref/tags" in " ".join(cmd_l) or "commits" in " ".join(cmd_l):
+                return 0, f"commit {sha_finto}\n"
             if "pr" in cmd_l and "create" in cmd_l:
                 return 0, "https://github.com/owner/repo/pull/1\n"
         return 0, ""
@@ -777,8 +783,8 @@ def test_progetto_workflow_puntano_alla_bottega(tmp_path: Path) -> None:
         cwd=str(clone),
         text=True,
     )
-    assert f"uses: o/bottega/.github/workflows/esecutore.yml@{sha_finto}" in testo_wf
-    assert "bottega_ref: v2.0.0" in testo_wf
+    assert f"uses: o/bottega/.github/workflows/esecutore.yml@{sha_finto} # v2.0.0" in testo_wf
+    assert f"bottega_ref: {sha_finto}" in testo_wf
 
 
 def test_progetto_esecutore_senza_pipe_si_ferma(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -800,8 +806,8 @@ def test_progetto_esecutore_senza_pipe_si_ferma(tmp_path: Path, capsys: pytest.C
                 return 0, json.dumps({"data": {"user": {"projectV2": {"id": "P_1", "fields": {"nodes": []}}}}})
             if "repo" in cmd_l and "view" in cmd_l:
                 return 0, json.dumps({"defaultBranchRef": {"name": "main"}})
-            if "commits" in " ".join(cmd_l):
-                return 0, ("1" * 40) + "\n"
+            if "git/ref/tags" in " ".join(cmd_l) or "commits" in " ".join(cmd_l):
+                return 0, f"commit {'1' * 40}\n"
             if "pr" in cmd_l and "create" in cmd_l:
                 return 0, "https://github.com/owner/repo/pull/1\n"
         return 0, ""
@@ -840,7 +846,7 @@ def test_aggiorna_bottega_dal_suo_clone(tmp_path: Path) -> None:
 
     esecutore = EsecutoreRegistratore({
         f"git -C {str(_RADICE_BOTTEGA)} remote get-url origin": (0, "https://github.com/o/bottega.git\n"),
-        "gh api repos/o/bottega/commits/v0.2.0 --jq .sha": (0, ("2" * 40) + "\n"),
+        "gh api repos/o/bottega/git/ref/tags/v0.2.0 --jq .object.type + \" \" + .object.sha": (0, f"commit {'2' * 40}\n"),
     })
     p = _parser_aggiorna()
     args = p.parse_args([
@@ -952,8 +958,8 @@ def test_progetto_include_le_firme_ammesse(tmp_path: Path, capsys: pytest.Captur
                 return 0, json.dumps({"data": {"user": {"projectV2": {"id": "P_1", "fields": {"nodes": []}}}}})
             if "repo" in cmd_l and "view" in cmd_l:
                 return 0, json.dumps({"defaultBranchRef": {"name": "main"}})
-            if "commits" in " ".join(cmd_l):
-                return 0, ("1" * 40) + "\n"
+            if "git/ref/tags" in " ".join(cmd_l) or "commits" in " ".join(cmd_l):
+                return 0, f"commit {'1' * 40}\n"
             if "pr" in cmd_l and "create" in cmd_l:
                 return 0, "https://github.com/owner/repo/pull/1\n"
         return 0, ""
@@ -1076,3 +1082,86 @@ def test_runner_architettura_sconosciuta(monkeypatch: pytest.MonkeyPatch, capsys
     assert codice == 2
     catturato = capsys.readouterr()
     assert "architettura sconosciuta, usa --arch" in catturato.err
+
+
+@pytest.mark.parametrize(
+    ("url", "atteso"),
+    [
+        ("https://codeberg.org/o/bottega.git", None),
+        ("git" + "@gitlab.com:o/bottega.git", None),
+        ("ssh://git" + "@gitlab.com/o/bottega", None),
+        ("/ho" + "me/utente/bottega", None),
+        ("https://github.com/o/bottega", "o/bottega"),
+        ("https://github.com/o/bottega.git", "o/bottega"),
+        ("git" + "@github.com:o/bottega.git", "o/bottega"),
+        ("ssh://git" + "@github.com/o/bottega", "o/bottega"),
+    ],
+)
+def test_g8_origin_non_github(url: str, atteso: str | None) -> None:
+    """G8: _estrai_owner_repo accetta solo origin GitHub, altri host o cartelle locali restituiscono None."""
+    from bottega.installa import _estrai_owner_repo
+    assert _estrai_owner_repo(url) == atteso
+
+
+def test_m2_tag_annotato_seguito() -> None:
+    """M2: _sha_del_tag segue un tag annotato (tipo 'tag') fino al commit sottostante."""
+    from bottega.installa import _sha_del_tag
+    sha_tag = "a" * 40
+    sha_commit = "b" * 40
+    esecutore = EsecutoreRegistratore({
+        "gh api repos/o/bottega/git/ref/tags/v1.0.0 --jq .object.type + \" \" + .object.sha": (0, f"tag {sha_tag}\n"),
+        f"gh api repos/o/bottega/git/tags/{sha_tag} --jq .object.type + \" \" + .object.sha": (0, f"commit {sha_commit}\n"),
+    })
+    sha = _sha_del_tag(esecutore, "o/bottega", "v1.0.0")
+    assert sha == sha_commit
+
+
+def test_m2_ramo_non_e_un_tag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """M2: un ramo non è un tag; se git/ref/tags fallisce esce 1 e non chiama mai commits/."""
+    cartella = tmp_path / "progetto"
+    cartella.mkdir()
+    cfg_file = cartella / "bottega.toml"
+    cfg_file.write_text(_CONFIGURAZIONE_BASE, encoding="utf-8")
+
+    esecutore = EsecutoreRegistratore({
+        "gh api repos/owner/bottega/git/ref/tags/main --jq .object.type + \" \" + .object.sha": (1, "Not Found\n"),
+    })
+    p = _parser_installa()
+    args = p.parse_args([
+        "progetto",
+        "--repo", "owner/repo",
+        "--project", "1",
+        "--configurazione", str(cfg_file),
+        "--tag", "main",
+        "--bottega", "owner/bottega",
+    ])
+    setattr(args, "cartella", cartella)
+
+    codice = comando_progetto(args, esegui=esecutore)
+    assert codice == 1
+    catturato = capsys.readouterr()
+    assert "non trovo lo SHA del tag main" in catturato.err
+    assert not any("commits/" in " ".join(cmd) for cmd, _ in esecutore.chiamate)
+
+
+def test_m13_runner_argomenti_storti_prima_del_token(capsys: pytest.CaptureFixture[str]) -> None:
+    """M13: se gli argomenti del runner sono invalidi, esce 2 e non chiede mai il registration-token."""
+    esecutore = EsecutoreRegistratore({
+        "gh api repos/actions/runner/releases/latest": (
+            0,
+            json.dumps({"tag_name": "v2.320.0", "body": f"<!-- BEGIN SHA linux-x64 -->{'0' * 64}<!-- END SHA linux-x64 -->"}),
+        ),
+    })
+    p = _parser_installa()
+    args = p.parse_args([
+        "runner",
+        "--repo", "owner/repo",
+        "--etichetta", "etichetta",
+        "--nome", "nome/storto",
+    ])
+
+    codice = comando_runner(args, esegui=esecutore)
+    assert codice == 2
+    catturato = capsys.readouterr()
+    assert "nome del runner non valido" in catturato.err
+    assert not any("registration-token" in " ".join(cmd) for cmd, _ in esecutore.chiamate)

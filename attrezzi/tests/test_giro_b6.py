@@ -169,15 +169,19 @@ def test_kill_prima_dell_oracolo(tmp_path: Path) -> None:
 
     righe = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
     indici_kill = [i for i, r in enumerate(righe) if r == "kill -KILL -1"]
-    assert len(indici_kill) >= 2, f"Attesi almeno 2 kill -KILL -1, trovati {len(indici_kill)} in {righe}"
+    assert len(indici_kill) >= 3, f"Attesi almeno 3 kill -KILL -1, trovati {len(indici_kill)} in {righe}"
 
-    # Il primo kill è prima del clone dell'oracolo
+    # Il primo kill è all'inizio del giro, prima del clone del progetto
+    idx_primo_clone = next(i for i, r in enumerate(righe) if "git clone" in r)
+    assert indici_kill[0] < idx_primo_clone, "Il primo kill deve precedere il primo clone"
+
+    # Il secondo kill è prima del clone dell'oracolo
     idx_clone_oracolo = next(i for i, r in enumerate(righe) if "git clone" in r and "oracolo.bundle" in r)
-    assert indici_kill[0] < idx_clone_oracolo, "Il primo kill deve precedere il clone dell'oracolo"
+    assert indici_kill[1] < idx_clone_oracolo, "Il secondo kill deve precedere il clone dell'oracolo"
 
-    # Il secondo kill è dopo l'ultimo comando del giro (l'oracolo o la revisione)
+    # Il terzo kill è dopo l'ultimo comando del giro (l'oracolo o la revisione)
     idx_oracolo = next(i for i, r in enumerate(righe) if "bash -c" in r)
-    assert indici_kill[1] > idx_oracolo, "Il secondo kill deve essere dopo l'oracolo"
+    assert indici_kill[2] > idx_oracolo, "Il terzo kill deve essere dopo l'oracolo"
 
 
 def test_niente_kill_senza_prefisso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -597,3 +601,102 @@ def test_ci_solo_nell_albero_non_conta(tmp_path: Path) -> None:
         caso=caso,
     )
     assert esito.esito == "consegnato"
+
+
+def test_m3_kill_all_inizio_del_giro(tmp_path: Path) -> None:
+    """M3: con prefisso finto (uid 54321), un kill -KILL -1 precede il primo git clone del giro."""
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntrue\n```\n"
+    iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    registro = tmp_path / "prefisso.log"
+    prefisso_sh = tmp_path / "prefisso.sh"
+    prefisso_sh.write_text(
+        f"#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{registro}"\n'
+        f'case "$1" in\n'
+        f"    kill|pkill|killall)\n"
+        f"        exit 0\n"
+        f"        ;;\n"
+        f"    id)\n"
+        f"        echo 54321\n"
+        f"        exit 0\n"
+        f"        ;;\n"
+        f"esac\n"
+        f'exec "$@"\n',
+        encoding="utf-8",
+    )
+    prefisso_sh.chmod(0o755)
+
+    porta = PortaFinta(callback=lambda cartella, prompt, **kw: Lancio(esito="fatto", testo="ok"))
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(str(prefisso_sh),),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    righe = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
+    indici_kill = [i for i, r in enumerate(righe) if r == "kill -KILL -1"]
+    assert len(indici_kill) >= 1
+    idx_primo_clone = next(i for i, r in enumerate(righe) if "git clone" in r)
+    assert indici_kill[0] < idx_primo_clone
+
+
+def test_m4_cartella_del_giro_imprevedibile(tmp_path: Path) -> None:
+    """M4: la cartella del giro creata in spazio ha nome imprevedibile (non lavoro-epoca) e modo 0o2770."""
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntrue\n```\n"
+    iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    cartella_vista: list[Path] = []
+    modo_visto: list[int] = []
+
+    def callback_porta(cartella, prompt, **kw):
+        p_giro = Path(cartella).parent
+        cartella_vista.append(p_giro)
+        modo_visto.append(p_giro.stat().st_mode & 0o7777)
+        return Lancio(esito="fatto", testo="ok")
+
+    porta = PortaFinta(callback=callback_porta)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+
+    assert len(cartella_vista) == 1
+    p_giro = cartella_vista[0]
+    epoca = str(int(adesso.timestamp()))
+    assert p_giro.name != f"1-{epoca}", f"Il nome della cartella del giro non deve essere prevedibile ({p_giro.name})"
+    assert p_giro.name.startswith("1-")
+    assert modo_visto[0] == 0o2770

@@ -323,18 +323,78 @@ def test_aggiorna_chiamanti() -> None:
     nuovo_sha = "2222222222222222222222222222222222222222"
     nuovo_tag = "v0.2.0"
 
-    aggiornati = aggiorna_chiamanti(testi, nuovo_sha, nuovo_tag)
+    aggiornati = aggiorna_chiamanti(testi, nuovo_sha, nuovo_tag, "proprietario/bottega")
     for path, testo in aggiornati.items():
-        assert f"@{nuovo_sha}" in testo
+        assert f"uses: proprietario/bottega/" in testo
+        assert f"@{nuovo_sha} # {nuovo_tag}" in testo
         assert "@1111111111111111111111111111111111111111" not in testo
-        assert f"bottega_ref: {nuovo_tag}" in testo
+        assert f"bottega_ref: {nuovo_sha}" in testo
         assert "bottega_ref: v0.1.0" not in testo
 
 
 def test_aggiorna_sha_non_valido() -> None:
     testi = {".github/workflows/wf.yml": "uses: bottega@123\n"}
     with pytest.raises(ErroreProgetto, match="SHA non valido"):
-        aggiorna_chiamanti(testi, "non-40-hex", "v1.0.0")
+        aggiorna_chiamanti(testi, "non-40-hex", "v1.0.0", "proprietario/bottega")
 
     with pytest.raises(ErroreProgetto, match="SHA non valido"):
-        aggiorna_chiamanti(testi, "g" * 40, "v1.0.0")
+        aggiorna_chiamanti(testi, "g" * 40, "v1.0.0", "proprietario/bottega")
+
+
+def test_g3_bottega_ref_e_lo_sha() -> None:
+    """G3: i workflow generati da file_dell_installazione hanno bottega_ref fissato allo SHA e @<sha> # <tag>."""
+    cfg = _configurazione_prova()
+    sha = "3" * 40
+    tag = "v1.2.3"
+    valori = {
+        "proprietario": "prop",
+        "sha": sha,
+        "tag": tag,
+        "etichetta del runner": "r-1",
+        "id": "principale",
+    }
+    file_pr = file_dell_installazione(cfg, valori, [])
+    for nome in (".github/workflows/bottega-distributore.yml", ".github/workflows/bottega-esecutore-principale.yml"):
+        testo = file_pr[nome]
+        assert f"bottega_ref: {sha}" in testo
+        assert f"@{sha} # {tag}" in testo
+        assert f"bottega_ref: {tag}" not in testo
+
+
+def test_m1_aggiorna_lascia_le_altre_azioni() -> None:
+    """M1: aggiorna_chiamanti riscrive solo uses della bottega; le altre azioni (actions/checkout@v4) restano intatte."""
+    testo = (
+        "jobs:\n"
+        "  esegui:\n"
+        "    uses: altro/bottega/.github/workflows/esecutore.yml@1111111111111111111111111111111111111111\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+    )
+    sha = "4" * 40
+    out = aggiorna_chiamanti({"wf.yml": testo}, sha, "v2.0.0", "nuovo/bottega")["wf.yml"]
+    assert "actions/checkout@v4" in out
+    assert f"uses: nuovo/bottega/.github/workflows/esecutore.yml@{sha} # v2.0.0" in out
+
+
+def test_m1_aggiorna_riscrive_il_repo_della_bottega() -> None:
+    """M1: aggiorna_chiamanti riscrive il repo della bottega sia nell'uses che in bottega_repo."""
+    testo = (
+        "jobs:\n"
+        "  a:\n"
+        "    uses: vecchio/bottega/.github/workflows/distributore.yml@1111111111111111111111111111111111111111\n"
+        "    with:\n"
+        "      bottega_repo: vecchio/bottega\n"
+        "      bottega_ref: 1111111111111111111111111111111111111111\n"
+    )
+    sha = "5" * 40
+    out = aggiorna_chiamanti({"wf.yml": testo}, sha, "v3.0.0", "mio/bottega")["wf.yml"]
+    assert f"uses: mio/bottega/.github/workflows/distributore.yml@{sha} # v3.0.0" in out
+    assert "bottega_repo: mio/bottega" in out
+    assert f"bottega_ref: {sha}" in out
+
+
+def test_m1_aggiorna_senza_chiamata_e_un_errore() -> None:
+    """M1: aggiorna_chiamanti solleva ErroreProgetto se un file non contiene nessuna chiamata a un workflow bottega."""
+    testo = "jobs:\n  a:\n    uses: actions/checkout@v4\n"
+    with pytest.raises(ErroreProgetto, match="nessuna chiamata a un workflow della bottega"):
+        aggiorna_chiamanti({"wf.yml": testo}, "6" * 40, "v4.0.0", "mio/bottega")

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import random
 from zoneinfo import ZoneInfo
@@ -1336,4 +1337,165 @@ def test_b5_elenco_che_cade_non_ferma(monkeypatch: pytest.MonkeyPatch) -> None:
     prima = chiamate_scegli[0]
     assert prima["risultati"] == {}
     assert prima["costi_propri"] is None
+
+
+def test_m3_kill_dopo_il_consulto(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """M3: con prefisso finto (uid 54321), un kill -KILL -1 è registrato subito dopo il consulto."""
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    spazio = tmp_path / "spazio"
+    spazio.mkdir()
+    monkeypatch.setenv("BOTTEGA_SPAZIO", str(spazio))
+
+    registro = tmp_path / "prefisso.log"
+    prefisso_sh = tmp_path / "prefisso.sh"
+    prefisso_sh.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{registro}"\n'
+        'case "$1" in\n'
+        '    kill|pkill|killall) exit 0 ;;\n'
+        '    id) echo 54321; exit 0 ;;\n'
+        'esac\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    prefisso_sh.chmod(0o755)
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Come procedere?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self, prefisso=()): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            with open(registro, "a", encoding="utf-8") as f:
+                f.write("porta: lancia\n")
+            return Lancio(esito="fatto", testo="Risposta consiglio")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso)),
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+        prefisso=(str(prefisso_sh),),
+    )
+
+    righe = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
+    idx_porta = next(i for i, r in enumerate(righe) if r == "porta: lancia")
+    idx_kill = next(i for i, r in enumerate(righe) if r == "kill -KILL -1")
+    assert idx_kill > idx_porta
+
+
+def test_m10_pulizia_del_consulto_non_cade(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """M10: la pulizia della cartella del consulto con sottocartella 0o500 non fallisce e il commento viene inviato."""
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    spazio = tmp_path / "spazio"
+    spazio.mkdir()
+    monkeypatch.setenv("BOTTEGA_SPAZIO", str(spazio))
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Domanda importante", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+
+    sub_creata: list[Path] = []
+
+    orig_unlink = os.unlink
+
+    def fake_unlink(path, *args, **kwargs):
+        if "file.txt" in str(path) or "intoccabile" in str(path):
+            raise PermissionError(13, "Permission denied")
+        return orig_unlink(path, *args, **kwargs)
+
+    import shutil
+    import tempfile
+    monkeypatch.setattr(shutil.os, "unlink", fake_unlink)
+    monkeypatch.setattr(tempfile._os, "unlink", fake_unlink)
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self, prefisso=()): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            sub = Path(cartella) / "intoccabile"
+            sub.mkdir()
+            (sub / "file.txt").write_text("dentro", encoding="utf-8")
+            sub.chmod(0o500)
+            sub_creata.append(sub)
+            return Lancio(esito="fatto", testo="Risposta anche con cartella bloccata")
+
+    try:
+        distribuisci(
+            configurazione=cfg,
+            forgia=forgia,
+            board=board,
+            variabili={},
+            adesso=datetime(2026, 11, 8, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso)),
+            caso=random.Random(42),
+            percorso_evento=evento_file,
+            porte={"claude-code": PortaFintaCons()},
+        )
+    finally:
+        for s in sub_creata:
+            if s.exists():
+                s.chmod(0o700)
+
+    comm = forgia.commenti(1)
+    assert any("Risposta anche con cartella bloccata" in c.corpo for c in comm)
 
