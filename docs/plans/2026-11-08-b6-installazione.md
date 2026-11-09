@@ -196,6 +196,13 @@ di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove,
   `ci.rischi` legge `runs-on` in maiuscolo e fa un dubbio di ogni chiave fra doppi apici con un escape; `ferma` spegne
   anche uno stato mancante, `riparti` riaccende solo i `disabled_*`; le case degli utenti si chiudono a `0700` anche
   se c'erano già.
+- **B6-R24 (dalla terza rilettura). I workflow della bottega non sono mai un rischio.** `ci.rischi` toglie le
+  espressioni `${{ … }}` anche quando vanno a capo prima di cercare i flussi `{…}`: il distributore installato ne ha
+  una su più righe, e contarla come una graffa aperta faceva di ogni progetto installato un rischio, quindi ogni giro
+  restava in attesa («ci del progetto») e un secondo `installa progetto` si fermava. La prova
+  `test_c4_i_workflow_dell_installazione_non_sono_rischi` lo tiene. Una cartella del giro preparata a metà non resta
+  nello spazio; il cancello prova lo sticky su una cartella del runner aperta al gruppo (`2770`), che senza sticky
+  l'esecutore potrebbe togliere.
 
 ## Misure
 
@@ -221,3 +228,5 @@ di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove,
 | seconda rilettura (C2) | capobottega Sonnet high | 160 712 | 5 min 31 s | | | 1 grave (il `chmod` di Python toglieva il setgid: ogni giro moriva, B6-R23) + 8 minori, corretti |
 | B6.C3 correzioni | maestro | | | | | il cancello ora usa le funzioni vere del giro: con `0750` va ROSSO |
 | B6.C3 prove | Lavorante Gemini 3.8 Flash, in gabbia | 394 484 (Google) | 10 min 43 s | 0 | 0 | 12 prove rosse sul codice di prima |
+| terza rilettura (C3) | capobottega Sonnet high | 176 873 | 7 min 24 s | | | nessun grave; 5 minori, fra cui il falso rischio sui workflow della bottega che il maestro ha pesato come grave (B6-R24), corretti |
+| B6.C4 correzioni e prove | maestro | | | | | la prova dei modelli rossa sul codice di prima |

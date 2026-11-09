@@ -69,10 +69,14 @@ def _ha_ancora_o_alias(riga: str) -> bool:
 
 
 def _ha_flusso_multilinea(righe_pulite: list[str]) -> bool:
-    """Rileva parentesi graffe aperte fuori dagli apici e non chiuse sulla stessa riga (tranne ${{...}})."""
-    for riga in righe_pulite:
-        senza_expr = re.sub(r"\$\{\{[^}]*\}\}", "", riga)
-        senza_stringhe = re.sub(r"'[^']*'|\"[^\"]*\"", "", senza_expr)
+    """Rileva parentesi graffe aperte fuori dagli apici e non chiuse sulla stessa riga.
+
+    Le espressioni `${{ … }}` si tolgono prima, anche quando vanno a capo: il distributore della bottega ne ha una su
+    più righe, e contarla come flusso faceva di ogni progetto installato un rischio (ogni giro restava in attesa).
+    """
+    testo = re.sub(r"\$\{\{.*?\}\}", "", "\n".join(righe_pulite), flags=re.DOTALL)
+    for riga in testo.split("\n"):
+        senza_stringhe = re.sub(r"'[^']*'|\"[^\"]*\"", "", riga)
         aperte = senza_stringhe.count("{")
         chiuse = senza_stringhe.count("}")
         if aperte != chiuse:

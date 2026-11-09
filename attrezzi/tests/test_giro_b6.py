@@ -1331,3 +1331,20 @@ def test_c3_tetto_della_copia(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert lav is not None
     assert lav.stato != "consegnato"
 
+
+
+def test_c4_cartella_a_meta_non_resta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Se la preparazione delle cartelle del giro cade a metà, la cartella creata da mkdtemp non resta nello spazio."""
+    spazio = tmp_path / "spazio"
+    chmod_vero = Path.chmod
+
+    def chmod_che_cade(self: Path, modo: int, *a, **kw) -> None:
+        if self.name == "esecutore":
+            raise OSError("chmod rifiutato")
+        chmod_vero(self, modo, *a, **kw)
+
+    monkeypatch.setattr(Path, "chmod", chmod_che_cade)
+    with pytest.raises(OSError):
+        modulo_giro.prepara_cartelle_del_giro(spazio, 7)
+    monkeypatch.undo()
+    assert list(spazio.iterdir()) == []

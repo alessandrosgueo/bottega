@@ -255,13 +255,18 @@ def prepara_cartelle_del_giro(spazio: Path, lavoro: int) -> tuple[Path, Path]:
     spazio.mkdir(parents=True, exist_ok=True)
     dir_giro = Path(tempfile.mkdtemp(prefix=f"{lavoro}-", dir=spazio))
     dir_esec = dir_giro / "esecutore"
-    dir_esec.mkdir()
-    gid_comune = spazio.stat().st_gid
-    for cartella in (dir_giro, dir_esec):
-        if cartella.stat().st_gid != gid_comune:
-            os.chown(cartella, -1, gid_comune)
-    dir_giro.chmod(0o2750)
-    dir_esec.chmod(0o2770)
+    try:
+        dir_esec.mkdir()
+        gid_comune = spazio.stat().st_gid
+        for cartella in (dir_giro, dir_esec):
+            if cartella.stat().st_gid != gid_comune:
+                os.chown(cartella, -1, gid_comune)
+        dir_giro.chmod(0o2750)
+        dir_esec.chmod(0o2770)
+    except BaseException:
+        # Una cartella a metà non resta nello spazio: il chiamante non la conosce ancora.
+        shutil.rmtree(dir_giro, ignore_errors=True)
+        raise
     return dir_giro, dir_esec
 
 

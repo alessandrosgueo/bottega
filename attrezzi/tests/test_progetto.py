@@ -521,3 +521,22 @@ def test_c3_riparti_non_tocca_i_cancellati() -> None:
 
 
 
+
+
+def test_c4_i_workflow_dell_installazione_non_sono_rischi() -> None:
+    """Dopo l'installazione il ramo principale del progetto ha i workflow della bottega, e il giro li controlla
+    (B6-R7): non devono mai essere un rischio, altrimenti ogni giro resta in attesa. Il distributore ha un'espressione
+    `${{ … }}` su più righe, che la lettura dei flussi `{…}` contava come una graffa aperta."""
+    from bottega.ci import rischi
+
+    valori = {
+        "proprietario": "prop",
+        "sha": "3" * 40,
+        "tag": "v1.2.3",
+        "etichetta del runner": "r-1",
+        "id": "principale",
+    }
+    file_pr = file_dell_installazione(_configurazione_prova(), valori, [])
+    workflow = {p: testo for p, testo in file_pr.items() if p.startswith(".github/workflows/")}
+    assert len(workflow) >= 2
+    assert rischi(workflow) == []

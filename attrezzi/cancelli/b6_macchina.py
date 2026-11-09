@@ -16,6 +16,11 @@ def sh(comando: str) -> tuple[int, str]:
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
+def sh_uscita(comando: str) -> str:
+    """Solo l'uscita normale: un avviso su stderr non sporca un percorso."""
+    return subprocess.run(["sh", "-c", comando], capture_output=True, text=True).stdout.strip()
+
+
 def main() -> int:
     u = Utenti()
     esiti: list[tuple[str, bool]] = []
@@ -80,7 +85,7 @@ def main() -> int:
         "f = d / 'fascicolo'; g.prepara_cartella_del_fascicolo(f); (f / 'brief.md').write_text('il brief'); "
         "g.chiudi_file_del_fascicolo(f); b = d / 'ramo.bundle'; b.write_text('bundle'); b.chmod(0o640); print(d)"
     )
-    _, d = sh(f'sudo -u bottega-runner env PYTHONPATH=/bottega/attrezzi python3 -c "{prepara}"')
+    d = sh_uscita(f'sudo -u bottega-runner env PYTHONPATH=/bottega/attrezzi python3 -c "{prepara}"')
     esec = "sudo -u bottega-runner sudo -n -H -u bottega-esecutore --"
     codice, _ = sh(f"{esec} cp -R {d}/fascicolo {d}/esecutore/fascicolo")
     _, uscita = sh(f"{esec} cat {d}/esecutore/fascicolo/brief.md {d}/ramo.bundle")
@@ -92,8 +97,12 @@ def main() -> int:
     esiti.append(("l'esecutore NON pianta un link nella cartella del runner", codice != 0))
     codice, _ = sh(f"{esec} sh -c 'echo x > {d}/fascicolo/brief.md'")
     esiti.append(("l'esecutore NON cambia il fascicolo del runner", codice != 0))
-    codice, _ = sh(f"{esec} mv {d} /var/lib/bottega/spazio/rubata")
-    esiti.append(("l'esecutore NON rinomina la cartella del giro (sticky)", codice != 0))
+    # Lo sticky: una cartella del runner che il gruppo può scrivere (2770) non si toglie né si rinomina lo stesso.
+    aperta = sh_uscita("sudo -u bottega-runner sh -c 'a=$(mktemp -d -p /var/lib/bottega/spazio) && chmod 2770 \"$a\" && echo \"$a\"'")
+    codice_mv, _ = sh(f"{esec} mv {aperta} /var/lib/bottega/spazio/rubata")
+    codice_rm, _ = sh(f"{esec} rmdir {aperta}")
+    esiti.append(("l'esecutore NON rinomina né toglie una cartella del runner (sticky)", codice_mv != 0 and codice_rm != 0))
+    sh(f"rmdir {aperta}")
     sh(f"{esec} sh -c 'mkdir {d}/esecutore/chiusa && touch {d}/esecutore/chiusa/f && chmod 000 {d}/esecutore/chiusa'")
     togli = (
         "from pathlib import Path; import shutil; from bottega import giro as g; "
