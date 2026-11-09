@@ -125,6 +125,49 @@ ricognizione `docs/ricognizioni/2026-11-08-installazione.md`.
 uv run pytest -q
 ```
 
+
+## Correzioni della revisione finale
+
+La revisione finale (Opus high, a contesto fresco) ha trovato 8 gravi e 13 minori. Il maestro ha scritto le correzioni
+di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove, ognuna vista rossa sul codice di prima
+(C1-prove), e le correzioni di `ci.rischi` e di `riparti` (C1-ci).
+
+- **B6-R15 (G1). L'esecutore non scrive mai dove scrive il runner.** Ognuno dei due utenti ha il suo gruppo
+  principale (`useradd --user-group --groups bottega`); il servizio del runner non ha `UMask` (prima `0007`: tutto ciò
+  che il runner creava, hook e configurazione git dei cloni, codice della bottega in `_work`, nasceva scrivibile
+  all'esecutore, che poteva così far girare codice suo come runner, col token). La cartella del runner è sua, `0750`.
+  Il gruppo `bottega` vale solo nello spazio (`2770`) e nelle cartelle del giro e del consulto (`2770`, mkdtemp): il
+  bit setgid tiene il gruppo su ciò che crea l'esecutore (con la sua umask `0007` del sudoers), così il runner lo
+  legge e lo toglie.
+- **B6-R16 (G2).** Lo spazio del giro è quello del `.env` del runner: il workflow `esecutore.yml` lo esporta solo
+  come ripiego (`${BOTTEGA_SPAZIO:-$RUNNER_TEMP/bottega-spazio}`).
+- **B6-R17 (G3, M1, M2). Il codice che gira è quello del commit fissato.** `bottega_ref:` è lo SHA del tag, il tag
+  resta solo nel commento `@<sha> # <tag>`; lo SHA viene da `refs/tags/<tag>` (un tag annotato si segue fino al
+  commit; mai `commits/<x>`, che risolve anche rami e commit dei fork); `aggiorna` riscrive solo le chiamate ai
+  workflow della bottega, col repo della bottega.
+- **B6-R18 (G4). Il token di registrazione nell'ambiente, attraverso sudo.** `config.sh` lo riceve come
+  `ACTIONS_RUNNER_INPUT_TOKEN` con `sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN`: sudo azzera l'ambiente
+  (`env_reset`), e il token del primo codice arrivava vuoto. Mai in un argomento (`ps` lo mostrerebbe a tutti).
+- **B6-R19 (G7, M8). Root non esegue file del runner.** L'unità `bottega-runner-<owner>-<repo>.service` la scriviamo
+  noi con `passo_file` (`User=` il runner, `ExecStart=<cartella>/runsvc.sh`); `svc.sh` non si usa.
+- **B6-R20 (G8).** Il repo della bottega si ricava solo da un origin di GitHub (https o ssh, sempre verso `github.com`); altrimenti serve `--bottega`.
+- **B6-R21 (G5, G6).** `riparti` vede i workflow disabilitati (`gh workflow list --all`), e un elenco vuoto è un
+  errore. `ci.rischi` legge le chiavi fra apici, ogni forma di `secrets` in un'espressione, `runs-on` a mappa o con
+  un'espressione come dubbio, le sole etichette esatte dei runner di GitHub, e la guardia `bottega/` solo intera o in
+  `&&`.
+- **Minori corretti:** M3 (processi dell'esecutore uccisi anche all'inizio del giro e dopo ogni consulto), M4
+  (cartella del giro con mkdtemp), M5 (con la G1 i file del fascicolo nascono `0644` in una cartella `0750`: l'esecutore
+  li legge e non li cambia), M9 (archivio scaricato in un temporaneo e rinominato dopo la verifica), M10 (pulizia del
+  consulto con `ignore_cleanup_errors`), M13 (argomenti del runner controllati prima del token).
+- **Minori aperti** (da rivedere col signore o dopo la palestra di B7):
+  - M6: gli esecutori di progetti diversi condividono gruppo e spazio. Il runner (`bottega-runner`) è comunque uno
+    solo per la macchina, quindi i progetti di una macchina sono un solo dominio di fiducia.
+  - M7: il `.env` sta nella cartella del runner, che il runner può cambiare; non apre nulla all'esecutore.
+  - M11: `BOTTEGA_TOKEN` è l'accesso OAuth di chi installa (`repo`, `workflow`, `project`) e vale su tutti i suoi
+    repo; un token a grana fine o una GitHub App per il solo progetto è la scelta da proporre al signore.
+  - M12: `bottega-esecutore-<repo>` sta nei 32 caratteri solo con nomi corti; `INSTALLA.md` consiglia un suffisso
+    breve.
+
 ## Misure
 
 | Compito | Chi | Token | Durata | Giri | Consulti | Rilievi dopo |
@@ -139,3 +182,7 @@ uv run pytest -q
 | B6.5 i comandi | Lavorante Gemini 3.8 Flash, in gabbia | 340 871 (Google) | 22 min 53 s | 0 | 0 | tag inventato e SHA del progetto nei workflow, pipe del segreto spezzata in due comandi, bottega cercata nell'origin del progetto (brief: non diceva da dove venissero; corretti dal maestro, B6-R13) |
 | B6.5 bis prove e aggiunte | Lavorante Gemini 3.8 Flash, in gabbia | 473 736 (Google) | 14 min 41 s | 0 | 0 | 9 prove d'attacco rosse sul codice di prima; mutazione dello SHA uccisa |
 | B6 sudoers per esecutore | maestro | | | | | un file solo per tutti gli esecutori: la seconda installazione toglieva il permesso al primo progetto (piano, B6-R12) |
+| revisione finale | revisore Opus high | 173 592 | 8 min 5 s | | | 8 gravi + 13 minori (B6-R15…R21) |
+| B6.C1 correzioni di root, sudo, token e pin | maestro | | | | | il cancello in contenitore prova G1 e G4 dal vero |
+| B6.C1-ci `ci.rischi` e `riparti` | Lavorante Gemini 3.8 Flash, in gabbia | 363 832 (Google) | 11 min 33 s | 0 | 0 | 8 prove rosse sul codice di prima |
+| B6.C1-prove | Lavorante Gemini 3.8 Flash, in gabbia | 710 009 (Google) | 23 min 8 s | 0 | 0 | 17 prove rimesse al passo, 21 d'attacco rosse sul codice di prima |

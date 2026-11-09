@@ -57,7 +57,8 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
    utenti di sistema (`bottega-runner` con le chiavi di GitHub, `bottega-esecutore` per i modelli, senza chiavi), un
    gruppo, lo spazio dei giri e il solo `sudo` che serve: il runner può diventare l'esecutore, mai root.
 2. **L'accesso a GitHub del runner:** `sudo -u bottega-runner -H gh auth login --web --git-protocol https -s
-   repo,workflow,project`. È l'account dell'utente (un solo account): l'utente mette il codice nel browser, una volta.
+   repo,workflow,project`. È l'account dell'utente (un solo account): l'utente mette il codice nel browser, una volta. Di' all'utente che questo
+   accesso vale per tutti i suoi repo: se preferisce, può usare un account o un token limitato al solo progetto.
 3. **Le porte dell'esecutore:** per ogni porta di un candidato che esegue fuori, installala per `bottega-esecutore`
    con l'installatore ufficiale e fai il suo login come quell'utente (`sudo -u bottega-esecutore -H <porta> …`;
    l'utente completa nel browser). **Non copiare le credenziali dell'utente**: i token si rinnovano e la copia può
@@ -68,7 +69,8 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
 
 Un secondo progetto sulla stessa macchina vuole un suo utente dell'esecutore: `bottega installa macchina --esecutore
 bottega-esecutore-<repo>` (aggiunge l'utente e il suo file in `/etc/sudoers.d/`, il primo resta com'era) e lo stesso
-`--esecutore` a `installa runner`. Due giri dello stesso utente potrebbero toccarsi a vicenda.
+`--esecutore` a `installa runner`. Due giri dello stesso utente potrebbero toccarsi a vicenda. Il nome di un utente sta in 32 caratteri,
+minuscoli, cifre, `-` e `_`: per un repo dal nome lungo scegli un suffisso breve (`bottega-esecutore-sito`).
 
 ## 6. Il progetto
 
@@ -96,9 +98,11 @@ le vuole le fa una volta a mano.
 ## Fermare, ripartire, aggiornare, togliere
 
 - `bottega ferma --repo <owner>/<repo>` spegne i workflow della bottega del progetto; `bottega riparti` li riaccende.
-- `bottega aggiorna --repo <owner>/<repo> --tag <tag>`: una PR che porta i workflow al tag nuovo della bottega.
-- `bottega aggiorna --repo <owner>/<repo> --tag <tag>` si lancia nel clone del progetto, come `installa progetto`.
-- Togliere (a mano, in quest'ordine): nella cartella del runner (`/var/lib/bottega/runner-<owner>-<repo>`)
-  `sudo ./svc.sh stop` e `sudo ./svc.sh uninstall`, `sudo -u bottega-runner ./config.sh remove --token <token>` (da
-  `gh api -X POST repos/<owner>/<repo>/actions/runners/remove-token`), poi il file dell'esecutore in
-  `/etc/sudoers.d/`, i due utenti e il gruppo.
+- `bottega aggiorna --repo <owner>/<repo> --tag <tag>`, nel clone del progetto: una PR che porta i workflow al
+  commit del tag nuovo della bottega.
+- Togliere (a mano, in quest'ordine): `sudo systemctl disable --now bottega-runner-<owner>-<repo>.service` e
+  `sudo rm /etc/systemd/system/bottega-runner-<owner>-<repo>.service`; poi la registrazione, col token di rimozione
+  solo nell'ambiente (mai scritto né in un argomento): `export ACTIONS_RUNNER_INPUT_TOKEN="$(gh api -X POST
+  repos/<owner>/<repo>/actions/runners/remove-token --jq .token)"` e `sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN
+  -u bottega-runner -H sh -c 'cd /var/lib/bottega/runner-<owner>-<repo> && ./config.sh remove'`; infine la cartella
+  del runner, il file dell'esecutore in `/etc/sudoers.d/`, i due utenti e il gruppo.
