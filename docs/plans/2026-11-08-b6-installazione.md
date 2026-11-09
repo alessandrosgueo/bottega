@@ -184,6 +184,18 @@ di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove,
   - `_uccidi_processi_esecutore` uccide anche i processi di un secondo progetto che usasse lo stesso utente
     dell'esecutore: `INSTALLA.md` lo sconsiglia (B6-R12);
   - lo spazio non ha una pulizia dei giri rimasti per un errore: la palestra di B7 dirà se serve.
+- **B6-R23 (dalla seconda rilettura). Il setgid si scrive.** Il `chmod` di Python mette esattamente il modo dato e
+  toglie il setgid se il modo non lo nomina (quello di coreutils lo conserva): la prima versione di B6-R22 dava
+  `0750` alla cartella del giro, `fascicolo/` nasceva col gruppo del runner e l'esecutore non poteva copiarlo, quindi
+  ogni giro moriva. Ora le cartelle del runner nel giro sono `2750` (giro, fascicolo), `esecutore/` `2770`, i file del
+  runner che l'esecutore legge `0640`: nessuno dipende dall'umask del runner. Le cartelle le preparano
+  `prepara_cartelle_del_giro` e `prepara_cartella_del_fascicolo`, che il cancello lancia come runner nel contenitore: con
+  `0750` il cancello va ROSSO. La creazione sta dentro il `try` del giro; l'esecutore toglie ciò che ha creato, anche
+  le sue cartelle chiuse (`togli_come_esecutore`), prima della pulizia del runner, nel giro e nel consulto; una pulizia
+  del consulto che non riesce non fa perdere la risposta; la copia di un bundle dell'esecutore ha un tetto di 1 GiB.
+  `ci.rischi` legge `runs-on` in maiuscolo e fa un dubbio di ogni chiave fra doppi apici con un escape; `ferma` spegne
+  anche uno stato mancante, `riparti` riaccende solo i `disabled_*`; le case degli utenti si chiudono a `0700` anche
+  se c'erano già.
 
 ## Misure
 
@@ -206,3 +218,6 @@ di root, sudo, token e pin (B6.C1, `d31de1d`); il Lavorante ha scritto le prove,
 | rilettura delle correzioni | capobottega Sonnet high | 212 445 | 8 min 41 s | | | 1 grave (link piantato nella cartella del giro, B6-R22) + 8 minori |
 | B6.C2 correzioni | maestro | | | | | il cancello in contenitore prova link, sticky e case dal vero |
 | B6.C2 prove e `ci.rischi` | Lavorante Gemini 3.8 Flash, in gabbia | 620 952 (Google) | 21 min 32 s | 0 | 0 | 14 prove rosse sul codice di prima; `ferma` due volte di fila dava errore (corretto dal maestro); nessuna prova vedeva il runner scrivere in `esecutore/` (aggiunta dal maestro, mutazione uccisa) |
+| seconda rilettura (C2) | capobottega Sonnet high | 160 712 | 5 min 31 s | | | 1 grave (il `chmod` di Python toglieva il setgid: ogni giro moriva, B6-R23) + 8 minori, corretti |
+| B6.C3 correzioni | maestro | | | | | il cancello ora usa le funzioni vere del giro: con `0750` va ROSSO |
+| B6.C3 prove | Lavorante Gemini 3.8 Flash, in gabbia | 394 484 (Google) | 10 min 43 s | 0 | 0 | 12 prove rosse sul codice di prima |

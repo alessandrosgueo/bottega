@@ -659,7 +659,7 @@ def test_m3_kill_all_inizio_del_giro(tmp_path: Path) -> None:
 
 
 def test_m4_cartella_del_giro_imprevedibile(tmp_path: Path) -> None:
-    """M4: la cartella del giro creata in spazio ha nome imprevedibile (non lavoro-epoca) e modo 0o750 con esecutore/ 0o2770."""
+    """M4: la cartella del giro creata in spazio ha nome imprevedibile (non lavoro-epoca) e modo 0o2750 con esecutore/ 0o2770."""
     origin, clone = _crea_ambiente_git(tmp_path)
     cfg = _crea_configurazione()
     corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntrue\n```\n"
@@ -705,7 +705,7 @@ def test_m4_cartella_del_giro_imprevedibile(tmp_path: Path) -> None:
     epoca = str(int(adesso.timestamp()))
     assert p_giro.name != f"1-{epoca}", f"Il nome della cartella del giro non deve essere prevedibile ({p_giro.name})"
     assert p_giro.name.startswith("1-")
-    assert modo_visto[0] == 0o750
+    assert modo_visto[0] == 0o2750
     assert len(cartella_esec_vista) == 1
     p_esec = cartella_esec_vista[0]
     assert p_esec.name == "esecutore"
@@ -713,7 +713,7 @@ def test_m4_cartella_del_giro_imprevedibile(tmp_path: Path) -> None:
 
 
 def test_r22_cartella_del_giro_del_runner(tmp_path: Path) -> None:
-    """B6-R22: la cartella del giro 0o750, esecutore/ 0o2770, lavoro e oracolo dentro esecutore/."""
+    """B6-R22: la cartella del giro 0o2750, esecutore/ 0o2770, lavoro e oracolo dentro esecutore/."""
     origin, clone = _crea_ambiente_git(tmp_path)
     cfg = _crea_configurazione()
     corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f file.txt\n```\n"
@@ -777,7 +777,7 @@ def test_r22_cartella_del_giro_del_runner(tmp_path: Path) -> None:
 
     assert p_lavoro.name == "lavoro"
     assert p_esec.name == "esecutore"
-    assert modi_giro[0] == 0o750
+    assert modi_giro[0] == 0o2750
     assert modi_esec[0] == 0o2770
 
     righe = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
@@ -1123,3 +1123,211 @@ def test_r22_il_runner_non_scrive_in_esecutore(tmp_path: Path, monkeypatch: pyte
     assert len(bundle_del_runner) >= 2, comandi_del_runner
     for cmd in comandi_del_runner:
         assert not any("/esecutore/" in arg or arg.endswith("/esecutore") for arg in cmd), cmd
+
+
+def test_c3_setgid_sulle_cartelle(tmp_path: Path) -> None:
+    """C3: prepara_cartelle_del_giro dà 0o2750 e 0o2770; prepara_cartella_del_fascicolo dà 0o2750."""
+    spazio = tmp_path / "spazio"
+    spazio.mkdir()
+    d_giro, d_esec = modulo_giro.prepara_cartelle_del_giro(spazio, 1)
+    assert (d_giro.stat().st_mode & 0o7777) == 0o2750
+    assert (d_esec.stat().st_mode & 0o7777) == 0o2770
+
+    f_dir = d_giro / "fascicolo"
+    modulo_giro.prepara_cartella_del_fascicolo(f_dir)
+    assert (f_dir.stat().st_mode & 0o7777) == 0o2750
+
+
+def test_c3_file_del_runner_0640(tmp_path: Path) -> None:
+    """C3: dopo un giro consegnato, visto durante il lancio: ramo.bundle e file di fascicolo/ sono 0o640 anche con umask 0o077."""
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f file.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    modi_visti: dict[str, int] = {}
+
+    def callback_porta(cartella, prompt, **kw):
+        p_lavoro = Path(cartella)
+        p_esec = p_lavoro.parent
+        p_giro = p_esec.parent
+        for b in p_giro.glob("*.bundle"):
+            modi_visti[b.name] = b.stat().st_mode & 0o7777
+        p_fasc = p_giro / "fascicolo"
+        for f in p_fasc.iterdir():
+            if f.is_file():
+                modi_visti[f.name] = f.stat().st_mode & 0o7777
+        (p_lavoro / "file.txt").write_text("ok\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(p_lavoro), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: file"], cwd=str(p_lavoro), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    vecchia_umask = os.umask(0o077)
+    try:
+        esito = giro(
+            lavoro=1,
+            bottega="principale",
+            configurazione=cfg,
+            forgia=forgia,
+            board=board,
+            porte={"finta": PortaFinta(callback=callback_porta)},
+            clone_progetto=clone,
+            spazio=tmp_path / "spazio",
+            prefisso=(),
+            adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+            caso=random.Random(42),
+        )
+    finally:
+        os.umask(vecchia_umask)
+
+    assert esito.esito == "consegnato"
+    assert any(k.endswith(".bundle") for k in modi_visti)
+    assert "brief.md" in modi_visti
+    for nome, modo in modi_visti.items():
+        assert modo == 0o640, f"{nome} ha modo {oct(modo)}, atteso 0o640"
+
+
+def test_c3_errore_delle_cartelle_non_lascia_in_corso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """C3: monkeypatch di prepara_cartelle_del_giro che solleva OSError: il giro non esce con eccezione e lavoro non resta in corso."""
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    iss = Issue(numero=1, titolo="Compito Uno", corpo="Brief", autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    def fallisci_prepara(spazio, lavoro):
+        raise OSError("impossibile creare la cartella del giro")
+
+    monkeypatch.setattr(modulo_giro, "prepara_cartelle_del_giro", fallisci_prepara)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": PortaFinta()},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+
+    assert esito.esito != "consegnato"
+    lav = board.lavoro(1)
+    assert lav is not None
+    assert lav.stato != "in corso"
+
+
+def test_c3_l_esecutore_toglie_il_suo(tmp_path: Path) -> None:
+    """C3: nel registro del prefisso, alla fine del giro, chmod -R u+rwX -- <…>/esecutore e poi rm -rf -- <…>/esecutore."""
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f file.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    registro = tmp_path / "prefisso.log"
+    prefisso_sh = tmp_path / "prefisso.sh"
+    prefisso_sh.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{registro}"\n'
+        'case "$1" in\n'
+        "    kill|pkill|killall)\n"
+        "        exit 0\n"
+        "        ;;\n"
+        "    id)\n"
+        "        echo 54321\n"
+        "        exit 0\n"
+        "        ;;\n"
+        "esac\n"
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    prefisso_sh.chmod(0o755)
+
+    def callback_porta(cartella, prompt, **kw):
+        p_lavoro = Path(cartella)
+        (p_lavoro / "file.txt").write_text("ok\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(p_lavoro), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: file"], cwd=str(p_lavoro), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": PortaFinta(callback=callback_porta)},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(str(prefisso_sh),),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+    assert esito.esito == "consegnato"
+
+    righe = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
+    idx_chmod = next(i for i, r in enumerate(righe) if "chmod -R u+rwX --" in r and r.endswith("/esecutore"))
+    idx_rm = next(i for i, r in enumerate(righe) if "rm -rf --" in r and r.endswith("/esecutore"))
+    assert idx_chmod < idx_rm
+
+
+def test_c3_tetto_della_copia(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """C3: monkeypatch di giro.TETTO_COPIA a pochi byte: il giro non consegna e non c'è spinta."""
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f file.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Uno", corpo=corpo, autore="maestro")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Uno", stato="pronto")])
+
+    commit_iniziali = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=str(origin),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    monkeypatch.setattr(modulo_giro, "TETTO_COPIA", 10)
+
+    def callback_porta(cartella, prompt, **kw):
+        p_lavoro = Path(cartella)
+        (p_lavoro / "file.txt").write_text("modifica consistente\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(p_lavoro), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: file"], cwd=str(p_lavoro), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": PortaFinta(callback=callback_porta)},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        caso=random.Random(42),
+    )
+
+    assert esito.esito != "consegnato"
+    commit_finali = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=str(origin),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert commit_finali == commit_iniziali
+    lav = board.lavoro(1)
+    assert lav is not None
+    assert lav.stato != "consegnato"
+

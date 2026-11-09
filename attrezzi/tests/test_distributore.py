@@ -1575,3 +1575,181 @@ def test_r22_consulto_apre_dopo_aver_scritto(tmp_path: Path, monkeypatch: pytest
     assert chmod_chiamate[0][2] is True, "fascicolo.md deve essere già scritto prima del chmod 2770"
 
 
+def test_c3_pulizia_del_consulto_che_cade(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """C3: se la pulizia della cartella temporanea solleva OSError, la risposta del consulto è comunque commentata."""
+    import tempfile
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(
+        json.dumps({
+            "action": "created",
+            "issue": {"number": 1},
+            "comment": {"body": "/bottega consulta Come procediamo?", "user": {"login": "alice"}},
+        }),
+        encoding="utf-8",
+    )
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+
+        def controlla(self, prefisso=()):
+            return Controllo(ok=True)
+
+        def lancia(
+            self,
+            cartella,
+            prompt,
+            modello,
+            *,
+            conversazione=None,
+            sola_lettura=False,
+            prefisso=(),
+            tempo=3600,
+        ):
+            return Lancio(esito="fatto", testo="Risposta preziosa del consulto")
+
+    orig_cleanup = tempfile.TemporaryDirectory.cleanup
+
+    def fake_cleanup(self):
+        orig_cleanup(self)
+        raise OSError("pulizia fallita per errore disco")
+
+    monkeypatch.setattr(tempfile.TemporaryDirectory, "cleanup", fake_cleanup)
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso)),
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+    )
+
+    comms = forgia.commenti(1)
+    assert any("Risposta preziosa del consulto" in c.corpo for c in comms)
+
+
+def test_c3_l_esecutore_toglie_il_consulto(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """C3: con un prefisso finto con uid 54321, l'esecutore toglie via prefisso ogni voce della cartella."""
+    from dataclasses import replace
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+
+    board = BoardFinta([
+        Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice"),
+    ])
+
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(
+        json.dumps({
+            "action": "created",
+            "issue": {"number": 1},
+            "comment": {"body": "/bottega consulta Come pulire?", "user": {"login": "alice"}},
+        }),
+        encoding="utf-8",
+    )
+
+    registro = tmp_path / "prefisso.log"
+    prefisso_sh = tmp_path / "prefisso.sh"
+    prefisso_sh.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{registro}"\n'
+        'case "$1" in\n'
+        "    kill|pkill|killall)\n"
+        "        exit 0\n"
+        "        ;;\n"
+        "    id)\n"
+        "        echo 54321\n"
+        "        exit 0\n"
+        "        ;;\n"
+        "esac\n"
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    prefisso_sh.chmod(0o755)
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+
+        def controlla(self, prefisso=()):
+            return Controllo(ok=True)
+
+        def lancia(
+            self,
+            cartella,
+            prompt,
+            modello,
+            *,
+            conversazione=None,
+            sola_lettura=False,
+            prefisso=(),
+            tempo=3600,
+        ):
+            extra = Path(cartella) / "output_esecutore"
+            extra.mkdir()
+            (extra / "f.txt").write_text("ciao", encoding="utf-8")
+            return Lancio(esito="fatto", testo="Fatto e pulito")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso)),
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+        prefisso=(str(prefisso_sh),),
+    )
+
+    righe_log = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
+    assert any("chmod -R u+rwX --" in r and "fascicolo.md" in r for r in righe_log)
+    assert any("rm -rf --" in r and "fascicolo.md" in r for r in righe_log)
+    assert any("chmod -R u+rwX --" in r and "output_esecutore" in r for r in righe_log)
+    assert any("rm -rf --" in r and "output_esecutore" in r for r in righe_log)
+
+
+

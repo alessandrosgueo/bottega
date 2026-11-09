@@ -1019,6 +1019,70 @@ jobs:
     assert "secrets" in r_upper[0].motivo.lower()
 
 
+def test_c3_runs_on_maiuscolo():
+    wf_upper = """
+on: push
+jobs:
+  a:
+    RUNS-ON: self-hosted
+    steps:
+      - run: make
+"""
+    r_upper = rischi({"upper.yml": wf_upper})
+    assert len(r_upper) == 1
+    assert "self-hosted" in r_upper[0].motivo or "non GitHub" in r_upper[0].motivo
+
+    wf_mixed = """
+on: push
+jobs:
+  a:
+    Runs-On: [self-hosted, linux]
+    steps:
+      - run: make
+"""
+    r_mixed = rischi({"mixed.yml": wf_mixed})
+    assert len(r_mixed) == 1
+    assert "self-hosted" in r_mixed[0].motivo or "non GitHub" in r_mixed[0].motivo
+
+
+def test_c3_chiave_con_escape():
+    wf_escape_line = """
+on: push
+jobs:
+  a:
+    "\\x72uns-on": self-hosted
+    steps:
+      - run: make
+"""
+    r_escape = rischi({"escape.yml": wf_escape_line})
+    assert len(r_escape) == 1
+    assert "escape" in r_escape[0].motivo.lower()
+
+    wf_escape_inline = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+        with: {"\\x72uns-on": self-hosted}
+"""
+    r_inline = rischi({"inline.yml": wf_escape_inline})
+    assert len(r_inline) == 1
+    assert "escape" in r_inline[0].motivo.lower()
+
+    wf_sicuro = """
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "a\\nb"
+"""
+    assert rischi({"sicuro.yml": wf_sicuro}) == []
+
+
+
 
 
 

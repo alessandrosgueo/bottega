@@ -470,3 +470,54 @@ def test_g5_ferma_e_riparti_guardano_lo_stato() -> None:
     assert not any(c[0] == "workflow" and c[1] == "enable" and "ci.yml" in c[2] for c in chiamate)
 
 
+def test_c3_ferma_spegne_lo_stato_mancante() -> None:
+    """C3: ferma spegne anche un workflow con stato mancante o vuoto."""
+    chiamate: list[list[str]] = []
+    risposta_wf = json.dumps([
+        {"path": ".github/workflows/bottega-distributore.yml"},  # stato assente
+        {"path": ".github/workflows/bottega-esecutore-principale.yml", "state": ""},  # stato vuoto
+        {"path": ".github/workflows/bottega-altri.yml", "state": "disabled_manually"},
+    ])
+
+    def esegui_gh(args: list[str]) -> str:
+        chiamate.append(args)
+        if args[:2] == ["workflow", "list"]:
+            return risposta_wf
+        return ""
+
+    toccati = ferma(esegui_gh, "owner/repo")
+    assert ".github/workflows/bottega-distributore.yml" in toccati
+    assert ".github/workflows/bottega-esecutore-principale.yml" in toccati
+    assert ".github/workflows/bottega-altri.yml" not in toccati
+    assert ["workflow", "disable", ".github/workflows/bottega-distributore.yml", "--repo", "owner/repo"] in chiamate
+    assert ["workflow", "disable", ".github/workflows/bottega-esecutore-principale.yml", "--repo", "owner/repo"] in chiamate
+
+
+def test_c3_riparti_non_tocca_i_cancellati() -> None:
+    """C3: riparti non tocca deleted e active, ma abilita disabled_manually e disabled_inactivity."""
+    chiamate: list[list[str]] = []
+    risposta_wf = json.dumps([
+        {"path": ".github/workflows/bottega-attivo.yml", "state": "active"},
+        {"path": ".github/workflows/bottega-cancellato.yml", "state": "deleted"},
+        {"path": ".github/workflows/bottega-manualmente.yml", "state": "disabled_manually"},
+        {"path": ".github/workflows/bottega-inattivita.yml", "state": "disabled_inactivity"},
+    ])
+
+    def esegui_gh(args: list[str]) -> str:
+        chiamate.append(args)
+        if args[:2] == ["workflow", "list"]:
+            return risposta_wf
+        return ""
+
+    toccati = riparti(esegui_gh, "owner/repo")
+    assert ".github/workflows/bottega-manualmente.yml" in toccati
+    assert ".github/workflows/bottega-inattivita.yml" in toccati
+    assert ".github/workflows/bottega-attivo.yml" not in toccati
+    assert ".github/workflows/bottega-cancellato.yml" not in toccati
+    assert ["workflow", "enable", ".github/workflows/bottega-manualmente.yml", "--repo", "owner/repo"] in chiamate
+    assert ["workflow", "enable", ".github/workflows/bottega-inattivita.yml", "--repo", "owner/repo"] in chiamate
+    assert not any(c[0] == "workflow" and c[1] == "enable" and "cancellato" in c[2] for c in chiamate)
+    assert not any(c[0] == "workflow" and c[1] == "enable" and "attivo" in c[2] for c in chiamate)
+
+
+

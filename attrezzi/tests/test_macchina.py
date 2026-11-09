@@ -618,3 +618,24 @@ def test_r22_utente_gia_fatto_col_suo_gruppo() -> None:
         assert f'id -gn {utente}' in p.controllo[2]
         assert f'= {utente}' in p.controllo[2]
 
+
+def test_c3_case_chiuse_anche_se_c_erano() -> None:
+    """C3: due passi «casa di … chiusa (0700)», col controllo che legge il modo con stat."""
+    u = Utenti()
+    passi = passi_macchina(u)
+    passi_case = [p for p in passi if "chiusa (0700)" in p.descrizione]
+    assert len(passi_case) == 2
+    for desc, utente in (
+        (f"casa di {u.runner} chiusa (0700)", u.runner),
+        (f"casa di {u.esecutore} chiusa (0700)", u.esecutore),
+    ):
+        p = next(p for p in passi if p.descrizione == desc)
+        assert p.comando[0] == "sudo" and p.comando[1] == "-n"
+        assert "chmod 700" in p.comando[-1]
+        assert utente in p.comando[-1]
+        assert p.controllo[0] == "sh" and p.controllo[1] == "-c"
+        assert "stat -c %a" in p.controllo[2]
+        assert "= 700" in p.controllo[2]
+        assert utente in p.controllo[2]
+
+
