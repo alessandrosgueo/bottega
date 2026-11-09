@@ -196,6 +196,18 @@ def passi_macchina(u: Utenti) -> list[Passo]:
             ),
             controllo=("sh", "-c", f"[ \"$(id -gn {u.esecutore} 2>/dev/null)\" = {u.esecutore} ]"),
         ),
+        *(
+            Passo(
+                descrizione=f"casa di {utente} chiusa (0700)",
+                comando=("sudo", "-n", "sh", "-c", f'chmod 700 "$(getent passwd {utente} | cut -d: -f6)"'),
+                controllo=(
+                    "sh",
+                    "-c",
+                    f'[ "$(stat -c %a "$(getent passwd {utente} | cut -d: -f6)" 2>/dev/null)" = 700 ]',
+                ),
+            )
+            for utente in (u.runner, u.esecutore)
+        ),
         Passo(
             descrizione=f"appartenenza di {u.runner} al gruppo {u.gruppo}",
             comando=("sudo", "-n", "usermod", "-a", "-G", u.gruppo, u.runner),

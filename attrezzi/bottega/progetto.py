@@ -336,7 +336,8 @@ def ferma(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
     for item in wfs:
         path = item["path"] if isinstance(item, dict) else item
         state = item.get("state", "") if isinstance(item, dict) else ""
-        if state == "active":
+        # Uno stato mancante conta come acceso: l'interruttore spegne nel dubbio.
+        if state in ("active", ""):
             esegui_gh(["workflow", "disable", path, "--repo", repo])
             toccati.append(path)
     return toccati
@@ -352,7 +353,8 @@ def riparti(esegui_gh: Callable[[list[str]], str], repo: str) -> list[str]:
     for item in wfs:
         path = item["path"] if isinstance(item, dict) else item
         state = item.get("state", "") if isinstance(item, dict) else ""
-        if state != "active":
+        # Solo gli spenti (disabled_manually, disabled_inactivity…): un workflow cancellato non si riaccende.
+        if state.startswith("disabled"):
             esegui_gh(["workflow", "enable", path, "--repo", repo])
             toccati.append(path)
     return toccati

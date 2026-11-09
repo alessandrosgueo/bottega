@@ -276,55 +276,65 @@ def _gestisci_evento_commento(
         spazio_env = os.environ.get("BOTTEGA_SPAZIO")
         kw_temp = {"dir": spazio_env} if spazio_env else {}
         # M10: un file dell'esecutore che il runner non può togliere non deve far perdere la risposta del consulto.
-        with tempfile.TemporaryDirectory(**kw_temp, ignore_cleanup_errors=True) as tmpdir:
-            p_tmp = Path(tmpdir)
-            try:
-                iss = forgia.issue(num_issue)
-                corpo_iss = iss.corpo
-                titolo_iss = iss.titolo
-            except Exception:
-                corpo_iss = ""
-                titolo_iss = f"Issue #{num_issue}"
+        lancio = None
+        try:
+            with tempfile.TemporaryDirectory(**kw_temp, ignore_cleanup_errors=True) as tmpdir:
+                p_tmp = Path(tmpdir)
+                try:
+                    iss = forgia.issue(num_issue)
+                    corpo_iss = iss.corpo
+                    titolo_iss = iss.titolo
+                except Exception:
+                    corpo_iss = ""
+                    titolo_iss = f"Issue #{num_issue}"
 
-            comandanti_set = {c.strip().casefold() for c in comandanti}
-            try:
-                tutti_comm = forgia.commenti(num_issue)
-                comm_cmd = [c for c in tutti_comm if c.autore.strip().casefold() in comandanti_set]
-            except Exception:
-                comm_cmd = []
+                comandanti_set = {c.strip().casefold() for c in comandanti}
+                try:
+                    tutti_comm = forgia.commenti(num_issue)
+                    comm_cmd = [c for c in tutti_comm if c.autore.strip().casefold() in comandanti_set]
+                except Exception:
+                    comm_cmd = []
 
-            testo_comm = "\n\n".join(f"### Commento di @{c.autore}:\n{c.corpo}" for c in comm_cmd)
+                testo_comm = "\n\n".join(f"### Commento di @{c.autore}:\n{c.corpo}" for c in comm_cmd)
 
-            fascicolo_md = (
-                f"# {titolo_iss}\n\n"
-                f"## Corpo dell'issue\n{corpo_iss}\n\n"
-                f"## Commenti dei comandanti\n{testo_comm or '(nessun commento)'}\n\n"
-                f"## Domanda di consulto\n{cmd.argomento}\n"
-            )
-            (p_tmp / "fascicolo.md").write_text(fascicolo_md, encoding="utf-8")
-            # La cartella si apre all'esecutore solo dopo che il runner vi ha scritto: prima, un link messo al posto
-            # di `fascicolo.md` porterebbe la scrittura del runner fuori dal consulto.
-            if spazio_env:
-                os.chmod(tmpdir, 0o2770)
-
-            prompt = (
-                f"Sei il consigliere della bottega. Rispondi alla seguente domanda sul compito #{num_issue}.\n"
-                f"Nella cartella di lavoro è presente il fascicolo minimo (`fascicolo.md`).\n\n"
-                f"Domanda:\n{cmd.argomento}\n"
-            )
-            try:
-                lancio = adattatore_porta.lancia(
-                    cartella=p_tmp,
-                    prompt=prompt,
-                    modello=cand.modello,
-                    sola_lettura=True,
-                    prefisso=prefisso,
+                fascicolo_md = (
+                    f"# {titolo_iss}\n\n"
+                    f"## Corpo dell'issue\n{corpo_iss}\n\n"
+                    f"## Commenti dei comandanti\n{testo_comm or '(nessun commento)'}\n\n"
+                    f"## Domanda di consulto\n{cmd.argomento}\n"
                 )
-            finally:
-                # M3: niente processi dell'esecutore vivi dopo il consulto.
-                from bottega.giro import _uccidi_processi_esecutore
+                (p_tmp / "fascicolo.md").write_text(fascicolo_md, encoding="utf-8")
+                # La cartella si apre all'esecutore solo dopo che il runner vi ha scritto: prima, un link messo al posto
+                # di `fascicolo.md` porterebbe la scrittura del runner fuori dal consulto.
+                if spazio_env:
+                    os.chmod(tmpdir, 0o2770)
 
-                _uccidi_processi_esecutore(prefisso)
+                prompt = (
+                    f"Sei il consigliere della bottega. Rispondi alla seguente domanda sul compito #{num_issue}.\n"
+                    f"Nella cartella di lavoro è presente il fascicolo minimo (`fascicolo.md`).\n\n"
+                    f"Domanda:\n{cmd.argomento}\n"
+                )
+                try:
+                    lancio = adattatore_porta.lancia(
+                        cartella=p_tmp,
+                        prompt=prompt,
+                        modello=cand.modello,
+                        sola_lettura=True,
+                        prefisso=prefisso,
+                    )
+                finally:
+                    # M3: niente processi dell'esecutore vivi dopo il consulto; poi l'esecutore toglie ciò che ha creato,
+                    # anche le sue cartelle chiuse, così la pulizia del runner non cade.
+                    from bottega.giro import _uccidi_processi_esecutore, togli_come_esecutore
+
+                    _uccidi_processi_esecutore(prefisso)
+                    for voce in p_tmp.iterdir():
+                        togli_come_esecutore(prefisso, voce)
+        except OSError as exc:
+            # Una pulizia che non riesce (un file dell'esecutore che il runner non toglie) non fa perdere la risposta.
+            if lancio is None:
+                raise
+            print(f"consulto: pulizia non riuscita: {exc}", file=sys.stderr)
 
         testo_cons = lancio.testo if lancio.esito == "fatto" else f"Errore consulto ({lancio.esito}): {lancio.testo}"
         corpo_risposta = f"Risposta del consigliere ({cand.nome}):\n\n{_recinta(testo_cons)}"

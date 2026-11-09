@@ -72,22 +72,36 @@ def main() -> int:
     _, uscita = sh("stat -c '%a' $(getent passwd bottega-runner bottega-esecutore | cut -d: -f6)")
     esiti.append((f"case 700 ({' '.join(uscita.split())})", uscita.split() == ["700", "700"]))
 
-    # Il giro (B6-R22): la cartella del giro è del runner, 0750; l'esecutore lavora in esecutore/ (2770).
-    giro = (
-        "d=$(mktemp -d -p /var/lib/bottega/spazio) && mkdir \"$d/esecutore\" && "
-        "chgrp bottega \"$d\" \"$d/esecutore\" && chmod 750 \"$d\" && chmod 2770 \"$d/esecutore\" && echo \"$d\""
+    # Il giro (B6-R22), con le funzioni vere di giro.py lanciate come runner: il chmod di Python e quello di
+    # coreutils non trattano il setgid allo stesso modo.
+    prepara = (
+        "from pathlib import Path; from bottega import giro as g; "
+        "d, e = g.prepara_cartelle_del_giro(Path('/var/lib/bottega/spazio'), 1); "
+        "f = d / 'fascicolo'; g.prepara_cartella_del_fascicolo(f); (f / 'brief.md').write_text('il brief'); "
+        "g.chiudi_file_del_fascicolo(f); b = d / 'ramo.bundle'; b.write_text('bundle'); b.chmod(0o640); print(d)"
     )
-    _, d = sh(f"sudo -u bottega-runner sh -c '{giro}'")
+    _, d = sh(f'sudo -u bottega-runner env PYTHONPATH=/bottega/attrezzi python3 -c "{prepara}"')
     esec = "sudo -u bottega-runner sudo -n -H -u bottega-esecutore --"
+    codice, _ = sh(f"{esec} cp -R {d}/fascicolo {d}/esecutore/fascicolo")
+    _, uscita = sh(f"{esec} cat {d}/esecutore/fascicolo/brief.md {d}/ramo.bundle")
+    esiti.append((f"l'esecutore copia il fascicolo e legge il bundle del runner ({uscita!r})", codice == 0 and uscita == "il briefbundle"))
     codice, uscita = sh(f"{esec} sh -c 'mkdir {d}/esecutore/lavoro && echo dentro > {d}/esecutore/lavoro/f'")
     codice2, uscita2 = sh(f"sudo -u bottega-runner cat {d}/esecutore/lavoro/f")
     esiti.append((f"il runner legge ciò che l'esecutore crea nel giro ({uscita2})", codice == 0 and uscita2 == "dentro"))
     codice, _ = sh(f"{esec} ln -s /var/lib/bottega/runner-o-r/.runner {d}/oracolo.bundle")
     esiti.append(("l'esecutore NON pianta un link nella cartella del runner", codice != 0))
+    codice, _ = sh(f"{esec} sh -c 'echo x > {d}/fascicolo/brief.md'")
+    esiti.append(("l'esecutore NON cambia il fascicolo del runner", codice != 0))
     codice, _ = sh(f"{esec} mv {d} /var/lib/bottega/spazio/rubata")
     esiti.append(("l'esecutore NON rinomina la cartella del giro (sticky)", codice != 0))
-    codice, _ = sh(f"sudo -u bottega-runner rm -rf {d}")
-    esiti.append(("il runner toglie tutto il giro", codice == 0 and sh(f"test -e {d}")[0] != 0))
+    sh(f"{esec} sh -c 'mkdir {d}/esecutore/chiusa && touch {d}/esecutore/chiusa/f && chmod 000 {d}/esecutore/chiusa'")
+    togli = (
+        "from pathlib import Path; import shutil; from bottega import giro as g; "
+        f"d = Path('{d}'); g.togli_come_esecutore(('sudo', '-n', '-H', '-u', 'bottega-esecutore', '--'), d / 'esecutore'); "
+        "shutil.rmtree(d, ignore_errors=True)"
+    )
+    sh(f'sudo -u bottega-runner env PYTHONPATH=/bottega/attrezzi python3 -c "{togli}"')
+    esiti.append(("il giro si toglie tutto, anche una cartella chiusa dell'esecutore", sh(f"test -e {d}")[0] != 0))
 
     # La cartella del runner: sua, 0750, l'esecutore non ci entra.
     passi = passi_runner(

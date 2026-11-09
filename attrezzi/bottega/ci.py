@@ -193,7 +193,7 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
     righe_chiave_runs_on: set[int] = set()
     while i < len(righe_pulite):
         riga = righe_pulite[i]
-        m = re.match(r"^(\s*)(?:'runs-on'|\"runs-on\"|runs-on)\s*:\s*(.*)$", riga)
+        m = re.match(r"^(\s*)(?:'runs-on'|\"runs-on\"|runs-on)\s*:\s*(.*)$", riga, re.IGNORECASE)
         if m:
             righe_chiave_runs_on.add(i)
             indent = len(m.group(1))
@@ -252,11 +252,17 @@ def _trova_pericolo(righe_pulite: list[str]) -> str | None:
                             return f"usa runner non GitHub ({el})"
         i += 1
 
-    # 6. ogni comparsa di runs-on nel testo (fuori dai commenti) che la lettura riga per riga non ha letto come chiave di un job è un dubbio
+    # 6. ogni comparsa di runs-on nel testo (fuori dai commenti, maiuscole o no) che la lettura riga per riga non ha
+    # letto come chiave di un job è un dubbio
     for idx, riga in enumerate(righe_pulite):
-        if "runs-on" in riga:
-            if idx not in righe_chiave_runs_on or riga.count("runs-on") > 1:
+        if "runs-on" in riga.lower():
+            if idx not in righe_chiave_runs_on or riga.lower().count("runs-on") > 1:
                 return f"runs-on non riconosciuto o dubbio ({riga.strip()})"
+
+    # 7. una chiave fra doppi apici con una sequenza di escape (`"\x72uns-on":`) può nascondere qualunque chiave
+    for riga in righe_pulite:
+        if re.search(r'(?:^\s*(?:-\s*)?|[{,]\s*)"[^"]*\\[^"]*"\s*:', riga):
+            return f"chiave con escape, dubbio ({riga.strip()})"
 
     return None
 
