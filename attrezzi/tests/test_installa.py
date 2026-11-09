@@ -1214,3 +1214,29 @@ def test_m13_runner_argomenti_storti_prima_del_token(capsys: pytest.CaptureFixtu
     catturato = capsys.readouterr()
     assert "nome del runner non valido" in catturato.err
     assert not any("registration-token" in " ".join(cmd) for cmd, _ in esecutore.chiamate)
+
+
+def test_runner_gh_del_runner(capsys: pytest.CaptureFixture[str]) -> None:
+    """Con --gh-del-runner la release e il token di registrazione passano dal gh del runner (sudo -u <runner>), mai
+    dal gh di chi installa; il token resta solo nell'ambiente di config.sh."""
+    sha_finto = "a" * 64
+    body = f"<!-- BEGIN SHA linux-x64 -->\n{sha_finto}\n<!-- END SHA linux-x64 -->"
+    release_json = json.dumps({"tag_name": "v2.320.0", "body": body})
+    token_segreto = "TOKEN_DEL_RUNNER_xyz"
+    via = "sudo -n -u bottega-runner -H gh"
+    esecutore = EsecutoreRegistratore(
+        {
+            f"{via} api repos/actions/runner/releases/latest": (0, release_json),
+            f"{via} api -X POST repos/owner/repo/actions/runners/registration-token --jq .token": (0, token_segreto),
+        }
+    )
+    args = _parser_installa().parse_args(
+        ["runner", "--repo", "owner/repo", "--etichetta", "e", "--nome", "n", "--gh-del-runner"]
+    )
+    assert comando_runner(args, esegui=esecutore) == 0
+    comandi = [" ".join(cmd) for cmd, _ in esecutore.chiamate]
+    assert any(c.startswith(f"{via} api -X POST") for c in comandi)
+    assert not any(c.startswith("gh ") for c in comandi)
+    assert all(token_segreto not in c for c in comandi)
+    catturato = capsys.readouterr()
+    assert token_segreto not in catturato.out + catturato.err
