@@ -205,3 +205,53 @@ produce; la prova passa anche con la correzione sbagliata.
 **Esito:** la rilettura ha visto il buco; la correzione nuova (un campo scritto solo dal giro) ha la prova col
 `prendi` fra due giri, rossa senza la correzione.
 **Fonte:** dal vivo 2026-11-08
+
+### CICLO-15. Il finto che esegue davvero
+
+**Scenario:** il codice nuovo lancia un comando attraverso il prefisso dell'esecutore (`sudo -u <esecutore> --`),
+e quel comando uccide processi (`kill -KILL -1`). Nelle prove il prefisso è uno script finto che registra gli
+argomenti e poi fa `exec "$@"`.
+**Domanda:** cosa si fa prima di lanciare le prove?
+**Opzioni:**
+- A) niente: il finto registra, la prova controlla il registro
+- B) il finto intercetta ogni comando che uccide (`kill`, `pkill`, `killall`) e non lo esegue; il codice che uccide
+  chiede prima a quale utente arriva (`id -u` attraverso il prefisso); le prove girano in un namespace PID
+- C) si toglie il comando dalle prove
+**Scelta:** B
+**Perché:** il finto con `exec "$@"` esegue il comando come chi lancia le prove: `kill -1` uccide tutti i suoi
+processi, la sessione compresa.
+**Esito:** con A è successo due volte (il Lavorante, poi la suite del maestro): la macchina di sviluppo è stata
+riavviata due volte. Dopo B, il blocco dell'uid è nel codice (B6-R14), i finti intercettano, e Lavorante e prove girano
+in un namespace PID.
+**Fonte:** dal vivo 2026-11-09
+
+### CICLO-16. Il cancello che imita il codice
+
+**Scenario:** il cancello in contenitore prova i permessi del giro con due utenti veri, ma prepara le cartelle con
+comandi di shell scritti a mano (`chmod 750`), mentre il giro le prepara in Python (`Path.chmod(0o750)`).
+**Domanda:** il cancello verde basta?
+**Opzioni:**
+- A) sì: i modi sono gli stessi
+- B) no: il cancello deve lanciare le funzioni vere del codice, come l'utente che le lancia nel giro
+**Scelta:** B
+**Perché:** lo stesso numero non vuol dire lo stesso effetto: il `chmod` di coreutils conserva il setgid di una
+cartella, quello di Python (la chiamata di sistema) lo toglie.
+**Esito:** con A il cancello era verde e ogni giro vero sarebbe morto (l'esecutore non poteva copiare il fascicolo):
+l'ha trovato una rilettura leggendo il codice. Con B il cancello va ROSSO sullo stesso errore.
+**Fonte:** dal vivo 2026-11-09
+
+### CICLO-17. Il controllo che guarda anche i propri file
+
+**Scenario:** un controllo di sicurezza (i workflow del progetto che partono sui rami `bottega/*`) gira a ogni giro
+sul ramo principale del progetto. Dopo l'installazione quel ramo contiene anche i workflow della bottega.
+**Domanda:** quali prove servono oltre ai casi pericolosi?
+**Opzioni:**
+- A) bastano i casi pericolosi e qualche caso sicuro inventato
+- B) anche una prova sui file che la bottega stessa installa, resi come li scrive l'installazione: non devono mai
+  essere un rischio
+**Scelta:** B
+**Perché:** un controllo prudente («nel dubbio è un rischio») che inciampa nei file della bottega ferma la bottega
+stessa, in silenzio, a ogni giro.
+**Esito:** con A il distributore installato (un'espressione `${{ … }}` su più righe) risultava un rischio e ogni giro
+sarebbe restato in attesa; l'ha trovato la terza rilettura. La prova B è rossa sul codice di prima (B6-R24).
+**Fonte:** dal vivo 2026-11-09
