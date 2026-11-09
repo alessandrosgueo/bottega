@@ -165,6 +165,12 @@ def comando_runner(
         print("errore: architettura sconosciuta, usa --arch", file=sys.stderr)
         return 2
 
+    # Su una macchina dove chi installa non ha `gh` collegato, le chiamate a GitHub passano dall'accesso del runner
+    # (fatto prima, INSTALLA §5), senza un secondo login.
+    gh: list[str] = ["gh"]
+    if getattr(args, "gh_del_runner", False):
+        gh = ["sudo", "-n", "-u", getattr(args, "runner", "bottega-runner"), "-H", "gh"]
+
     porte: dict[str, str] = {}
     for p in getattr(args, "porta", []) or []:
         if "=" not in p:
@@ -177,9 +183,9 @@ def comando_runner(
     if versione:
         tag = f"v{versione}" if not versione.startswith("v") else versione
         versione_pulita = tag.lstrip("v")
-        cmd_rel = ["gh", "api", f"repos/actions/runner/releases/tags/{tag}"]
+        cmd_rel = [*gh, "api", f"repos/actions/runner/releases/tags/{tag}"]
     else:
-        cmd_rel = ["gh", "api", "repos/actions/runner/releases/latest"]
+        cmd_rel = [*gh, "api", "repos/actions/runner/releases/latest"]
         versione_pulita = None
 
     cod_rel, out_rel = esegui_fn(cmd_rel, None)
@@ -229,7 +235,7 @@ def comando_runner(
     token = ""
     if not prova:
         cmd_tok = [
-            "gh",
+            *gh,
             "api",
             "-X",
             "POST",
@@ -746,6 +752,11 @@ def argomenti_installa(parser: argparse.ArgumentParser) -> None:
     p_runner.add_argument("--arch", default=None, metavar="A", help="architettura di macchina")
     p_runner.add_argument(
         "--porta", action="append", default=[], metavar="NOME=PERCORSO", help="porta dell'esecutore (ripetibile)"
+    )
+    p_runner.add_argument(
+        "--gh-del-runner",
+        action="store_true",
+        help="le chiamate a GitHub passano dall'accesso gh del runner (chi installa non ha gh su questa macchina)",
     )
     p_runner.add_argument(
         "--tetto", default=None, metavar="T", help="tetto di memoria del servizio del runner (per esempio 6G)"

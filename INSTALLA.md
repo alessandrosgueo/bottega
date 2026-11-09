@@ -68,6 +68,8 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
    nella configurazione.
    Su una macchina che fa anche altro, `--tetto 6G` (o quanto vuole l'utente) dà al servizio del runner un tetto di
    memoria senza swap: l'esecutore, le sue porte e le sue prove ci stanno dentro.
+   Se chi installa non ha `gh` collegato su questa macchina (un server), `--gh-del-runner` fa passare la richiesta
+   della release e del token di registrazione dall'accesso del runner del passo 2: niente secondo login.
 
 Un secondo progetto sulla stessa macchina vuole un suo utente dell'esecutore: `bottega installa macchina --esecutore
 bottega-esecutore-<repo>` (aggiunge l'utente e il suo file in `/etc/sudoers.d/`, il primo resta com'era) e lo stesso
