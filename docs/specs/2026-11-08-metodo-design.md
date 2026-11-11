@@ -1,7 +1,8 @@
 # La bottega: design del metodo
 
-Stato: design, da approvare. Scritto l'8 novembre 2026 da un brainstorming con l'utente che ha fondato il metodo,
-riletto da un costruttore (Gemini 4 Argon) e rifatto dopo le sue domande.
+Stato: approvato e costruito (tappe B0-B8, `docs/plans/2026-11-08-tappe.md`). Scritto l'8 novembre 2026 da un
+brainstorming con l'utente che ha fondato il metodo, riletto da un costruttore (Gemini 4 Argon) e rifatto dopo le sue
+domande.
 
 ## Perché
 
