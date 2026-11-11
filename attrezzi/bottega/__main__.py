@@ -14,7 +14,7 @@ from bottega.distributore import argomenti_distribuisci, comando_distribuisci
 from bottega.dividi import argomenti_dividi, comando_dividi
 from bottega.firma import ErroreFirma, argomenti_firma, comando_firma
 from bottega.forgia import ErroreForgia
-from bottega.giro import argomenti_giro, comando_giro
+from bottega.giro import argomenti_giro, comando_giro, comando_pulisci
 from bottega.installa import (
     argomenti_aggiorna,
     argomenti_ferma,
@@ -38,6 +38,7 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "conti": comando_conti,
     "configurazione": comando_configurazione,
     "giro": comando_giro,
+    "pulisci": comando_pulisci,
     "scegli": comando_scegli,
     "distribuisci": comando_distribuisci,
     "dividi": comando_dividi,

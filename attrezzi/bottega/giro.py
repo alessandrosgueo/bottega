@@ -338,6 +338,72 @@ def _uccidi_processi_esecutore(prefisso: Sequence[str]) -> None:
         pass
 
 
+# B7-3: il segno del giro in corso sta nella cartella temporanea del runner, una per job. Un giro più vecchio di
+# `ETA_GIRO_MORTO_S` è morto: il job dell'esecutore ha `timeout-minutes: 300` (`.github/workflows/esecutore.yml`).
+NOME_SEGNO_GIRO = "bottega-giro-in-corso"
+ETA_GIRO_MORTO_S = 6 * 3600
+_NOME_DA_GIRO = re.compile(r"\d+-[a-z0-9_]{8}")
+
+
+def _cartella_da_giro_nostra(cartella: Path, spazio: Path) -> bool:
+    """Una figlia diretta dello spazio col nome di `prepara_cartelle_del_giro`, cartella vera (non un link) e nostra."""
+    if cartella.parent != spazio or not _NOME_DA_GIRO.fullmatch(cartella.name):
+        return False
+    try:
+        st = cartella.lstat()
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+
+
+def pulisci_dopo_il_giro(prefisso: Sequence[str], spazio: Path, segno: Path | None, adesso_s: float) -> list[str]:
+    """B7-3: ferma i processi rimasti dell'esecutore e toglie le cartelle dei giri finiti male; ne dice i nomi.
+
+    Si toglie la cartella scritta nel segno del giro (un job annullato da GitHub: il passo `if: cancelled()` di
+    `esecutore.yml`) e ogni cartella da giro più vecchia di `ETA_GIRO_MORTO_S`. Lo spazio può servire più progetti:
+    una cartella giovane non segnata può essere il giro vivo di un altro runner, e resta. Senza prefisso il giro
+    girava come runner, nella cartella temporanea del job, che GitHub svuota: niente da fare.
+    """
+    if not prefisso:
+        return []
+    _uccidi_processi_esecutore(prefisso)
+    spazio = Path(os.path.abspath(spazio))
+    da_togliere: set[Path] = set()
+    if segno is not None:
+        try:
+            scritta = segno.read_text(encoding="utf-8").strip()
+        except OSError:
+            scritta = ""
+        if scritta:
+            cartella = Path(os.path.abspath(scritta))
+            if _cartella_da_giro_nostra(cartella, spazio):
+                da_togliere.add(cartella)
+    try:
+        voci = list(spazio.iterdir())
+    except OSError:
+        voci = []
+    for cartella in voci:
+        if not _cartella_da_giro_nostra(cartella, spazio):
+            continue
+        try:
+            if cartella.lstat().st_mtime < adesso_s - ETA_GIRO_MORTO_S:
+                da_togliere.add(cartella)
+        except OSError:
+            continue
+    tolte: list[str] = []
+    for cartella in sorted(da_togliere):
+        togli_come_esecutore(prefisso, cartella / "esecutore")
+        shutil.rmtree(cartella, ignore_errors=True)
+        if not os.path.lexists(cartella):
+            tolte.append(cartella.name)
+    if segno is not None:
+        try:
+            segno.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return tolte
+
+
 def _rilancia_distributore(forgia: Forgia) -> None:
     """Rilancia il distributore a fine giro; gli errori non bloccano il giro."""
     try:
@@ -657,6 +723,7 @@ def giro(
     prefisso: Sequence[str] = (),
     adesso: datetime,
     caso: random.Random,
+    segno: Path | None = None,
 ) -> EsitoGiro:
     """Esegue un giro dell'esecutore per il lavoro e la bottega indicati. Non solleva mai (RV5).
 
@@ -677,6 +744,7 @@ def giro(
             prefisso=prefisso,
             adesso=adesso,
             caso=caso,
+            segno=segno,
         )
     except Exception as exc:
         try:
@@ -699,6 +767,7 @@ def _giro(
     prefisso: Sequence[str] = (),
     adesso: datetime,
     caso: random.Random,
+    segno: Path | None = None,
 ) -> EsitoGiro:
     """Il corpo del giro; `giro` lo avvolge."""
     if bottega not in configurazione.botteghe:
@@ -803,7 +872,8 @@ def _giro(
     board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
 
     # M3: un processo dell'esecutore sopravvissuto a un consulto o a un giro di prima non deve vedere questo giro.
-    _uccidi_processi_esecutore(prefisso)
+    # B7-3: e le cartelle dei giri morti non restano nello spazio.
+    pulisci_dopo_il_giro(prefisso, spazio, None, time.time())
 
     env_rip = ambiente_ripulito()
 
@@ -812,6 +882,9 @@ def _giro(
         # Spazio del giro (B6-R22): la cartella del giro è del runner, l'esecutore lavora in `esecutore/`. Dentro il
         # try: un errore qui non lascia il lavoro «in corso».
         dir_giro, dir_esec = prepara_cartelle_del_giro(spazio, lavoro)
+        if segno is not None:
+            # B7-3: se GitHub annulla il job, il passo `if: cancelled()` sa quale cartella togliere.
+            segno.write_text(f"{os.path.abspath(dir_giro)}\n", encoding="utf-8")
         # RV2: Pulizia del clone del runner da giri precedenti e rebase-apply
         _esegui(["git", *OPZIONI_GIT_RUNNER, "am", "--abort"], cwd=str(clone_progetto), capture_output=True)
         rebase_apply = clone_progetto / ".git" / "rebase-apply"
@@ -1526,6 +1599,12 @@ def _giro(
 
         _uccidi_processi_esecutore(prefisso)
 
+        if segno is not None:
+            try:
+                segno.unlink(missing_ok=True)
+            except OSError:
+                pass
+
         # Pulizia completa dello spazio del giro. C6: un errore qui (un `rm` che supera il tetto) non deve sostituire
         # l'esito già scritto sulla board.
         try:
@@ -1534,6 +1613,31 @@ def _giro(
                 shutil.rmtree(dir_giro, ignore_errors=True)
         except Exception:
             pass
+
+
+def _spazio_del_giro() -> Path:
+    """Lo spazio dei giri: `BOTTEGA_SPAZIO` (dal `.env` del runner), altrimenti la cartella temporanea del job.
+
+    Mai dentro il clone del progetto: il giro fa `git clean -fdx` e lo cancellerebbe."""
+    spazio_env = os.environ.get("BOTTEGA_SPAZIO")
+    if spazio_env:
+        return Path(spazio_env)
+    return Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "bottega-spazio"
+
+
+def _segno_del_giro() -> Path | None:
+    """B7-3: il segno del giro in corso, nella cartella temporanea del job; senza `RUNNER_TEMP` nessun segno."""
+    temp = os.environ.get("RUNNER_TEMP")
+    return Path(temp) / NOME_SEGNO_GIRO if temp else None
+
+
+def comando_pulisci(args: argparse.Namespace) -> int:
+    """Dopo un giro annullato: ferma i processi dell'esecutore e toglie le cartelle dei giri finiti male."""
+    env_pref = os.environ.get("BOTTEGA_PREFISSO_ESECUTORE", "").strip()
+    prefisso = tuple(shlex.split(env_pref)) if env_pref else ()
+    for nome in pulisci_dopo_il_giro(prefisso, _spazio_del_giro(), _segno_del_giro(), time.time()):
+        print(f"tolta la cartella del giro {nome}")
+    return 0
 
 
 def argomenti_giro(parser: argparse.ArgumentParser) -> None:
@@ -1574,9 +1678,8 @@ def comando_giro(args: argparse.Namespace) -> int:
     env_pref = os.environ.get("BOTTEGA_PREFISSO_ESECUTORE", "").strip()
     prefisso = tuple(shlex.split(env_pref)) if env_pref else ()
 
-    spazio_env = os.environ.get("BOTTEGA_SPAZIO")
-    # Mai dentro il clone del progetto: il giro fa `git clean -fdx` e lo cancellerebbe.
-    spazio = Path(spazio_env) if spazio_env else Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "bottega-spazio"
+    spazio = _spazio_del_giro()
+    segno = _segno_del_giro()
 
     clone_progetto = Path.cwd()
 
@@ -1598,6 +1701,7 @@ def comando_giro(args: argparse.Namespace) -> int:
         prefisso=prefisso,
         adesso=adesso,
         caso=caso,
+        segno=segno,
     )
 
     print(f"Esito giro: {esito.esito} ({esito.motivo or 'completato'})")
