@@ -476,6 +476,7 @@ def _prepara_fascicolo(
     d_nota: dict[str, str],
     ramo_principale: str,
     comandanti: Sequence[str],
+    costituzione: str = "docs/costituzione.md",
 ) -> None:
     """Prepara tutti i documenti del fascicolo prima del lancio dell'esecutore."""
     prepara_cartella_del_fascicolo(fascicolo_dir)
@@ -502,7 +503,7 @@ def _prepara_fascicolo(
 
     # RV3: Costituzione letta con git show da origin/<principale>
     res_cost = _esegui(
-        ["git", *OPZIONI_GIT_RUNNER, "show", f"refs/remotes/origin/{ramo_principale}:docs/costituzione.md"],
+        ["git", *OPZIONI_GIT_RUNNER, "show", f"refs/remotes/origin/{ramo_principale}:{costituzione}"],
         cwd=str(clone_progetto),
         capture_output=True,
         text=True,
@@ -1026,6 +1027,7 @@ def _giro(
             d_nota=d_nota,
             ramo_principale=ramo_principale,
             comandanti=configurazione.progetto.comandanti,
+            costituzione=configurazione.progetto.costituzione,
         )
         chiudi_file_del_fascicolo(fascicolo_runner)
         _esegui(

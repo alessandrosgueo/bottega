@@ -35,6 +35,7 @@ from bottega.progetto import (
     crea_campi,
     ferma,
     file_dell_installazione,
+    flusso_chiusa_acceso,
     imposta_segreto,
     riparti,
 )
@@ -497,6 +498,20 @@ def comando_progetto(
     except Exception as e:
         print(f"errore nella creazione dei campi del Project: {e}", file=sys.stderr)
         return 1
+
+    stato_flusso = flusso_chiusa_acceso(esegui_gh, proprietario, args.project)
+    if stato_flusso is False:
+        print(
+            f"avviso: il flusso «Item closed» del Project {args.project} non è attivo: "
+            "accendilo nelle impostazioni del Project (Workflows, Status Done)",
+            file=sys.stderr,
+        )
+    elif stato_flusso is None:
+        print(
+            f"avviso: impossibile verificare il flusso «Item closed» del Project {args.project}: "
+            "controllare a mano",
+            file=sys.stderr,
+        )
 
     try:
         esegui_gh([
