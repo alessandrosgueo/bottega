@@ -12,6 +12,7 @@ notte = "01:30"                                 # facoltativo: l'ora del giro di
 manutenzione = ["03:00-04:30", "23:30-01:00"]   # facoltativo: finestre senza giri; possono passare la mezzanotte
 project = 1                                     # numero del Project GitHub; obbligatorio se un candidato ha runner
 liberi = ["<etichetta>"]                        # facoltativo: etichette dei compiti sciolti per la notte
+# costituzione = "docs/costituzione.md"         # facoltativo: dove sta la costituzione del progetto
 
 # Una bottega è un abbonamento con la sua quota. L'id (a-z, 0-9 e -) lo sceglie chi configura.
 [botteghe.principale]

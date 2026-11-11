@@ -22,12 +22,13 @@ FUNZIONI = ("decidere", "eseguire", "rivedere", "consigliare")
 QUOTE = ("scarsa", "normale", "abbondante")
 
 _CHIAVI_TOP = ("versione", "progetto", "botteghe", "candidati")
-_CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione", "project", "liberi")
+_CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione", "project", "liberi", "costituzione")
 _CHIAVI_BOTTEGA = ("quota", "porte")
 _CHIAVI_CANDIDATO = ("nome", "bottega", "porta", "modello", "funzioni", "runner")
 _ID = re.compile(r"[a-z0-9-]+")
 _ORA = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 _FINESTRA = re.compile(r"((?:[01][0-9]|2[0-3]):[0-5][0-9])-((?:[01][0-9]|2[0-3]):[0-5][0-9])")
+_PERCORSO_COSTITUZIONE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class Progetto:
     manutenzione: tuple[str, ...]
     project: int | None = None
     liberi: tuple[str, ...] = ()
+    costituzione: str = "docs/costituzione.md"
 
 
 @dataclass(frozen=True)
@@ -239,7 +241,8 @@ def _progetto(dati: dict, errori: list[str], ha_runner: bool = False) -> Progett
     manutenzione = _manutenzione(tabella, "progetto", errori)
     project = _project(tabella, "progetto", errori, obbligatorio=ha_runner)
     liberi = _liberi(tabella, "progetto", errori)
-    if fuso is None:
+    costituzione = _costituzione(tabella, "progetto", errori)
+    if fuso is None or costituzione is None:
         return None
     return Progetto(
         comandanti=comandanti,
@@ -249,6 +252,7 @@ def _progetto(dati: dict, errori: list[str], ha_runner: bool = False) -> Progett
         manutenzione=manutenzione,
         project=project,
         liberi=liberi,
+        costituzione=costituzione,
     )
 
 
@@ -396,6 +400,33 @@ def _liberi(tabella: dict, percorso: str, errori: list[str]) -> tuple[str, ...]:
             viste.add(chiave)
             valori.append(valore)
     return tuple(valori)
+
+
+def _costituzione(tabella: dict, percorso: str, errori: list[str]) -> str | None:
+    completa = _completa(percorso, "costituzione")
+    if "costituzione" not in tabella:
+        return "docs/costituzione.md"
+    valore = tabella["costituzione"]
+    if not isinstance(valore, str):
+        _errore(errori, completa, "tipo sbagliato: serve una stringa")
+        return None
+    if not valore:
+        _errore(errori, completa, "percorso vuoto")
+        return None
+    if len(valore) > 200:
+        _errore(errori, completa, f"percorso troppo lungo ({len(valore)} caratteri, massimo 200)")
+        return None
+    if valore.startswith(("/", "-")):
+        _errore(errori, completa, f"«{valore}» non può cominciare con «/» né con «-»")
+        return None
+    if not _PERCORSO_COSTITUZIONE.fullmatch(valore):
+        _errore(errori, completa, f"«{valore}» contiene caratteri non ammessi (solo [A-Za-z0-9._/-])")
+        return None
+    parti = valore.split("/")
+    if any(p in ("", ".", "..") for p in parti):
+        _errore(errori, completa, f"«{valore}» non è un percorso relativo valido")
+        return None
+    return valore
 
 
 def _scelta(

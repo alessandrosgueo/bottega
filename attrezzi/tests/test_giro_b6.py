@@ -917,7 +917,7 @@ def test_r22_fifo_al_posto_della_consegna(tmp_path: Path, monkeypatch: pytest.Mo
         return Lancio(esito="fatto", testo="fatto")
 
     # In 3ce72c8~1 senza _copia_dall_esecutore, git bundle verify resterebbe appeso a tempo pieno
-    monkeypatch.setattr(modulo_giro, "TEMPO_GIT", 0.4)
+    monkeypatch.setattr(modulo_giro, "TEMPO_GIT", 5.0)
 
     t0 = time.monotonic()
     esito = giro(
@@ -936,7 +936,8 @@ def test_r22_fifo_al_posto_della_consegna(tmp_path: Path, monkeypatch: pytest.Mo
     durata = time.monotonic() - t0
 
     assert esito.esito != "consegnato"
-    assert durata < 0.35, f"Il giro si è appeso per {durata}s"
+    # Un giro appeso aspetta il tetto di git (5 s), uno sano finisce prima anche con la macchina carica.
+    assert durata < 4.0, f"Il giro si è appeso per {durata}s"
     righe = [r.strip() for r in registro.read_text(encoding="utf-8").splitlines() if r.strip()]
     assert any("git bundle create" in r and "/esecutore/consegna.bundle" in r for r in righe)
 

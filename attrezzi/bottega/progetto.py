@@ -121,6 +121,107 @@ query($owner: String!, $number: Int!) {
 """
 
 
+_QUERY_WORKFLOWS_USER = """
+query($owner: String!, $number: Int!) {
+  user(login: $owner) {
+    projectV2(number: $number) {
+      workflows(first: 50) {
+        nodes {
+          name
+          enabled
+        }
+      }
+    }
+  }
+}
+"""
+
+_QUERY_WORKFLOWS_ORG = """
+query($owner: String!, $number: Int!) {
+  organization(login: $owner) {
+    projectV2(number: $number) {
+      workflows(first: 50) {
+        nodes {
+          name
+          enabled
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def flusso_chiusa_acceso(
+    esegui_gh: Callable[[list[str]], str],
+    proprietario: str,
+    numero: int,
+) -> bool | None:
+    """Verifica se il flusso «Item closed» del Project è abilitato.
+
+    Restituisce True se c'è un flusso di nome 'Item closed' con enabled vero,
+    False se manca o è spento, None se la lettura non riesce (eccezione di esegui_gh,
+    JSON non leggibile, Project non trovato).
+    """
+    proj = None
+    try:
+        cmd_user = [
+            "api",
+            "graphql",
+            "-f",
+            f"owner={proprietario}",
+            "-F",
+            f"number={numero}",
+            "-f",
+            f"query={_QUERY_WORKFLOWS_USER}",
+        ]
+        out_user = esegui_gh(cmd_user)
+        data = json.loads(out_user) if out_user else {}
+        if isinstance(data, dict) and data.get("data"):
+            user_val = data["data"].get("user")
+            if isinstance(user_val, dict):
+                proj = user_val.get("projectV2")
+    except Exception:  # noqa: BLE001
+        proj = None
+
+    if not proj:
+        try:
+            cmd_org = [
+                "api",
+                "graphql",
+                "-f",
+                f"owner={proprietario}",
+                "-F",
+                f"number={numero}",
+                "-f",
+                f"query={_QUERY_WORKFLOWS_ORG}",
+            ]
+            out_org = esegui_gh(cmd_org)
+            data_org = json.loads(out_org) if out_org else {}
+            if isinstance(data_org, dict) and data_org.get("data"):
+                org_val = data_org["data"].get("organization")
+                if isinstance(org_val, dict):
+                    proj = org_val.get("projectV2")
+        except Exception:  # noqa: BLE001
+            proj = None
+
+    if not proj or not isinstance(proj, dict):
+        return None
+
+    workflows_obj = proj.get("workflows")
+    if not isinstance(workflows_obj, dict):
+        return False
+    nodes = workflows_obj.get("nodes")
+    if not isinstance(nodes, list):
+        return False
+
+    for node in nodes:
+        if isinstance(node, dict) and node.get("name") == "Item closed":
+            return bool(node.get("enabled"))
+
+    return False
+
+
 def crea_campi(esegui_gh: Callable[[list[str]], str], proprietario: str, numero: int) -> list[str]:
     """Legge i campi del Project, crea i mancanti e restituisce i nomi di quelli creati."""
     cmd_user = [
@@ -286,7 +387,7 @@ def file_dell_installazione(
         risultati[percorso_agents] = modello_agents.read_text(encoding="utf-8")
 
     # 5. Costituzione (solo se non esiste già)
-    percorso_cost = "docs/costituzione.md"
+    percorso_cost = cfg.progetto.costituzione
     if percorso_cost not in file_esistenti:
         modello_cost = _CARTELLA_MODELLI / "costituzione.md"
         risultati[percorso_cost] = modello_cost.read_text(encoding="utf-8")
