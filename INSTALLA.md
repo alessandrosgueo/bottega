@@ -88,7 +88,8 @@ minuscoli, cifre, `-` e `_`: per un repo dal nome lungo scegli un suffisso breve
    (configurazione, `AGENTS.md` e `docs/costituzione.md` se mancano, i workflow della bottega fissati allo SHA del tag,
    `.github/bottega/firme-ammesse` se c'è) e mette il segreto `BOTTEGA_TOKEN` dall'accesso del runner. Lascia il clone
    sul ramo `bottega/installazione`. Senza esecutore fuori: `--solo-sessione` (solo la configurazione e le firme,
-   niente workflow, niente segreto, niente tag).
+   niente workflow, niente segreto, niente tag). Se chi installa non è sulla macchina del runner, `--senza-segreto` salta il
+   segreto e stampa il comando da lanciare lì (il token passa dall'accesso del runner a `gh secret set`, mai a video).
 3. L'utente rivede la PR; chi decide la unisce **in locale e firmata** (`git merge --no-ff -S`) e spinge.
 
 ## 7. Il primo giro

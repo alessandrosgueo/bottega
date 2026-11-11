@@ -504,6 +504,72 @@ def test_progetto_completo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
     assert "BOTTEGA_TOKEN" in pipe_chiamate[0][1]
 
 
+
+def test_progetto_senza_segreto(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Con --senza-segreto la PR si apre lo stesso, la pipe del segreto non parte e il comando da lanciare sulla
+    macchina del runner è stampato (senza alcun token)."""
+    origin, clone = _crea_repo_git(tmp_path)
+
+    # Aggiunge un file non tracciato che NON deve entrare nel commit
+    file_estraneo = clone / "non_preparato.txt"
+    file_estraneo.write_text("estraneo", encoding="utf-8")
+
+    cfg_file = clone / "bottega.toml"
+    cfg_file.write_text(_CONFIGURAZIONE_BASE, encoding="utf-8")
+
+    query_user_resp = json.dumps({
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PROJ_123",
+                    "fields": {"nodes": []},
+                }
+            }
+        }
+    })
+
+    pipe_chiamate: list[tuple[list[str], list[str]]] = []
+
+    def pipe_finta(cmd1: list[str], cmd2: list[str]) -> int:
+        pipe_chiamate.append((cmd1, cmd2))
+        return 0
+
+    def esecutore_completo(cmd: Sequence[str], env: Mapping[str, str] | None = None) -> tuple[int, str]:
+        cmd_l = list(cmd)
+        if cmd_l[0] == "git":
+            res = subprocess.run(cmd_l, capture_output=True, text=True, cwd=str(clone))
+            return res.returncode, res.stdout + res.stderr
+        if cmd_l[0] == "gh":
+            if "graphql" in cmd_l:
+                return 0, query_user_resp
+            if "repo" in cmd_l and "view" in cmd_l:
+                return 0, json.dumps({"defaultBranchRef": {"name": "main"}})
+            if "git/ref/tags" in " ".join(cmd_l) or "commits" in " ".join(cmd_l):
+                return 0, f"commit {'1' * 40}\n"
+            if "pr" in cmd_l and "create" in cmd_l:
+                return 0, "https://github.com/owner/repo/pull/101\n"
+        return 0, ""
+
+    p = _parser_installa()
+    args = p.parse_args([
+        "progetto",
+        "--repo", "owner/repo",
+        "--project", "1",
+        "--configurazione", str(cfg_file),
+        "--tag", "v1.0.0",
+        "--bottega", "owner/bottega",
+        "--senza-segreto",
+    ])
+    setattr(args, "cartella", clone)
+
+    codice = comando_progetto(args, esegui=esecutore_completo, esegui_pipe=pipe_finta)
+    assert codice == 0
+
+    assert pipe_chiamate == []
+    uscita = capsys.readouterr().out
+    assert "gh auth token | gh secret set BOTTEGA_TOKEN --repo owner/repo" in uscita
+    assert "sudo -u bottega-runner -H" in uscita
+
 def test_ferma_e_riparti(capsys: pytest.CaptureFixture[str]) -> None:
     """Verifica comandi bottega ferma e bottega riparti con output di una riga per workflow."""
     wf_attivi = json.dumps([
