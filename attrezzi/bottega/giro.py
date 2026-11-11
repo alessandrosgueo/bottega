@@ -614,6 +614,28 @@ def _verifica_e_consegna_bundle(
     return True, entries
 
 
+def _base_della_consegna_fatta(
+    d_nota: dict[str, str], compito: int, punta: str, clone_progetto: Path
+) -> str | None:
+    """B7-2: la base della consegna di questo compito, se la nota dice che la punta del ramo è proprio quella consegna.
+
+    La nota porta `consegnato=<compito>:<base>:<sha>` dalla consegna spinta. Vale solo per lo stesso compito, con lo sha
+    uguale alla punta di partenza del giro e la base sua antenata; in ogni altro caso `None`.
+    """
+    pezzi = d_nota.get("consegnato", "").split(":")
+    if len(pezzi) != 3 or pezzi[0] != str(compito) or pezzi[2] != punta:
+        return None
+    base = pezzi[1]
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base):
+        return None
+    res = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "merge-base", "--is-ancestor", base, punta],
+        cwd=str(clone_progetto),
+        capture_output=True,
+    )
+    return base if res.returncode == 0 else None
+
+
 def _esito_del_rifiuto(d_nota: dict[str, str]) -> str:
     """L'esito di una consegna rifiutata: `errore` (un tentativo) per i messaggi che chiudono un'issue sotto il terzo
     tentativo, altrimenti `bloccato`."""
@@ -1193,7 +1215,15 @@ def _giro(
             env=env_rip,
         ).stdout.strip()
 
-        if cur_head == base_commit:
+        # B7-2: il giro di prima ha consegnato questo compito ed è caduto dopo; il ramo è ancora la sua consegna. Il
+        # modello non ha niente da aggiungere: si riprende dall'oracolo, coi controlli sulla base di quella consegna.
+        base_consegna = base_commit
+        base_ripresa = (
+            _base_della_consegna_fatta(d_nota, compito.numero, base_commit, clone_progetto)
+            if cur_head == base_commit
+            else None
+        )
+        if cur_head == base_commit and base_ripresa is None:
             tentativi = int(d_nota.get("tentativi", 0)) + 1
             d_nota["tentativi"] = str(tentativi)
             d_nota["motivo"] = "nessun commit"
@@ -1207,48 +1237,86 @@ def _giro(
             _rilancia_distributore(forgia)
             return EsitoGiro(stato_dest, motivo="nessun commit")
 
-        # Genera bundle di consegna dall'esecutore (RV1)
-        bundle_esec = dir_esec / "consegna.bundle"
-        _esegui(
-            [*prefisso, "git", "bundle", "create", str(bundle_esec), nome_ramo],
-            cwd=str(lavoro_dir),
-            check=True,
-            capture_output=True,
-            env=env_rip,
-        )
-        bundle_file = dir_giro / "consegna.bundle"
-        _copia_dall_esecutore(bundle_esec, bundle_file)
-
-        # Controlli, verifica e applicazione eseguiti ESCLUSIVAMENTE dal runner col suo git
-        ok_consegna, entries_diff = _verifica_e_consegna_bundle(
-            clone_progetto=clone_progetto,
-            bundle_file=bundle_file,
-            base_commit=base_commit,
-            nome_ramo=nome_ramo,
-            forgia=forgia,
-            compito_numero=compito.numero,
-            d_nota=d_nota,
-            board=board,
-            lavoro=lavoro,
-        )
-        if not ok_consegna:
-            _rilancia_distributore(forgia)
-            return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
-
-        # RV4: Se il commit è vuoto (nessun file toccato nel diff)
-        if not entries_diff:
-            tentativi = int(d_nota.get("tentativi", 0)) + 1
-            d_nota["tentativi"] = str(tentativi)
-            d_nota["motivo"] = "commit vuoto"
-            stato_dest = "bloccato" if tentativi >= 3 else "pronto"
-            board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+        if base_ripresa is not None:
+            base_consegna = base_ripresa
+            _esegui(
+                ["git", *OPZIONI_GIT_RUNNER, "update-ref", "refs/bottega/consegna", base_commit],
+                cwd=str(clone_progetto),
+                check=True,
+                capture_output=True,
+            )
+            proc_ripresa = _esegui(
+                [
+                    "git", *OPZIONI_GIT_RUNNER, "diff", "--raw", "-z", "-M", "--no-ext-diff", base_consegna,
+                    "refs/bottega/consegna",
+                ],
+                cwd=str(clone_progetto),
+                check=True,
+                capture_output=True,
+            )
+            entries_diff = analizza_diff_raw(proc_ripresa.stdout)
             forgia.commenta(
                 compito.numero,
-                f"Rapporto dell'esecutore per il compito {compito.numero}:\n\n{recinta_testo_modello(lancio.testo)}",
+                f"Il compito era già consegnato sul ramo ({base_commit[:12]}): il giro riprende dall'oracolo.",
                 ruolo="esecutore",
             )
-            _rilancia_distributore(forgia)
-            return EsitoGiro(stato_dest, motivo="commit vuoto")
+        else:
+            # Genera bundle di consegna dall'esecutore (RV1)
+            bundle_esec = dir_esec / "consegna.bundle"
+            _esegui(
+                [*prefisso, "git", "bundle", "create", str(bundle_esec), nome_ramo],
+                cwd=str(lavoro_dir),
+                check=True,
+                capture_output=True,
+                env=env_rip,
+            )
+            bundle_file = dir_giro / "consegna.bundle"
+            _copia_dall_esecutore(bundle_esec, bundle_file)
+
+            # Controlli, verifica e applicazione eseguiti ESCLUSIVAMENTE dal runner col suo git
+            ok_consegna, entries_diff = _verifica_e_consegna_bundle(
+                clone_progetto=clone_progetto,
+                bundle_file=bundle_file,
+                base_commit=base_commit,
+                nome_ramo=nome_ramo,
+                forgia=forgia,
+                compito_numero=compito.numero,
+                d_nota=d_nota,
+                board=board,
+                lavoro=lavoro,
+            )
+            if not ok_consegna:
+                _rilancia_distributore(forgia)
+                return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
+
+            # RV4: Se il commit è vuoto (nessun file toccato nel diff)
+            if not entries_diff:
+                tentativi = int(d_nota.get("tentativi", 0)) + 1
+                d_nota["tentativi"] = str(tentativi)
+                d_nota["motivo"] = "commit vuoto"
+                stato_dest = "bloccato" if tentativi >= 3 else "pronto"
+                board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+                rapporto_vuoto = recinta_testo_modello(lancio.testo)
+                forgia.commenta(
+                    compito.numero,
+                    f"Rapporto dell'esecutore per il compito {compito.numero}:\n\n{rapporto_vuoto}",
+                    ruolo="esecutore",
+                )
+                _rilancia_distributore(forgia)
+                return EsitoGiro(stato_dest, motivo="commit vuoto")
+
+            # B7-2: la consegna è sul ramo remoto. La nota lo dice subito, prima dell'oracolo: se il giro cade dopo
+            # (anche senza passare dal gestore d'errore), il giro seguente riprende da qui invece di contare un
+            # tentativo.
+            sha_consegna = _esegui(
+                ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", "refs/bottega/consegna^{commit}"],
+                cwd=str(clone_progetto),
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            d_nota["consegnato"] = f"{compito.numero}:{base_commit}:{sha_consegna}"
+            board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
 
         # B3-R12: Oracolo su copia fresca
         dir_oracolo = dir_esec / "oracolo"
@@ -1325,7 +1393,7 @@ def _giro(
 
         # C5: diff della consegna, letto una volta (serve qui e alla rilettura del consigliere).
         diff_consegna = _esegui(
-            ["git", *OPZIONI_GIT_RUNNER, "diff", "--no-ext-diff", "--no-textconv", f"{base_commit}..refs/bottega/consegna"],
+            ["git", *OPZIONI_GIT_RUNNER, "diff", "--no-ext-diff", "--no-textconv", f"{base_consegna}..refs/bottega/consegna"],
             cwd=str(clone_progetto),
             capture_output=True,
             text=True,
@@ -1335,7 +1403,7 @@ def _giro(
         patch_storia = _esegui(
             [
                 "git", *OPZIONI_GIT_RUNNER, "log", "-p", "--no-ext-diff", "--no-textconv", "--format=",
-                f"{base_commit}..refs/bottega/consegna",
+                f"{base_consegna}..refs/bottega/consegna",
             ],
             cwd=str(clone_progetto),
             capture_output=True,
@@ -1348,7 +1416,7 @@ def _giro(
             proc_gl = _esegui(
                 [
                     "gitleaks", "git", "--no-banner", "--redact",
-                    f"--log-opts={base_commit}..refs/bottega/consegna", str(clone_progetto),
+                    f"--log-opts={base_consegna}..refs/bottega/consegna", str(clone_progetto),
                 ],
                 cwd=str(clone_progetto),
                 capture_output=True,
@@ -1410,6 +1478,7 @@ def _giro(
             d_nota.pop("tentativi", None)
             d_nota.pop("attese", None)
             d_nota.pop("quote", None)
+            d_nota.pop("consegnato", None)
             board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
 
         _rilancia_distributore(forgia)
