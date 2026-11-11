@@ -171,7 +171,7 @@ def test_b8_sentinella_rete_chiusa(tmp_path: Path) -> None:
         "    kill|pkill|killall)\n"
         "        exit 0\n"
         "        ;;\n"
-        "    python3)\n"
+        "    python3|/usr/bin/python3)\n"
         "        exit 3\n"
         "        ;;\n"
         "esac\n"
@@ -194,7 +194,7 @@ def test_b8_sentinella_sonda_storta(tmp_path: Path) -> None:
         "    kill|pkill|killall)\n"
         "        exit 0\n"
         "        ;;\n"
-        "    python3)\n"
+        "    python3|/usr/bin/python3)\n"
         "        exit 1\n"
         "        ;;\n"
         "esac\n"
@@ -210,7 +210,7 @@ def test_b8_sentinella_sonda_storta(tmp_path: Path) -> None:
         "    kill|pkill|killall)\n"
         "        exit 0\n"
         "        ;;\n"
-        "    python3)\n"
+        "    python3|/usr/bin/python3)\n"
         "        exit 0\n"
         "        ;;\n"
         "esac\n"
@@ -344,7 +344,7 @@ def test_b8_giro_va_con_la_rete_chiusa(
         f"        echo 54321\n"
         f"        exit 0\n"
         f"        ;;\n"
-        f"    python3)\n"
+        f"    python3|/usr/bin/python3)\n"
         f'        for a in "$@"; do\n'
         f'            if [ "$a" = "-c" ]; then\n'
         f"                exit 3\n"
@@ -585,3 +585,53 @@ def test_b8_sentinella_sonda_che_non_parte(tmp_path: Path) -> None:
     from bottega.giro import rete_dell_esecutore_chiusa
 
     assert rete_dell_esecutore_chiusa((str(tmp_path / "prefisso-che-non-c-e"),)) is False
+
+
+def test_b8_sonda_vera(tmp_path: Path) -> None:
+    """La sonda stessa: verso un ascoltatore che risponde esce 0, verso una porta chiusa (rifiuto) esce 3."""
+    import socket
+    import sys
+
+    from bottega.giro import _ESITO_RETE_CHIUSA, _SONDA_RETE
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ascolto:
+        ascolto.bind(("127.0.0.1", 0))
+        ascolto.listen(1)
+        porta = ascolto.getsockname()[1]
+        aperta = subprocess.run([sys.executable, "-I", "-c", _SONDA_RETE, str(porta)], timeout=30, check=False)
+    assert aperta.returncode == 0
+    chiusa = subprocess.run([sys.executable, "-I", "-c", _SONDA_RETE, str(porta)], timeout=30, check=False)
+    assert chiusa.returncode == _ESITO_RETE_CHIUSA
+
+
+def test_b8_sentinella_senza_python_di_sistema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Senza il Python di sistema la rete non si verifica: mai «chiusa» (un python3 dell'esecutore mentirebbe)."""
+    import bottega.giro as modulo_giro
+
+    finto = tmp_path / "prefisso.sh"
+    finto.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
+    finto.chmod(0o755)
+    monkeypatch.setattr(modulo_giro, "PYTHON_DELLA_SONDA", str(tmp_path / "python3-che-non-c-e"))
+    assert modulo_giro.rete_dell_esecutore_chiusa((str(finto),)) is False
+
+
+def test_b8_sonda_altro_errore_non_vale_chiusa() -> None:
+    """Un errore che non è tempo scaduto né rifiuto (rete irraggiungibile, in uno spazio di rete senza loopback acceso)
+    non vale «chiusa»."""
+    import shutil
+    import sys
+
+    from bottega.giro import _ESITO_RETE_CHIUSA, _SONDA_RETE
+
+    if shutil.which("unshare") is None:
+        pytest.skip("unshare non c'è")
+    prova = subprocess.run(["unshare", "-rn", "true"], capture_output=True, timeout=30, check=False)
+    if prova.returncode != 0:
+        pytest.skip("unshare -rn non permesso qui")
+    esito = subprocess.run(
+        ["unshare", "-rn", sys.executable, "-I", "-c", _SONDA_RETE, "12345"],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert esito.returncode not in (0, _ESITO_RETE_CHIUSA)

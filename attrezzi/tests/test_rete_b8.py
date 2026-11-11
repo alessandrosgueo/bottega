@@ -229,8 +229,8 @@ def test_b8_passi_rete_in_ordine() -> None:
     passi = passi_rete(u, ["192.0.2.53"])
 
     # B8-3: dopo i tre file della rete vengono i tre dell'IP pubblico; in fondo l'avvio dell'IP pubblico e il suo timer.
-    assert len(passi) == 11
-    passi = [*passi[:3], *passi[6:9]]
+    assert len(passi) == 12
+    passi = [*passi[:3], passi[6], passi[8], passi[9]]
 
     # 1. verifica presenza nft
     cmd0 = " ".join(passi[0].comando)

@@ -69,12 +69,19 @@ def _esegui(cmd: Sequence[str], **kw: Any) -> subprocess.CompletedProcess:
 # svuotato il ruleset, l'unità fermata): il giro si ferma. Le prove la spengono (conftest), mai il codice di serie.
 SENTINELLA_RETE: bool = True
 _ESITO_RETE_CHIUSA = 3
+# Il Python di sistema, con un percorso intero: il `secure_path` del sudoers finisce con la `~/.local/bin`
+# dell'esecutore, e un `python3` suo direbbe «chiusa» sempre. Senza quel file la rete non si verifica e il giro si ferma.
+PYTHON_DELLA_SONDA = "/usr/bin/python3"
+# Vale chiusa solo il tempo scaduto (il SYN-ACK del runner cade) o il rifiuto (il loopback senza conntrack); ogni altro
+# errore esce 4, una connessione riuscita esce 0.
 _SONDA_RETE = (
     "import socket, sys\n"
     "try:\n"
     "    socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=2).close()\n"
-    "except OSError:\n"
+    "except (TimeoutError, ConnectionRefusedError):\n"
     f"    sys.exit({_ESITO_RETE_CHIUSA})\n"
+    "except OSError:\n"
+    "    sys.exit(4)\n"
     "sys.exit(0)\n"
 )
 
@@ -87,13 +94,15 @@ def rete_dell_esecutore_chiusa(prefisso: Sequence[str]) -> bool:
     """
     if not prefisso:
         return True
+    if not os.path.isfile(PYTHON_DELLA_SONDA):
+        return False
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ascolto:
             ascolto.bind(("127.0.0.1", 0))
             ascolto.listen(1)
             porta = ascolto.getsockname()[1]
             esito = subprocess.run(
-                [*prefisso, "python3", "-I", "-c", _SONDA_RETE, str(porta)],
+                [*prefisso, PYTHON_DELLA_SONDA, "-I", "-c", _SONDA_RETE, str(porta)],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 timeout=30,
@@ -844,6 +853,29 @@ def _giro(
         risultati_storici = {}
         costi_relativi = None
 
+    # B8-3: con la rete dell'esecutore aperta il giro non parte, e niente dell'esecutore gira (nemmeno il controllo
+    # della porta qui sotto). Il lavoro si blocca (serve una mano sulla macchina) e il distributore non riparte da qui:
+    # un altro lavoro troverebbe la stessa rete. Un commento che non si scrive non cambia l'esito.
+    if SENTINELLA_RETE and prefisso and not rete_dell_esecutore_chiusa(prefisso):
+        msg = (
+            "Giro fermo: la rete dell'esecutore è aperta su questa macchina, o non si può verificare (la regola di "
+            "`bottega installa macchina` non è attiva). Nessun lavoro fatto: rilanciare `bottega installa macchina` "
+            "sulla macchina del runner, poi rimandare il lavoro."
+        )
+        try:
+            forgia.commenta(lavoro, msg, ruolo="esecutore")
+        except Exception as exc:  # noqa: BLE001
+            print(f"giro: commento della rete aperta non scritto: {exc}", file=sys.stderr)
+        # La nota di prima resta (una consegna segnata serve alla ripresa); cambia solo il motivo.
+        try:
+            lav_prima = board.lavoro(lavoro)
+            d_rete = nota(lav_prima.nota if lav_prima else "")
+        except Exception:  # noqa: BLE001
+            d_rete = {}
+        d_rete["motivo"] = "rete aperta"
+        board.stato(lavoro, "bloccato", nota=scrivi_nota(d_rete))
+        return EsitoGiro("bloccato", motivo="rete aperta")
+
     # RV9: Controllo all'apertura con prefisso
     controllo = porta_esecutore.controlla(prefisso=prefisso)
 
@@ -932,19 +964,6 @@ def _giro(
     # M3: un processo dell'esecutore sopravvissuto a un consulto o a un giro di prima non deve vedere questo giro.
     # B7-3: e le cartelle dei giri morti non restano nello spazio.
     pulisci_dopo_il_giro(prefisso, spazio, None, time.time())
-
-    # B8-3: con la rete dell'esecutore aperta il giro non parte. Il lavoro si blocca (serve una mano sulla macchina) e
-    # il distributore non riparte da qui: un altro lavoro troverebbe la stessa rete.
-    if SENTINELLA_RETE and prefisso and not rete_dell_esecutore_chiusa(prefisso):
-        msg = (
-            "Giro fermo: la rete dell'esecutore è aperta su questa macchina (la regola di `bottega installa "
-            "macchina` non è attiva). Nessun lavoro fatto: rilanciare `bottega installa macchina` sulla macchina del "
-            "runner, poi rimandare il lavoro."
-        )
-        forgia.commenta(compito.numero, msg, ruolo="esecutore")
-        d_nota["motivo"] = "rete aperta"
-        board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
-        return EsitoGiro("bloccato", motivo="rete aperta")
 
     env_rip = ambiente_ripulito()
 

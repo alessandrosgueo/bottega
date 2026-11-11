@@ -621,7 +621,9 @@ def testo_unita_rete(u: Utenti) -> str:
         "Type=oneshot\n"
         "RemainAfterExit=yes\n"
         f"ExecStart=/usr/sbin/nft -f {file_rete(u)}\n"
+        f"ExecStartPost=-{programma_ip_pubblico(u)} --salvato\n"
         f"ExecReload=/usr/sbin/nft -f {file_rete(u)}\n"
+        f"ExecReload=-{programma_ip_pubblico(u)} --salvato\n"
         f"ExecStop=/usr/sbin/nft delete table inet {tabella_rete(u)}\n"
         "\n"
         "[Install]\n"
@@ -636,7 +638,8 @@ def passi_rete(u: Utenti, dns: Sequence[str]) -> list[Passo]:
     """I passi della rete dell'esecutore: `nft`, il file della regola, le unità, il carico e l'accensione all'avvio.
 
     La regola si ricarica sempre (`nft -f` è atomico): un file cambiato vale subito, senza fermare l'unità. Ricaricata
-    la regola il set dell'IP pubblico è vuoto: lo riempie subito il programma dell'IP pubblico, poi il suo timer.
+    la regola il set dell'IP pubblico è vuoto: si rimette l'ultimo salvato, poi lo rilegge il programma dell'IP pubblico
+    e il suo timer.
     """
     unita = unita_rete(u)
     ip = unita_ip_pubblico(u)
@@ -652,15 +655,15 @@ def passi_rete(u: Utenti, dns: Sequence[str]) -> list[Passo]:
         passo_file(f"unità {ip}.service", testo_unita_ip_pubblico(u), f"/etc/systemd/system/{ip}.service", "0644"),
         passo_file(f"timer {ip}.timer", testo_timer_ip_pubblico(u), f"/etc/systemd/system/{ip}.timer", "0644"),
         Passo(descrizione="rete dell'esecutore caricata", comando=("sudo", "-n", "nft", "-f", file_rete(u))),
+        Passo(
+            descrizione="ultimo IP pubblico salvato rimesso",
+            comando=("sudo", "-n", programma_ip_pubblico(u), "--salvato"),
+        ),
         Passo(descrizione="configurazione di systemd ricaricata", comando=("sudo", "-n", "systemctl", "daemon-reload")),
         Passo(
             descrizione=f"unità {unita} accesa all'avvio",
             comando=("sudo", "-n", "systemctl", "enable", "--now", unita),
             controllo=("sh", "-c", f"systemctl is-enabled --quiet {unita} && systemctl is-active --quiet {unita}"),
-        ),
-        Passo(
-            descrizione="IP pubblico nella rete dell'esecutore",
-            comando=("sudo", "-n", "systemctl", "start", f"{ip}.service"),
         ),
         Passo(
             descrizione=f"timer {ip}.timer acceso",
@@ -670,6 +673,11 @@ def passi_rete(u: Utenti, dns: Sequence[str]) -> list[Passo]:
                 "-c",
                 f"systemctl is-enabled --quiet {ip}.timer && systemctl is-active --quiet {ip}.timer",
             ),
+        ),
+        # Dopo il timer: se la lettura fallisce, il timer e il Restart= del servizio riprovano.
+        Passo(
+            descrizione="IP pubblico nella rete dell'esecutore",
+            comando=("sudo", "-n", "systemctl", "start", f"{ip}.service"),
         ),
     ]
 
@@ -691,26 +699,54 @@ def unita_ip_pubblico(u: Utenti) -> str:
     return f"{u.esecutore}-ip-pubblico"
 
 
+def stato_ip_pubblico(u: Utenti) -> str:
+    """Il file (di root) con l'ultimo IP pubblico letto: si rimette dopo ogni ricarica della regola."""
+    return f"/var/lib/bottega-rete/{u.esecutore}-ip-pubblico"
+
+
 def testo_ip_pubblico(u: Utenti) -> str:
     """Il programma che mette l'IP pubblico della macchina nel set `pubblici4` della rete dell'esecutore.
 
     Un router che risponde sul suo IP pubblico anche dalla LAN (NAT loopback, gestione dal lato WAN, inoltri di porte)
-    riaprirebbe la casa all'esecutore. L'IP si legge da fuori; se nessuna fonte risponde con un IPv4 il set resta
-    com'era e il programma esce 1. Il cambio del set è una transazione sola.
+    riaprirebbe la casa all'esecutore. L'IP si legge da fuori, solo in HTTPS; vale solo una risposta fatta di sole
+    cifre e punti, in forma di IPv4 (niente righe in più: il testo finisce in `nft -f`, che gira come root). Letto,
+    si mette nel set in una transazione sola e si salva. Con `--salvato` rimette solo l'IP salvato (dopo una ricarica
+    della regola, quando la rete può non esserci). Se nessuna fonte risponde rimette l'ultimo salvato ed esce 1.
     """
     t = tabella_rete(u)
     fonti = " ".join(FONTI_IP_PUBBLICO)
+    stato = stato_ip_pubblico(u)
     return (
         "#!/bin/sh\n"
         f"# L'IP pubblico nella rete dell'esecutore {u.esecutore}, scritto da `bottega installa macchina`.\n"
         "set -u\n"
+        f"STATO={stato}\n"
+        "valido() {\n"
+        "\tcase \"$1\" in ''|*[!0-9.]*) return 1 ;; esac\n"
+        "\tprintf '%s\\n' \"$1\" | grep -Eqx '([0-9]{1,3}[.]){3}[0-9]{1,3}'\n"
+        "}\n"
+        "metti() {\n"
+        f"\tprintf 'flush set inet {t} pubblici4\\nadd element inet {t} pubblici4 {{ %s }}\\n' \"$1\" "
+        "| /usr/sbin/nft -f -\n"
+        "}\n"
+        "salvato() {\n"
+        '\t[ -f "$STATO" ] || return 0\n'
+        '\tip=$(cat "$STATO")\n'
+        '\tvalido "$ip" && metti "$ip"\n'
+        "}\n"
+        'if [ "${1:-}" = "--salvato" ]; then\n'
+        "\tsalvato\n"
+        "\texit $?\n"
+        "fi\n"
         f"for fonte in {fonti}; do\n"
-        '\tip=$(curl -fsS -m 10 "$fonte" 2>/dev/null) || continue\n'
-        "\tprintf '%s\\n' \"$ip\" | grep -Eqx '([0-9]{1,3}[.]){3}[0-9]{1,3}' || continue\n"
-        f"\tprintf 'flush set inet {t} pubblici4\\nadd element inet {t} pubblici4 {{ %s }}\\n' \"$ip\" "
-        "| /usr/sbin/nft -f - && exit 0\n"
+        '\tip=$(/usr/bin/curl -fsS --proto =https -m 10 "$fonte" 2>/dev/null) || continue\n'
+        '\tvalido "$ip" || continue\n'
+        '\tmetti "$ip" || exit 1\n'
+        "\tmkdir -p -m 0700 \"${STATO%/*}\" && printf '%s\\n' \"$ip\" > \"$STATO\"\n"
+        "\texit 0\n"
         "done\n"
-        "echo \"IP pubblico non letto: la rete dell'esecutore resta com'era\" >&2\n"
+        "echo \"IP pubblico non letto: resta l'ultimo salvato\" >&2\n"
+        "salvato\n"
         "exit 1\n"
     )
 
@@ -730,6 +766,8 @@ def testo_unita_ip_pubblico(u: Utenti) -> str:
         "[Service]\n"
         "Type=oneshot\n"
         f"ExecStart={programma_ip_pubblico(u)}\n"
+        "Restart=on-failure\n"
+        "RestartSec=30s\n"
     )
 
 
