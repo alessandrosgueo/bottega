@@ -3587,3 +3587,377 @@ def test_c6_pulizia_che_cade_non_cambia_l_esito(tmp_path: Path, monkeypatch: pyt
     assert esito.esito == "consegnato"
     lav = board.lavoro(1)
     assert lav is not None and lav.stato == "consegnato"
+
+
+# B7-2: ripresa di un compito già consegnato
+
+
+def _primo_giro_consegna_caduta(tmp_path: Path):
+    from bottega.brief import ramo
+    from bottega.forgia import ErroreForgia
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    base = subprocess.run(
+        ["git", "rev-parse", "main"],
+        cwd=str(origin),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    iss = Issue(numero=1, titolo="Compito B7", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito B7", stato="pronto")])
+
+    def committa(cartella, prompt, **kwargs):
+        p = Path(cartella) / "modifica.txt"
+        p.write_text("modifica fatta\n", encoding="utf-8")
+        subprocess.run(["git", "add", "modifica.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: modifica"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto con successo")
+
+    def variabile_rotta(nome: str) -> str | None:
+        raise ErroreForgia('gh ha fallito (1): unknown command "get" for "gh variable"')
+
+    forgia.variabile = variabile_rotta
+    porta = PortaFinta(callback=committa)
+    spazio = tmp_path / "spazio"
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    caso = random.Random(42)
+
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso,
+        caso=caso,
+    )
+    nome_ramo = ramo(1, "Compito B7")
+    return esito, origin, clone, cfg, forgia, board, base, nome_ramo, spazio, adesso, caso
+
+
+def test_b7_consegna_segnata_nella_nota(tmp_path: Path):
+    esito, origin, _clone, _cfg, forgia, board, base, nome_ramo, _spazio, _adesso, _caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito.esito == "errore"
+    res = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/heads/{nome_ramo}"],
+        cwd=str(origin),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0
+    sha = res.stdout.strip()
+    assert sha != base
+    assert forgia.pr_del_ramo(nome_ramo) is not None
+    lav = board.lavoro(1)
+    assert lav is not None
+    d_n = nota(lav.nota)
+    assert d_n.get("consegnato") == f"1:{base}:{sha}"
+
+
+def test_b7_ripresa_dopo_la_caduta(tmp_path: Path):
+    from bottega.giro import giro
+
+    esito1, _origin, clone, cfg, forgia, board, _base, nome_ramo, spazio, adesso, caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito1.esito == "errore"
+
+    del forgia.variabile
+
+    def non_committa(cartella, prompt, **kwargs):
+        return Lancio(esito="fatto", testo="secondo giro senza modifiche")
+
+    porta2 = PortaFinta(callback=non_committa)
+    esito2 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta2},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso + timedelta(minutes=5),
+        caso=caso,
+    )
+
+    assert esito2.esito == "consegnato"
+    assert len(forgia._pr) == 1
+    commenti_oracolo = [c for c in forgia._commenti.get(1, []) if "Esito dell'oracolo: VERDE" in c.corpo]
+    assert len(commenti_oracolo) == 2
+    pr_num = forgia.pr_del_ramo(nome_ramo)
+    assert pr_num is not None
+    commenti_pr = forgia._commenti.get(pr_num, [])
+    assert any("secondo giro senza modifiche" in c.corpo for c in commenti_pr)
+    lav = board.lavoro(1)
+    assert lav is not None and lav.stato == "consegnato"
+    d_n = nota(lav.nota)
+    assert d_n.get("tentativi") == "1"
+
+
+def test_b7_ripresa_solo_se_la_punta_coincide(tmp_path: Path):
+    from bottega.giro import giro
+
+    esito1, origin, clone, cfg, forgia, board, _base, nome_ramo, spazio, adesso, caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito1.esito == "errore"
+    del forgia.variabile
+
+    clone_esterno = tmp_path / "clone_esterno"
+    subprocess.run(["git", "clone", str(origin), str(clone_esterno), "-b", nome_ramo], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Tester Esterno"], cwd=str(clone_esterno), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "esterno@example.com"], cwd=str(clone_esterno), check=True, capture_output=True
+    )
+    (clone_esterno / "altro.txt").write_text("commit a mano\n", encoding="utf-8")
+    subprocess.run(["git", "add", "altro.txt"], cwd=str(clone_esterno), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "commit esterno"], cwd=str(clone_esterno), check=True, capture_output=True)
+    subprocess.run(["git", "push", "origin", nome_ramo], cwd=str(clone_esterno), check=True, capture_output=True)
+
+    def non_committa(cartella, prompt, **kwargs):
+        return Lancio(esito="fatto", testo="nessun commit")
+
+    porta2 = PortaFinta(callback=non_committa)
+    esito2 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta2},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso + timedelta(minutes=5),
+        caso=caso,
+    )
+
+    assert esito2.esito == "pronto"
+    assert esito2.motivo == "nessun commit"
+    lav = board.lavoro(1)
+    assert lav is not None and lav.stato == "pronto"
+    d_n = nota(lav.nota)
+    assert d_n.get("tentativi") == "2"
+    assert d_n.get("motivo") == "nessun commit"
+
+
+def test_b7_ripresa_solo_per_lo_stesso_compito(tmp_path: Path):
+    from bottega.giro import giro
+    from bottega.segni import scrivi_nota
+
+    esito1, origin, clone, cfg, forgia, board, base, nome_ramo, spazio, adesso, caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito1.esito == "errore"
+    del forgia.variabile
+
+    sha = subprocess.run(
+        ["git", "rev-parse", f"refs/heads/{nome_ramo}"],
+        cwd=str(origin),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    lav = board.lavoro(1)
+    assert lav is not None
+    d_n = nota(lav.nota)
+    d_n["consegnato"] = f"99:{base}:{sha}"
+    board.stato(1, lav.stato, nota=scrivi_nota(d_n))
+
+    def non_committa(cartella, prompt, **kwargs):
+        return Lancio(esito="fatto", testo="nessun commit")
+
+    porta2 = PortaFinta(callback=non_committa)
+    esito2 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta2},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso + timedelta(minutes=5),
+        caso=caso,
+    )
+
+    assert esito2.esito == "pronto"
+    assert esito2.motivo == "nessun commit"
+    lav2 = board.lavoro(1)
+    assert lav2 is not None and lav2.stato == "pronto"
+    d_n2 = nota(lav2.nota)
+    assert d_n2.get("tentativi") == "2"
+    assert d_n2.get("motivo") == "nessun commit"
+
+
+def test_b7_consegna_scritta_prima_dell_oracolo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from bottega.brief import ramo
+    from bottega.giro import giro
+
+    origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _crea_configurazione()
+    base = subprocess.run(
+        ["git", "rev-parse", "main"],
+        cwd=str(origin),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    iss = Issue(numero=1, titolo="Compito B7", corpo="Brief\n\n## Fatto quando\n```bash\ntrue\n```\n")
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito B7", stato="pronto")])
+
+    def committa(cartella, prompt, **kwargs):
+        p = Path(cartella) / "modifica.txt"
+        p.write_text("modifica fatta\n", encoding="utf-8")
+        subprocess.run(["git", "add", "modifica.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: modifica"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto con successo")
+
+    porta = PortaFinta(callback=committa)
+
+    def oracolo_interrotto(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("bottega.giro.esegui_oracolo", oracolo_interrotto)
+
+    with pytest.raises(KeyboardInterrupt):
+        giro(
+            lavoro=1,
+            bottega="principale",
+            configurazione=cfg,
+            forgia=forgia,
+            board=board,
+            porte={"finta": porta},
+            clone_progetto=clone,
+            spazio=tmp_path / "spazio",
+            prefisso=(),
+            adesso=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+            caso=random.Random(42),
+        )
+
+    nome_ramo = ramo(1, "Compito B7")
+    sha = subprocess.run(
+        ["git", "rev-parse", f"refs/heads/{nome_ramo}"],
+        cwd=str(origin),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    lav = board.lavoro(1)
+    assert lav is not None
+    d_n = nota(lav.nota)
+    assert d_n.get("consegnato") == f"1:{base}:{sha}"
+
+
+
+def _secondo_giro(clone: Path, cfg, forgia, board, spazio: Path, adesso, caso, callback):
+    from bottega.giro import giro
+
+    return giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": PortaFinta(callback=callback)},
+        clone_progetto=clone,
+        spazio=spazio,
+        prefisso=(),
+        adesso=adesso + timedelta(minutes=5),
+        caso=caso,
+    )
+
+
+def _non_committa(cartella, prompt, **kwargs):
+    return Lancio(esito="fatto", testo="nessun commit")
+
+
+def test_b7_ripresa_rifiuta_la_base_uguale_alla_punta(tmp_path: Path):
+    """Una base falsa uguale alla punta lascerebbe i controlli senza niente da guardare: niente ripresa."""
+    from bottega.segni import scrivi_nota
+
+    esito1, origin, clone, cfg, forgia, board, _base, nome_ramo, spazio, adesso, caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito1.esito == "errore"
+    del forgia.variabile
+    sha = subprocess.run(
+        ["git", "rev-parse", f"refs/heads/{nome_ramo}"], cwd=str(origin), check=True, capture_output=True, text=True
+    ).stdout.strip()
+    lav = board.lavoro(1)
+    assert lav is not None
+    d_n = nota(lav.nota)
+    d_n["consegnato"] = f"1:{sha}:{sha}"
+    board.stato(1, lav.stato, nota=scrivi_nota(d_n))
+
+    esito2 = _secondo_giro(clone, cfg, forgia, board, spazio, adesso, caso, _non_committa)
+    assert esito2.esito == "pronto"
+    assert esito2.motivo == "nessun commit"
+
+
+def test_b7_catena_di_consegne_tiene_la_prima_base(tmp_path: Path):
+    """Due consegne dello stesso compito cadute di fila: la nota tiene la base della prima, così la ripresa controlla
+    anche i commit della prima consegna."""
+    esito1, origin, clone, cfg, forgia, board, base, nome_ramo, spazio, adesso, caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito1.esito == "errore"
+
+    def committa_ancora(cartella, prompt, **kwargs):
+        (Path(cartella) / "seconda.txt").write_text("seconda modifica\n", encoding="utf-8")
+        subprocess.run(["git", "add", "seconda.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "seconda"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="seconda consegna")
+
+    esito2 = _secondo_giro(clone, cfg, forgia, board, spazio, adesso, caso, committa_ancora)
+    assert esito2.esito == "errore"
+    sha2 = subprocess.run(
+        ["git", "rev-parse", f"refs/heads/{nome_ramo}"], cwd=str(origin), check=True, capture_output=True, text=True
+    ).stdout.strip()
+    lav = board.lavoro(1)
+    assert lav is not None
+    assert nota(lav.nota).get("consegnato") == f"1:{base}:{sha2}"
+
+
+def test_b7_ripresa_solo_col_ramo_remoto(tmp_path: Path):
+    """Ramo cancellato dopo un'unione veloce: la punta di main è la vecchia consegna, ma il ramo non c'è più."""
+    esito1, origin, _clone, cfg, forgia, board, _base, nome_ramo, spazio, adesso, caso = (
+        _primo_giro_consegna_caduta(tmp_path)
+    )
+    assert esito1.esito == "errore"
+    del forgia.variabile
+    sha = subprocess.run(
+        ["git", "rev-parse", f"refs/heads/{nome_ramo}"], cwd=str(origin), check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "update-ref", "refs/heads/main", sha], cwd=str(origin), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "update-ref", "-d", f"refs/heads/{nome_ramo}"], cwd=str(origin), check=True, capture_output=True
+    )
+
+    # Un clone fresco, come quello del job: niente riferimenti rimasti del ramo cancellato.
+    clone_nuovo = tmp_path / "progetto-nuovo"
+    subprocess.run(["git", "clone", str(origin), str(clone_nuovo)], check=True, capture_output=True)
+
+    esito2 = _secondo_giro(clone_nuovo, cfg, forgia, board, spazio, adesso, caso, _non_committa)
+    assert esito2.esito == "pronto"
+    assert esito2.motivo == "nessun commit"
