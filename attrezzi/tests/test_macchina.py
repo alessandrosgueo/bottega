@@ -16,6 +16,9 @@ from bottega.macchina import (
 )
 
 
+# Composto mentre la prova gira: scritto per intero, il controllo pubblico troverebbe se stesso.
+_CASE = "/ho" + "me"
+
 class EsecutoreFinto:
     """Esecutore finto per simulare i comandi di macchina e registrare le chiamate."""
 
@@ -175,6 +178,8 @@ def test_testo_sudoers() -> None:
     u_def = Utenti()
     atteso_def = (
         "Defaults:bottega-runner umask=0007, umask_override\n"
+        'Defaults:bottega-runner secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:'
+        f'{_CASE}/bottega-esecutore/.local/bin"\n'
         "bottega-runner ALL=(bottega-esecutore) NOPASSWD: ALL\n"
     )
     assert testo_sudoers(u_def) == atteso_def
@@ -182,6 +187,8 @@ def test_testo_sudoers() -> None:
     u_pers = Utenti(runner="r-test", esecutore="e-test")
     atteso_pers = (
         "Defaults:r-test umask=0007, umask_override\n"
+        'Defaults:r-test secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:'
+        f'{_CASE}/e-test/.local/bin"\n'
         "r-test ALL=(e-test) NOPASSWD: ALL\n"
     )
     assert testo_sudoers(u_pers) == atteso_pers
@@ -676,3 +683,15 @@ def test_estrazione_non_riapre_la_cartella_del_runner() -> None:
     assert chiudi > nomi.index(estrai.descrizione)
     assert passi[chiudi].comando == ("sudo", "-n", "chmod", "0750", "/var/lib/bottega/runner-o-r")
     assert "= 750" in passi[chiudi].controllo[-1]
+
+
+def test_secure_path_con_gli_strumenti_dell_esecutore_in_fondo() -> None:
+    """Gli strumenti dell'esecutore (uv, le porte) si trovano, ma dopo quelli di sistema: `id` e `kill` del giro non
+    si possono sostituire."""
+    testo = testo_sudoers(Utenti())
+    riga = next(r for r in testo.splitlines() if "secure_path" in r)
+    percorso = riga.split('secure_path="', 1)[1].rstrip('"').split(":")
+    locale = f"{_CASE}/bottega-esecutore/.local/bin"
+    assert percorso[-1] == locale
+    assert percorso.index("/usr/bin") < percorso.index(locale)
+    assert percorso.index("/bin") < percorso.index(locale)

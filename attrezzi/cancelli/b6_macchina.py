@@ -63,6 +63,18 @@ def main() -> int:
     codice, _ = sh("sudo -u nobody sh -c 'ls /var/lib/bottega/spazio'")
     esiti.append(("un estraneo NON legge lo spazio", codice != 0))
 
+    # Gli strumenti dell'esecutore in ~/.local/bin si trovano, ma `id` resta quello di sistema.
+    casa_e = sh_uscita("getent passwd bottega-esecutore | cut -d: -f6")
+    sh(f"install -d -o bottega-esecutore -g bottega-esecutore {casa_e}/.local/bin")
+    for nome, testo in (("strumento-bottega", "echo trovato"), ("id", "echo 0")):
+        Path(casa_e, ".local/bin", nome).write_text(f"#!/bin/sh\n{testo}\n", encoding="utf-8")
+        Path(casa_e, ".local/bin", nome).chmod(0o755)
+        shutil.chown(Path(casa_e, ".local/bin", nome), "bottega-esecutore", "bottega-esecutore")
+    _, uscita = sh("sudo -u bottega-runner sudo -n -H -u bottega-esecutore -- strumento-bottega")
+    esiti.append((f"l'esecutore trova i suoi strumenti ({uscita})", uscita == "trovato"))
+    _, uscita = sh("sudo -u bottega-runner sudo -n -H -u bottega-esecutore -- id -un")
+    esiti.append((f"ma `id` è quello di sistema ({uscita})", uscita == "bottega-esecutore"))
+
     # G1: ogni utente ha il suo gruppo principale, `bottega` solo in più.
     _, uscita = sh("id -gn bottega-runner; id -gn bottega-esecutore; id -Gn bottega-esecutore")
     righe = uscita.splitlines()
