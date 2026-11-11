@@ -520,6 +520,10 @@ def test_g7_root_non_esegue_file_del_runner() -> None:
             assert "svc.sh start" not in cmd_str
             assert f"{cartella}/svc.sh" not in cmd_str
             assert f"cd {cartella}" not in cmd_str
+            if cmd[2] == "chmod":
+                # La sola eccezione: richiudere la cartella del runner (il padre è di root, non la può sostituire).
+                assert cmd == ("sudo", "-n", "chmod", "0750", cartella), f"chmod root non consentito: {cmd}"
+                continue
             assert cmd[1] == "-n" and cmd[2] in ("install", "sh", "systemctl"), f"Comando root non consentito: {cmd}"
 
 
@@ -659,3 +663,16 @@ def test_tetto_storto_rifiutato(tetto: str) -> None:
     """Il tetto entra in un'unità di root: solo un numero e un'unità di misura, mai altro testo."""
     with pytest.raises(ValueError):
         passi_runner(Utenti(), "o/r", "2.320.0", "x64", "a" * 64, "e", "n", {}, tetto=tetto)
+
+
+def test_estrazione_non_riapre_la_cartella_del_runner() -> None:
+    """Dal vivo (2026-11-09): l'archivio del runner ha la voce `./` a 0755 e tar la applicava alla cartella del runner,
+    che l'esecutore poteva così attraversare. tar non tocca le cartelle che ci sono già, e un passo la richiude."""
+    passi = passi_runner(Utenti(), "o/r", "2.320.0", "x64", "a" * 64, "e", "n", {})
+    estrai = next(p for p in passi if p.descrizione.startswith("estrai runner"))
+    assert "--no-overwrite-dir" in estrai.comando
+    nomi = [p.descrizione for p in passi]
+    chiudi = next(i for i, n in enumerate(nomi) if n.startswith("cartella runner chiusa"))
+    assert chiudi > nomi.index(estrai.descrizione)
+    assert passi[chiudi].comando == ("sudo", "-n", "chmod", "0750", "/var/lib/bottega/runner-o-r")
+    assert "= 750" in passi[chiudi].controllo[-1]
