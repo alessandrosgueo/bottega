@@ -1752,4 +1752,49 @@ def test_c3_l_esecutore_toglie_il_consulto(tmp_path: Path, monkeypatch: pytest.M
     assert any("rm -rf --" in r and "output_esecutore" in r for r in righe_log)
 
 
+# B7 (J4): un lavoro con l'etichetta che il distributore salta lo dice, con il motivo.
 
+
+def _distribuisci_uno(forgia: ForgiaFinta) -> tuple[list[str], BoardFinta]:
+    cfg = _configurazione_base()
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso))
+    board = BoardFinta([Lavoro(numero=1, titolo="Compito", stato="pronto", etichette=["bottega: fuori"])])
+    righe = distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=adesso,
+        caso=random.Random(42),
+        notte=False,
+    )
+    return righe, board
+
+
+def test_b7_senza_fatto_quando_lo_dice() -> None:
+    righe, board = _distribuisci_uno(ForgiaFinta([Issue(numero=1, titolo="Compito", corpo="Brief senza prova")]))
+    assert "lavoro 1: senza «Fatto quando», salto" in righe
+    assert not any(r[0] == "prendi" for r in board.registro)
+
+
+def test_b7_autore_estraneo_lo_dice() -> None:
+    forgia = ForgiaFinta(
+        [Issue(numero=1, titolo="Compito", corpo="## Fatto quando\n```\ntrue\n```", autore="estraneo")]
+    )
+    righe, board = _distribuisci_uno(forgia)
+    assert "lavoro 1: l'autore non è fra i comandanti, salto" in righe
+    assert not any(r[0] == "prendi" for r in board.registro)
+
+
+def test_b7_forgia_che_cade_lo_dice() -> None:
+    from bottega.forgia import ErroreForgia
+
+    class ForgiaCheCade(ForgiaFinta):
+        def sotto_issue(self, n: int) -> list[Issue]:
+            raise ErroreForgia("gh ha fallito (1): Unknown JSON field")
+
+    righe, board = _distribuisci_uno(
+        ForgiaCheCade([Issue(numero=1, titolo="Compito", corpo="## Fatto quando\n```\ntrue\n```")])
+    )
+    assert "lavoro 1: la forgia non risponde (gh ha fallito (1): Unknown JSON field), salto" in righe
+    assert not any(r[0] == "prendi" for r in board.registro)
