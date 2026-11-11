@@ -22,7 +22,9 @@ from bottega.macchina import (
     Utenti,
     esecutore_vero,
     esegui_passi,
+    nameserver_da_resolv,
     passi_macchina,
+    passi_rete,
     passi_runner,
     sha_della_release,
     systemd_attivo,
@@ -121,8 +123,13 @@ def _architettura_di_serie() -> str | None:
 def comando_macchina(
     args: argparse.Namespace,
     esegui: Esecutore | None = None,
+    resolv: str | None = None,
 ) -> int:
-    """Prepara la macchina host per la bottega (utenti, gruppo, spazio, sudoers)."""
+    """Prepara la macchina host per la bottega (utenti, gruppo, spazio, sudoers, rete dell'esecutore).
+
+    `resolv` è il testo di `/etc/resolv.conf` (letto dal disco se `None`): i suoi server DNS sono i soli indirizzi
+    privati che la rete dell'esecutore lascia raggiungere, e solo sulla porta 53.
+    """
     esegui_fn = esegui or esecutore_vero
     if not systemd_attivo(esegui_fn):
         print(
@@ -140,7 +147,12 @@ def comando_macchina(
     except ValueError as e:
         print(f"errore: {e}", file=sys.stderr)
         return 2
-    passi = passi_macchina(u)
+    if resolv is None:
+        try:
+            resolv = Path("/etc/resolv.conf").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            resolv = ""
+    passi = [*passi_macchina(u), *passi_rete(u, nameserver_da_resolv(resolv))]
     prova = getattr(args, "prova", False)
 
     try:

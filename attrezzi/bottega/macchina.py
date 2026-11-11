@@ -4,11 +4,13 @@ Gestisce la preparazione della macchina Linux/WSL per la bottega: creazione di u
 sudoers ristretti, spazio di lavoro comune e installazione del runner self-hosted di GitHub Actions.
 """
 
+import ipaddress
 import os
 import posixpath
 import re
 import shlex
 import subprocess
+import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -468,3 +470,177 @@ def systemd_attivo(esegui: Esecutore) -> bool:
     """Verifica se systemd è attivo tramite systemctl is-system-running (running o degraded)."""
     _, uscita = esegui(["systemctl", "is-system-running"], None)
     return uscita.strip() in ("running", "degraded")
+
+
+# --- La rete dell'esecutore (B8-2, Debt della LAN del collaudo) ---
+
+# Gli indirizzi IPv4 che l'esecutore non raggiunge fuori dalla macchina: reti private (RFC 1918), del gestore e delle
+# VPN a maglia (RFC 6598), di questa rete (0/8), di loopback, locali di collegamento, riservate, di prova e multicast.
+# Scritte in esadecimale come in `pubblico.py`, così il controllo pubblico non le trova come dati.
+_CHIUSE4 = tuple(
+    str(ipaddress.ip_network((indirizzo, bit)))
+    for indirizzo, bit in (
+        (0x00000000, 8),
+        (0x0A000000, 8),
+        (0x64400000, 10),
+        (0x7F000000, 8),
+        (0xA9FE0000, 16),
+        (0xAC100000, 12),
+        (0xC0000000, 24),
+        (0xC0A80000, 16),
+        (0xC6120000, 15),
+        (0xE0000000, 4),
+        (0xF0000000, 4),
+    )
+)
+
+
+def nameserver_da_resolv(testo: str) -> tuple[str, ...]:
+    """I server DNS di un `/etc/resolv.conf`: solo indirizzi IP letterali senza zona, nell'ordine, senza doppioni.
+
+    Senza nessuna riga `nameserver` buona resta `127.0.0.1`, il server che usa la libreria C in quel caso.
+    """
+    visti: list[str] = []
+    for riga in testo.splitlines():
+        pezzi = riga.split()
+        if len(pezzi) < 2 or pezzi[0] != "nameserver" or "%" in pezzi[1]:
+            continue
+        try:
+            indirizzo = str(ipaddress.ip_address(pezzi[1]))
+        except ValueError:
+            continue
+        if indirizzo not in visti:
+            visti.append(indirizzo)
+    return tuple(visti) or ("127.0.0.1",)
+
+
+def tabella_rete(u: Utenti) -> str:
+    """Il nome della tabella nftables della rete dell'esecutore."""
+    return "rete_" + re.sub(r"[^a-z0-9_]", "_", u.esecutore)
+
+
+def segno_rete(u: Utenti) -> int:
+    """Il bit del `ct mark` che segna le connessioni locali aperte dall'esecutore: uno degli 8 bit alti, dal nome.
+
+    Le VPN a maglia usano di solito i bit `0x00ff0000`. Due esecutori sulla stessa macchina (sconsigliato, B6-R12) hanno di regola bit
+    diversi; con lo stesso bit cadono le connessioni locali fra processi dello stesso esecutore, mai il contrario.
+    """
+    return 1 << (24 + zlib.crc32(u.esecutore.encode("utf-8")) % 8)
+
+
+def testo_rete_esecutore(u: Utenti, dns: Sequence[str]) -> str:
+    """Il file nftables della rete dell'esecutore: internet sì, la rete di casa e i servizi della macchina no.
+
+    - Verso i server DNS di `/etc/resolv.conf`, porta 53 TCP e UDP: sì.
+    - Verso la macchina stessa (l'interfaccia `lo`, che porta anche gli indirizzi di LAN, Docker e VPN della macchina):
+      solo TCP, e la connessione si apre solo se risponde un processo dell'esecutore. Il SYN-ACK di un servizio di un
+      altro utente (un broker, un pannello, un tunnel) cade: le prove dell'esecutore aprono i loro server locali, i
+      servizi della macchina restano chiusi. Gli altri protocolli verso `lo` sono rifiutati.
+    - Verso gli indirizzi di `_CHIUSE4` fuori dalla macchina e verso ogni IPv6 fuori dalla macchina: rifiutato.
+    - Il resto (internet in IPv4): sì.
+
+    Le prime due righe rendono la ricarica atomica: `nft -f` toglie e rimette la tabella in una transazione sola.
+    """
+    righe_dns: list[str] = []
+    for voce in dns:
+        indirizzo = ipaddress.ip_address(voce)  # ValueError per tutto ciò che non è un indirizzo letterale
+        if "%" in voce or str(indirizzo) != voce:
+            raise ValueError(f"server DNS non valido: {voce!r}")
+        famiglia = "ip" if indirizzo.version == 4 else "ip6"
+        righe_dns.append(f"\t\t{famiglia} daddr {voce} meta l4proto {{ tcp, udp }} th dport 53 accept\n")
+    t = tabella_rete(u)
+    segno = hex(segno_rete(u))
+    chi = u.esecutore
+    return (
+        f"# La rete dell'esecutore {chi}, scritta da `bottega installa macchina`: non cambiarla a mano.\n"
+        f"table inet {t}\n"
+        f"delete table inet {t}\n"
+        f"table inet {t} {{\n"
+        "\tset chiuse4 {\n"
+        "\t\ttype ipv4_addr\n"
+        "\t\tflags interval\n"
+        f"\t\telements = {{ {', '.join(_CHIUSE4)} }}\n"
+        "\t}\n"
+        "\n"
+        "\tchain uscita {\n"
+        "\t\ttype filter hook output priority filter - 10; policy accept;\n"
+        f'\t\tmeta skuid "{chi}" jump esecutore\n'
+        f'\t\toifname "lo" ct direction reply ct mark & {segno} == {segno} jump risposta\n'
+        "\t}\n"
+        "\n"
+        "\tchain esecutore {\n"
+        f"{''.join(righe_dns)}"
+        f'\t\toifname "lo" meta l4proto tcp ct mark set ct mark | {segno} accept\n'
+        '\t\toifname "lo" reject\n'
+        "\t\tip daddr @chiuse4 reject\n"
+        "\t\tmeta nfproto ipv6 reject\n"
+        "\t}\n"
+        "\n"
+        "\tchain risposta {\n"
+        f'\t\tmeta skuid "{chi}" accept\n'
+        "\t\ttcp flags & (syn | ack) == syn | ack drop\n"
+        "\t}\n"
+        "}\n"
+    )
+
+
+testo_rete_esecutore.__test__ = False  # type: ignore[attr-defined]
+
+
+def file_rete(u: Utenti) -> str:
+    """Il file nftables della rete dell'esecutore."""
+    return f"/etc/nftables.d/{u.esecutore}.nft"
+
+
+def unita_rete(u: Utenti) -> str:
+    """L'unità systemd che carica la rete dell'esecutore all'avvio."""
+    return f"{u.esecutore}-rete.service"
+
+
+def testo_unita_rete(u: Utenti) -> str:
+    """L'unità della rete dell'esecutore: si carica prima della rete, come `nftables.service`, quindi prima dei runner."""
+    return (
+        "[Unit]\n"
+        f"Description=Bottega: la rete dell'esecutore {u.esecutore}\n"
+        "Wants=network-pre.target\n"
+        "Before=network-pre.target shutdown.target\n"
+        "Conflicts=shutdown.target\n"
+        "DefaultDependencies=no\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        f"ExecStart=/usr/sbin/nft -f {file_rete(u)}\n"
+        f"ExecReload=/usr/sbin/nft -f {file_rete(u)}\n"
+        f"ExecStop=/usr/sbin/nft delete table inet {tabella_rete(u)}\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=sysinit.target\n"
+    )
+
+
+testo_unita_rete.__test__ = False  # type: ignore[attr-defined]
+
+
+def passi_rete(u: Utenti, dns: Sequence[str]) -> list[Passo]:
+    """I passi della rete dell'esecutore: `nft`, il file della regola, l'unità, il carico e l'accensione all'avvio.
+
+    La regola si ricarica sempre (`nft -f` è atomico): un file cambiato vale subito, senza fermare l'unità.
+    """
+    unita = unita_rete(u)
+    return [
+        Passo(
+            descrizione="nft presente",
+            comando=("sh", "-c", "echo 'manca nft: installa il pacchetto nftables' >&2; exit 1"),
+            controllo=("sudo", "-n", "sh", "-c", "command -v nft >/dev/null"),
+        ),
+        passo_file(f"rete dell'esecutore in {file_rete(u)}", testo_rete_esecutore(u, dns), file_rete(u), "0644"),
+        passo_file(f"unità {unita}", testo_unita_rete(u), f"/etc/systemd/system/{unita}", "0644"),
+        Passo(descrizione="rete dell'esecutore caricata", comando=("sudo", "-n", "nft", "-f", file_rete(u))),
+        Passo(descrizione="configurazione di systemd ricaricata", comando=("sudo", "-n", "systemctl", "daemon-reload")),
+        Passo(
+            descrizione=f"unità {unita} accesa all'avvio",
+            comando=("sudo", "-n", "systemctl", "enable", "--now", unita),
+            controllo=("sh", "-c", f"systemctl is-enabled --quiet {unita} && systemctl is-active --quiet {unita}"),
+        ),
+    ]
