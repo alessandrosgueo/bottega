@@ -78,20 +78,20 @@ def test_dati_liberi_mai_su_riga_di_comando() -> None:
 
 def test_issue_e_sotto_issue() -> None:
     def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
-        if "subIssues" in argomenti:
-            return json.dumps({
-                "subIssues": [
-                    {"number": 11, "title": "Compito 1", "state": "OPEN"},
-                    {"number": 12, "title": "Compito 2", "state": "CLOSED"},
-                ]
-            })
+        if argomenti[0] == "api":
+            return json.dumps([
+                {"number": 11, "title": "Compito 1", "body": "Corpo 11", "state": "open", "labels": [],
+                 "user": {"login": "proprietario"}},
+                {"number": 12, "title": "Compito 2", "body": "Corpo 12", "state": "closed", "labels": [],
+                 "user": {"login": "proprietario"}},
+            ])
         n = int(argomenti[2])
         return json.dumps({
             "number": n,
-            "title": "Tappa" if n == 10 else f"Compito {n - 10}",
-            "body": "Brief della tappa" if n == 10 else f"Corpo {n}",
-            "state": "OPEN" if n != 12 else "CLOSED",
-            "labels": [{"name": "bottega: fuori"}, {"name": "tappa"}] if n == 10 else [],
+            "title": "Tappa",
+            "body": "Brief della tappa",
+            "state": "OPEN",
+            "labels": [{"name": "bottega: fuori"}, {"name": "tappa"}],
         })
 
     forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
@@ -108,8 +108,6 @@ def test_issue_e_sotto_issue() -> None:
     assert sotto[0].titolo == "Compito 1"
     assert sotto[0].corpo == "Corpo 11"
     assert sotto[0].aperta is True
-    assert sotto[1].numero == 12
-    assert sotto[1].corpo == "Corpo 12"
     assert sotto[1].aperta is False
 
 
@@ -316,38 +314,42 @@ def test_forgia_finta_in_memoria() -> None:
 # Prove per RV12: fedeltà a gh 2.100.0 e requisiti della revisione
 
 
-def test_rv12_sotto_issue_legge_corpo_con_issue() -> None:
+def test_b7_sotto_issue_dall_api_rest() -> None:
+    """B7 (J4): le sotto-issue vengono dall'API REST, che va con ogni `gh`. `gh issue view --json subIssues` non c'è
+    nella 2.46 di Ubuntu, e nelle versioni nuove risponde un oggetto `{"nodes": [...]}` senza corpo."""
     chiamate: list[list[str]] = []
 
     def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
         chiamate.append(argomenti)
-        if "subIssues" in argomenti:
-            # gh vero risponde a --json subIssues SENZA body
-            return json.dumps({
-                "subIssues": [
-                    {"number": 21, "title": "Primo compito", "state": "OPEN"},
-                    {"number": 22, "title": "Secondo compito", "state": "CLOSED"},
-                ]
-            })
-        if "view" in argomenti:
-            n = int(argomenti[2])
-            return json.dumps({
-                "number": n,
-                "title": f"Compito {n}",
-                "body": f"Fatto quando del compito {n}",
-                "state": "OPEN" if n == 21 else "CLOSED",
-                "labels": [],
-            })
-        return "{}"
+        if argomenti == ["api", "repos/proprietario/repo/issues/20/sub_issues?per_page=100"]:
+            return json.dumps([
+                {"number": 21, "title": "Primo compito", "body": "Fatto quando del compito 21", "state": "open",
+                 "labels": [{"name": "bottega: fuori"}], "user": {"login": "chi-decide"}},
+                {"number": 22, "title": "Secondo compito", "body": None, "state": "closed", "labels": [],
+                 "user": {"login": "chi-decide"}},
+            ])
+        raise ErroreForgia(f"chiamata inattesa: {argomenti}")
 
     forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
     sotto = forgia.sotto_issue(20)
 
-    assert len(sotto) == 2
-    assert sotto[0].numero == 21
+    assert [s.numero for s in sotto] == [21, 22]
     assert sotto[0].corpo == "Fatto quando del compito 21"
-    assert sotto[1].numero == 22
-    assert sotto[1].corpo == "Fatto quando del compito 22"
+    assert sotto[0].aperta is True
+    assert sotto[0].etichette == ["bottega: fuori"]
+    assert sotto[0].autore == "chi-decide"
+    assert sotto[1].corpo == ""
+    assert sotto[1].aperta is False
+    assert not any("subIssues" in a for a in chiamate)
+
+
+def test_b7_sotto_issue_risposta_storta() -> None:
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        return json.dumps({"nodes": [{"number": 21}], "totalCount": 1})
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    with pytest.raises(ErroreForgia):
+        forgia.sotto_issue(20)
 
 
 def test_rv12_pr_del_ramo_solo_aperte() -> None:

@@ -129,14 +129,28 @@ class ForgiaGh:
         )
 
     def sotto_issue(self, n: int) -> list[Issue]:
-        out = self._esegui([
-            "issue", "view", str(n),
-            "--repo", self.repo,
-            "--json", "subIssues",
-        ])
-        d = json.loads(out)
-        sotto = d.get("subIssues", [])
-        return [self.issue(s["number"]) for s in sotto if "number" in s]
+        # B7 (J4): l'API REST va con ogni `gh`. `gh issue view --json subIssues` non c'è nella 2.46 di Ubuntu, e nelle
+        # versioni nuove risponde un oggetto `{"nodes": [...]}` senza corpo: le sotto-issue andavano perse.
+        out = self._esegui(["api", f"repos/{self.repo}/issues/{n}/sub_issues?per_page=100"])
+        voci = json.loads(out)
+        if not isinstance(voci, list):
+            raise ErroreForgia(f"sotto-issue di #{n}: risposta inattesa")
+        risultato: list[Issue] = []
+        for v in voci:
+            if not isinstance(v, dict) or not isinstance(v.get("number"), int):
+                continue
+            utente = v.get("user")
+            risultato.append(
+                Issue(
+                    numero=v["number"],
+                    titolo=v.get("title") or "",
+                    corpo=v.get("body") or "",
+                    stato=str(v.get("state") or "open").upper(),
+                    etichette=[et["name"] for et in v.get("labels") or [] if isinstance(et, dict) and "name" in et],
+                    autore=utente.get("login", "") if isinstance(utente, dict) else "",
+                )
+            )
+        return risultato
 
     def commenti(self, n: int) -> list[Commento]:
         out = self._esegui([
