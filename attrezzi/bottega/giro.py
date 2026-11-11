@@ -1599,12 +1599,6 @@ def _giro(
 
         _uccidi_processi_esecutore(prefisso)
 
-        if segno is not None:
-            try:
-                segno.unlink(missing_ok=True)
-            except OSError:
-                pass
-
         # Pulizia completa dello spazio del giro. C6: un errore qui (un `rm` che supera il tetto) non deve sostituire
         # l'esito già scritto sulla board.
         try:
@@ -1613,6 +1607,13 @@ def _giro(
                 shutil.rmtree(dir_giro, ignore_errors=True)
         except Exception:
             pass
+
+        # B7-3: il segno si toglie dopo la cartella: un annullamento a metà della pulizia la lascia ancora segnata.
+        if segno is not None:
+            try:
+                segno.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _spazio_del_giro() -> Path:

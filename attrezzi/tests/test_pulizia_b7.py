@@ -502,7 +502,12 @@ def test_b7_3_workflow_pulisce_se_annullato() -> None:
         "Manca il passo con if: ${{ cancelled() }} in esecutore.yml"
     )
 
-    assert re.search(r"if:\s*\${{\s*cancelled\(\)\s*}}", passo_annullato) is not None
+    assert (
+        re.search(
+            r"if:\s*\${{\s*cancelled\(\)\s*\|\|\s*failure\(\)\s*}}", passo_annullato
+        )
+        is not None
+    )
     assert "working-directory: progetto" in passo_annullato
     assert riga_export_giro in passo_annullato
     assert "python3 -P -m bottega pulisci" in passo_annullato
@@ -546,3 +551,39 @@ def test_b7_3_comando_pulisci(tmp_path: Path) -> None:
     assert "321-abcdefgh" in risultato.stdout
     assert not cartella_giro.exists()
     assert not segno.exists()
+
+
+def test_b7_3_cartelle_di_un_altro_uid_restano(tmp_path: Path, monkeypatch) -> None:
+    """Una cartella da giro vecchia ma non nostra (un altro utente runner) resta."""
+    import bottega.giro as modulo_giro
+    from bottega.giro import ETA_GIRO_MORTO_S, pulisci_dopo_il_giro
+
+    prefisso, _ = _crea_prefisso_finto(tmp_path)
+    spazio = tmp_path / "spazio"
+    vecchia = spazio / "5-abcdefgh"
+    vecchia.mkdir(parents=True)
+    adesso_s = time.time()
+    os.utime(vecchia, (adesso_s - ETA_GIRO_MORTO_S - 60,) * 2)
+    uid_vero = os.getuid()
+    monkeypatch.setattr(modulo_giro.os, "getuid", lambda: uid_vero + 1)
+
+    assert pulisci_dopo_il_giro(prefisso, spazio, None, adesso_s) == []
+    assert vecchia.is_dir()
+
+
+def test_b7_3_il_segno_non_vale_per_uno_spazio_fratello(tmp_path: Path) -> None:
+    """Una cartella da giro in uno spazio vicino (`spazio2/`) o annidata in un giro non è dello spazio."""
+    from bottega.giro import pulisci_dopo_il_giro
+
+    prefisso, _ = _crea_prefisso_finto(tmp_path)
+    spazio = tmp_path / "spazio"
+    spazio.mkdir()
+    fratello = tmp_path / "spazio2" / "6-abcdefgh"
+    fratello.mkdir(parents=True)
+    annidata = spazio / "7-abcdefgh" / "esecutore" / "8-abcdefgh"
+    annidata.mkdir(parents=True)
+    segno = tmp_path / "segno"
+    for bersaglio in (fratello, annidata):
+        segno.write_text(f"{bersaglio}\n", encoding="utf-8")
+        assert pulisci_dopo_il_giro(prefisso, spazio, segno, time.time()) == []
+        assert bersaglio.is_dir()

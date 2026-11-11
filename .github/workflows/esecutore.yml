@@ -77,8 +77,9 @@ jobs:
           python3 -P -m bottega giro --lavoro "$LAVORO" --bottega "$BOTTEGA"
 
       - name: Pulisce dopo un giro annullato
-        # B7-3: un job annullato da GitHub lascia vivo il modello dell'esecutore e la cartella del giro nello spazio.
-        if: ${{ cancelled() }}
+        # B7-3: un job annullato da GitHub lascia vivo il modello dell'esecutore e la cartella del giro nello spazio;
+        # anche un giro morto senza annullamento (memoria finita) salta il suo `finally`.
+        if: ${{ cancelled() || failure() }}
         working-directory: progetto
         env:
           PYTHONPATH: ${{ github.workspace }}/bottega/attrezzi
