@@ -1306,3 +1306,139 @@ def test_runner_gh_del_runner(capsys: pytest.CaptureFixture[str]) -> None:
     assert all(token_segreto not in c for c in comandi)
     catturato = capsys.readouterr()
     assert token_segreto not in catturato.out + catturato.err
+
+
+def test_progetto_crea_l_etichetta_fuori(tmp_path: Path) -> None:
+    """Dopo i campi del Project e prima del ramo, comando_progetto crea l'etichetta 'bottega: fuori' con --force."""
+    cartella = tmp_path / "progetto"
+    cartella.mkdir()
+    cfg_file = cartella / "bottega.toml"
+    cfg_file.write_text(_CONFIGURAZIONE_BASE, encoding="utf-8")
+
+    query_user_resp = json.dumps({
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PROJ_123",
+                    "fields": {"nodes": []},
+                }
+            }
+        }
+    })
+    esecutore = EsecutoreRegistratore({
+        "gh api graphql": (0, query_user_resp),
+        "gh pr create": (0, "https://github.com/owner/repo/pull/101\n"),
+    })
+    p = _parser_installa()
+    args = p.parse_args([
+        "progetto",
+        "--repo", "owner/repo",
+        "--project", "1",
+        "--configurazione", str(cfg_file),
+        "--tag", "v1.0.0",
+        "--bottega", "owner/bottega",
+        "--senza-segreto",
+    ])
+    args.cartella = cartella
+
+    codice = comando_progetto(args, esegui=esecutore)
+    assert codice == 0
+
+    cmd_atteso = (
+        "gh",
+        "label",
+        "create",
+        "bottega: fuori",
+        "--repo",
+        "owner/repo",
+        "--color",
+        "5319E7",
+        "--description",
+        "Lavoro per l'esecutore fuori della bottega",
+        "--force",
+    )
+    chiamate_cmd = [cmd for cmd, _ in esecutore.chiamate]
+    assert cmd_atteso in chiamate_cmd
+
+
+def test_progetto_in_prova_non_crea_l_etichetta(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Con --prova l'etichetta non viene creata e viene stampata la riga 'etichetta: bottega: fuori'."""
+    cartella = tmp_path / "progetto"
+    cartella.mkdir()
+    cfg_file = cartella / "bottega.toml"
+    cfg_file.write_text(_CONFIGURAZIONE_BASE, encoding="utf-8")
+
+    query_user_resp = json.dumps({
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PROJ_123",
+                    "fields": {"nodes": []},
+                }
+            }
+        }
+    })
+    esecutore = EsecutoreRegistratore({
+        "gh api graphql": (0, query_user_resp),
+    })
+    p = _parser_installa()
+    args = p.parse_args([
+        "progetto",
+        "--repo", "owner/repo",
+        "--project", "1",
+        "--configurazione", str(cfg_file),
+        "--tag", "v1.0.0",
+        "--bottega", "owner/bottega",
+        "--prova",
+    ])
+    args.cartella = cartella
+
+    codice = comando_progetto(args, esegui=esecutore)
+    assert codice == 0
+
+    chiamate_cmd = [cmd for cmd, _ in esecutore.chiamate]
+    assert not any(len(cmd) >= 3 and cmd[:3] == ("gh", "label", "create") for cmd in chiamate_cmd)
+
+    catturato = capsys.readouterr()
+    assert "etichetta: bottega: fuori\n" in catturato.out
+
+
+def test_progetto_etichetta_che_fallisce(tmp_path: Path) -> None:
+    """Se la creazione dell'etichetta fallisce, comando_progetto esce 1 e non crea alcun ramo."""
+    cartella = tmp_path / "progetto"
+    cartella.mkdir()
+    cfg_file = cartella / "bottega.toml"
+    cfg_file.write_text(_CONFIGURAZIONE_BASE, encoding="utf-8")
+
+    query_user_resp = json.dumps({
+        "data": {
+            "user": {
+                "projectV2": {
+                    "id": "PROJ_123",
+                    "fields": {"nodes": []},
+                }
+            }
+        }
+    })
+    esecutore = EsecutoreRegistratore({
+        "gh api graphql": (0, query_user_resp),
+        "gh label create": (1, "errore finto gh label create"),
+    })
+    p = _parser_installa()
+    args = p.parse_args([
+        "progetto",
+        "--repo", "owner/repo",
+        "--project", "1",
+        "--configurazione", str(cfg_file),
+        "--tag", "v1.0.0",
+        "--bottega", "owner/bottega",
+        "--senza-segreto",
+    ])
+    args.cartella = cartella
+
+    codice = comando_progetto(args, esegui=esecutore)
+    assert codice == 1
+
+    chiamate_cmd = [cmd for cmd, _ in esecutore.chiamate]
+    assert not any("switch" in cmd for cmd in chiamate_cmd)
+

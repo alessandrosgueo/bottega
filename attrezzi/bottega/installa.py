@@ -486,6 +486,7 @@ def comando_progetto(
             print(f"includerei: {percorso_firme}")
         for c in mancanti:
             print(f"creerei campo: {c}")
+        print("etichetta: bottega: fuori")
         return 0
 
     # 7. Creazione campi mancanti
@@ -495,6 +496,23 @@ def comando_progetto(
             print(f"creato campo: {c}")
     except Exception as e:
         print(f"errore nella creazione dei campi del Project: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        esegui_gh([
+            "label",
+            "create",
+            "bottega: fuori",
+            "--repo",
+            args.repo,
+            "--color",
+            "5319E7",
+            "--description",
+            "Lavoro per l'esecutore fuori della bottega",
+            "--force",
+        ])
+    except Exception as e:
+        print(f"errore nella creazione dell'etichetta: {e}", file=sys.stderr)
         return 1
 
     # 8. Scrittura dei file
