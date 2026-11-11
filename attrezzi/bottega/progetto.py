@@ -255,10 +255,18 @@ def file_dell_installazione(
     modello_esec = _CARTELLA_MODELLI / "workflows" / "bottega-esecutore.yml"
     testo_esec = modello_esec.read_text(encoding="utf-8")
 
-    botteghe_ids = list(cfg.botteghe.keys()) if cfg.botteghe else []
+    if cfg.botteghe:
+        botteghe_ids = [
+            b_id
+            for b_id in cfg.botteghe
+            if any(cand.bottega == b_id and cand.runner for cand in cfg.candidati.values())
+        ]
+    else:
+        botteghe_ids = []
+
     if "id" in mappa_valori and mappa_valori["id"] not in botteghe_ids:
         botteghe_ids.append(mappa_valori["id"])
-    if not botteghe_ids:
+    if not cfg.botteghe and not botteghe_ids:
         botteghe_ids = ["principale"]
 
     for b_id in botteghe_ids:

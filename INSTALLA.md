@@ -70,6 +70,8 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
    memoria senza swap: l'esecutore, le sue porte e le sue prove ci stanno dentro.
    Se chi installa non ha `gh` collegato su questa macchina (un server), `--gh-del-runner` fa passare la richiesta
    della release e del token di registrazione dall'accesso del runner del passo 2: niente secondo login.
+   L'adattatore della board del progetto gira come runner, col PATH di sistema (il `.path` del runner): gli strumenti
+   che usa (per esempio `uv`) vanno in `/usr/local/bin`, non nella casa di un utente.
 
 Un secondo progetto sulla stessa macchina vuole un suo utente dell'esecutore: `bottega installa macchina --esecutore
 bottega-esecutore-<repo>` (aggiunge l'utente e il suo file in `/etc/sudoers.d/`, il primo resta com'era) e lo stesso
@@ -84,9 +86,10 @@ minuscoli, cifre, `-` e `_`: per un repo dal nome lungo scegli un suffisso breve
    --tag <tag della bottega> --prova`, mostra all'utente i file e i campi, poi senza `--prova`. Il tag è quello della
    bottega a cui fissare i workflow (l'ultimo rilascio del repo `bottega`); il repo della bottega lo prende
    dall'`origin` del clone, oppure `--bottega <owner>/bottega`. Il comando controlla di nuovo la CI del progetto (anche
-   sul ramo principale), crea i campi del Project che mancano, apre una PR in bozza sul ramo `bottega/installazione`
-   (configurazione, `AGENTS.md` e `docs/costituzione.md` se mancano, i workflow della bottega fissati allo SHA del tag,
-   `.github/bottega/firme-ammesse` se c'è) e mette il segreto `BOTTEGA_TOKEN` dall'accesso del runner. Lascia il clone
+   sul ramo principale), crea i campi del Project che mancano e l'etichetta `bottega: fuori`, apre una PR in bozza sul
+   ramo `bottega/installazione` (configurazione, `AGENTS.md` e `docs/costituzione.md` se mancano, i workflow della
+   bottega per le botteghe con un runner fissati allo SHA del tag, `.github/bottega/firme-ammesse` se c'è) e mette il
+   segreto `BOTTEGA_TOKEN` dall'accesso del runner. Lascia il clone
    sul ramo `bottega/installazione`. Senza esecutore fuori: `--solo-sessione` (solo la configurazione e le firme,
    niente workflow, niente segreto, niente tag). Se chi installa non è sulla macchina del runner, `--senza-segreto` salta il
    segreto e stampa il comando da lanciare lì (il token passa dall'accesso del runner a `gh secret set`, mai a video).

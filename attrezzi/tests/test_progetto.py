@@ -540,3 +540,69 @@ def test_c4_i_workflow_dell_installazione_non_sono_rischi() -> None:
     workflow = {p: testo for p, testo in file_pr.items() if p.startswith(".github/workflows/")}
     assert len(workflow) >= 2
     assert rischi(workflow) == []
+
+
+def _configurazione_due_botteghe() -> Configurazione:
+    return Configurazione(
+        versione=1,
+        progetto=Progetto(
+            comandanti=("comandante",),
+            adattatore=None,
+            fuso="Europe/Rome",
+            notte="01:30",
+            manutenzione=(),
+            project=1,
+            liberi=(),
+        ),
+        botteghe={
+            "a": Bottega(id="a", quota="normale", porte=("claude-code",)),
+            "b": Bottega(id="b", quota="normale", porte=("claude-code",)),
+        },
+        candidati={
+            "cand_a": Candidato(
+                id="cand_a",
+                nome="Candidato A",
+                bottega="a",
+                porta="claude-code",
+                modello="modello-a",
+                funzioni=("eseguire",),
+                runner="runner-a",
+            ),
+            "cand_b": Candidato(
+                id="cand_b",
+                nome="Candidato B",
+                bottega="b",
+                porta="claude-code",
+                modello="modello-b",
+                funzioni=("eseguire",),
+                runner="",
+            ),
+        },
+    )
+
+
+def test_esecutore_solo_per_le_botteghe_col_runner() -> None:
+    """Due botteghe: 'a' con candidato col runner e 'b' con candidato senza runner; esecutore solo per 'a'."""
+    cfg = _configurazione_due_botteghe()
+    valori = {
+        "proprietario": "prop",
+        "sha": "1" * 40,
+        "tag": "v1.0.0",
+    }
+    file_pr = file_dell_installazione(cfg, valori, [])
+    assert ".github/workflows/bottega-esecutore-a.yml" in file_pr
+    assert ".github/workflows/bottega-esecutore-b.yml" not in file_pr
+
+
+def test_esecutore_col_runner_del_suo_candidato() -> None:
+    """Il workflow dell'esecutore porta l'etichetta del runner del candidato della bottega."""
+    cfg = _configurazione_due_botteghe()
+    valori = {
+        "proprietario": "prop",
+        "sha": "1" * 40,
+        "tag": "v1.0.0",
+    }
+    file_pr = file_dell_installazione(cfg, valori, [])
+    testo_a = file_pr[".github/workflows/bottega-esecutore-a.yml"]
+    assert "runner-a" in testo_a
+
