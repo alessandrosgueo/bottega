@@ -16,6 +16,8 @@ import tempfile
 from bottega.forgia import Forgia, ForgiaGh
 
 TITOLO_AVVISO = "Avviso della bottega: firma del ramo principale"
+# Il nome delle righe di firme-ammesse: neutro, mai l'email di chi decide.
+PRINCIPALE = "chi-decide"
 CHIAVE_AVVISO = "firma"
 
 
@@ -185,16 +187,6 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
         raise ErroreFirma(f"non è un repo git: {cartella}")
     cartella = Path(res_radice.stdout.strip())
 
-    # Ricava l'email utente da git
-    res_email = subprocess.run(
-        ["git", "-C", str(cartella), "config", "user.email"],
-        capture_output=True,
-        text=True,
-    )
-    email = res_email.stdout.strip()
-    if res_email.returncode != 0 or not email:
-        raise ErroreFirma("configurazione git priva di user.email")
-
     if chiave.is_file() and not chiave_pub.is_file():
         raise ErroreFirma(f"chiave privata presente senza pubblica: {chiave_pub}")
 
@@ -256,7 +248,9 @@ def prepara(cartella: Path, chiave: Path, globale: bool = False) -> list[str]:
 
     if not gia_presente:
         # Solo tipo e chiave: il commento della pubblica (anche di una chiave fatta prima) resta fuori dal repo.
-        riga_nuova = f'{email} namespaces="git" {corpo_chiave}'
+        # Il principale è un nome neutro: git non lo confronta con l'email di chi firma, e un'email in un file del
+        # repo è un dato personale che non serve (dal collaudo in Jarvis, 2026-11-11).
+        riga_nuova = f'{PRINCIPALE} namespaces="git" {corpo_chiave}'
         with firme_file.open("a", encoding="utf-8") as f:
             if testo_attuale and not testo_attuale.endswith("\n"):
                 f.write("\n")

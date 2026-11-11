@@ -376,7 +376,8 @@ def test_prepara_crea_chiave_e_configura_git(tmp_path: Path) -> None:
     pub = Path(str(chiave) + ".pub").read_text(encoding="utf-8").strip()
     tipo, corpo, commento = pub.split(" ", 2)
     assert commento == "bottega firma"
-    assert testo_firme == f"decisore@example.com namespaces=\"git\" {tipo} {corpo}\n"
+    assert testo_firme == f"chi-decide namespaces=\"git\" {tipo} {corpo}\n"
+    assert "@" not in testo_firme
 
     def _cfg(k: str) -> str:
         res = subprocess.run(["git", "config", "--local", k], cwd=repo, check=True, capture_output=True, text=True)
@@ -420,11 +421,14 @@ def test_prepara_privata_senza_pub(tmp_path: Path) -> None:
 
 
 def test_prepara_senza_email(tmp_path: Path) -> None:
+    """L'email di chi decide non serve: il principale è neutro, e prepara funziona anche senza user.email."""
     repo = _crea_repo(tmp_path, email="")
     chiave = tmp_path / "chiavi" / "bottega_firma"
 
-    with pytest.raises(ErroreFirma, match="user.email"):
-        prepara(cartella=repo, chiave=chiave, globale=False)
+    prepara(cartella=repo, chiave=chiave, globale=False)
+    assert chiave.is_file()
+    testo = (repo / ".github" / "bottega" / "firme-ammesse").read_text(encoding="utf-8")
+    assert testo.startswith('chi-decide namespaces="git" ssh-ed25519 ')
 
 
 def test_prepara_globale(tmp_path: Path) -> None:
@@ -522,7 +526,8 @@ def test_prepara_non_copia_il_commento_della_chiave(tmp_path: Path) -> None:
     prepara(cartella=repo, chiave=chiave, globale=False)
     testo = (repo / ".github" / "bottega" / "firme-ammesse").read_text(encoding="utf-8")
     assert "utente@macchina-di-casa" not in testo
-    assert testo.startswith('decisore@example.com namespaces="git" ssh-ed25519 ')
+    assert testo.startswith('chi-decide namespaces="git" ssh-ed25519 ')
+    assert "decisore@example.com" not in testo
 
 
 def test_verifica_parola_gpgsig_nel_messaggio(tmp_path: Path) -> None:
@@ -768,7 +773,7 @@ def test_c1_prepara_pub_senza_privata(tmp_path: Path) -> None:
     testo = firme_file.read_text(encoding="utf-8")
     parti = pub_testo.split()
     assert f"{parti[0]} {parti[1]}" in testo
-    assert "alice@example.com" in testo
+    assert "alice@example.com" not in testo
 
 
 def test_c1_prepara_da_una_sottocartella(tmp_path: Path) -> None:
@@ -926,14 +931,6 @@ def test_c2_prepara_fuori_da_un_repo_non_crea_la_chiave(tmp_path: Path) -> None:
     assert not chiave.parent.exists()
 
 
-def test_c2_prepara_senza_email_non_crea_la_chiave(tmp_path: Path) -> None:
-    repo = _crea_repo(tmp_path, email="")
-    chiave = tmp_path / "chiavi" / "bottega_firma"
-    with pytest.raises(ErroreFirma):
-        prepara(cartella=repo, chiave=chiave, globale=False)
-    assert not chiave.exists()
-
-
 def test_c2_prepara_riga_commentata_non_conta(tmp_path: Path) -> None:
     """Una riga commentata con la stessa chiave non la rende già ammessa: prepara aggiunge la riga attiva."""
     repo = _crea_repo(tmp_path, email="decisore@example.com")
@@ -947,4 +944,4 @@ def test_c2_prepara_riga_commentata_non_conta(tmp_path: Path) -> None:
 
     prepara(cartella=repo, chiave=chiave, globale=False)
     righe = firme.read_text(encoding="utf-8").splitlines()
-    assert f'decisore@example.com namespaces="git" {tipo} {corpo}' in righe
+    assert f'chi-decide namespaces="git" {tipo} {corpo}' in righe
