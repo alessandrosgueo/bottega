@@ -1798,3 +1798,66 @@ def test_b7_forgia_che_cade_lo_dice() -> None:
     )
     assert "lavoro 1: la forgia non risponde (gh ha fallito (1): Unknown JSON field), salto" in righe
     assert not any(r[0] == "prendi" for r in board.registro)
+
+
+def test_b8_consulto_fermo_con_la_rete_aperta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B8-3: il consigliere gira come esecutore e legge testi d'altri: con la rete aperta non parte."""
+    from dataclasses import replace
+    import bottega.giro as modulo_giro
+    from bottega.porte import Controllo, Lancio
+
+    cfg = _configurazione_base()
+    candidati = dict(cfg.candidati)
+    candidati["c-cons"] = Candidato(
+        id="c-cons",
+        nome="Consigliere",
+        bottega="b-claude",
+        porta="claude-code",
+        modello="sonnet",
+        funzioni=("consigliare",),
+        runner="linux-runner",
+    )
+    cfg = replace(cfg, candidati=candidati)
+    monkeypatch.setenv("BOTTEGA_RUNNER", "linux-runner")
+    monkeypatch.setattr(modulo_giro, "SENTINELLA_RETE", True)
+    controllate: list[tuple[str, ...]] = []
+
+    def rete_aperta(prefisso):
+        controllate.append(tuple(prefisso))
+        return False
+
+    monkeypatch.setattr(modulo_giro, "rete_dell_esecutore_chiusa", rete_aperta)
+
+    board = BoardFinta([Lavoro(numero=1, titolo="Compito 1", stato="pronto", etichette=["bottega: fuori"])])
+    forgia = ForgiaFinta([Issue(numero=1, titolo="Compito 1", corpo="Brief del compito 1", autore="alice")])
+    evento_file = tmp_path / "evento.json"
+    evento_file.write_text(json.dumps({
+        "action": "created",
+        "issue": {"number": 1},
+        "comment": {"body": "/bottega consulta Come procediamo?", "user": {"login": "alice"}},
+    }), encoding="utf-8")
+    chiamate_porta: list[dict[str, Any]] = []
+
+    class PortaFintaCons:
+        nome = "claude-code"
+        eseguibile = "claude"
+        def controlla(self, prefisso=()): return Controllo(ok=True)
+        def lancia(self, cartella, prompt, modello, *, conversazione=None, sola_lettura=False, prefisso=(), tempo=3600):
+            chiamate_porta.append({"prefisso": prefisso})
+            return Lancio(esito="fatto", testo="Risposta consiglio")
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili={},
+        adesso=datetime(2026, 11, 8, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso)),
+        caso=random.Random(42),
+        percorso_evento=evento_file,
+        porte={"claude-code": PortaFintaCons()},
+        prefisso=("env",),
+    )
+
+    assert controllate == [("env",)]
+    assert chiamate_porta == []
+    assert any("rete dell'esecutore" in c.corpo for c in forgia.commenti(1))

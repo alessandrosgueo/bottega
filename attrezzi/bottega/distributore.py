@@ -266,6 +266,20 @@ def _gestisci_evento_commento(
             print(riga)
             return False, righe
 
+        # B8-3: il consigliere legge testi scritti da altri e gira come esecutore: con la rete aperta non parte.
+        from bottega import giro as modulo_giro
+
+        if modulo_giro.SENTINELLA_RETE and prefisso and not modulo_giro.rete_dell_esecutore_chiusa(prefisso):
+            msg = (
+                "Consulto non fatto: la rete dell'esecutore è aperta su questa macchina, o non si può verificare. "
+                "Rilanciare `bottega installa macchina` sulla macchina del runner."
+            )
+            forgia.commenta(num_issue, msg, "distributore")
+            riga = f"lavoro {num_issue}: consulto non eseguito (rete dell'esecutore aperta)"
+            righe.append(riga)
+            print(riga)
+            return False, righe
+
         cand = configurazione.candidati[scelta_cons.candidato]
         if porte and cand.porta in porte:
             adattatore_porta = porte[cand.porta]

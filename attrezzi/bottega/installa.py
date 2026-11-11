@@ -121,15 +121,27 @@ def _architettura_di_serie() -> str | None:
     return None
 
 
+def interop_wsl_accesa() -> bool:
+    """Vero su WSL con l'interop accesa (i programmi di Windows si lanciano da Linux)."""
+    try:
+        prima = Path("/proc/sys/fs/binfmt_misc/WSLInterop").read_text(encoding="utf-8").splitlines()[:1]
+    except OSError:
+        return False
+    return prima == ["enabled"]
+
+
 def comando_macchina(
     args: argparse.Namespace,
     esegui: Esecutore | None = None,
     resolv: str | None = None,
+    interop: bool | None = None,
 ) -> int:
     """Prepara la macchina host per la bottega (utenti, gruppo, spazio, sudoers, rete dell'esecutore).
 
     `resolv` è il testo di `/etc/resolv.conf` (letto dal disco se `None`): i suoi server DNS sono i soli indirizzi
-    privati che la rete dell'esecutore lascia raggiungere, e solo sulla porta 53.
+    privati che la rete dell'esecutore lascia raggiungere, e solo sulla porta 53. Il controllo di `nft` viene prima
+    di tutto: su una macchina senza nft non si crea nessun utente. `interop` dice se l'interop di WSL è accesa (letta
+    da `/proc` se `None`): con l'interop l'esecutore lancia programmi di Windows, fuori dalla regola, e si avvisa.
     """
     esegui_fn = esegui or esecutore_vero
     if not systemd_attivo(esegui_fn):
@@ -153,7 +165,16 @@ def comando_macchina(
             resolv = Path("/etc/resolv.conf").read_text(encoding="utf-8", errors="replace")
         except OSError:
             resolv = ""
-    passi = [*passi_macchina(u), *passi_rete(u, nameserver_da_resolv(resolv))]
+    rete = passi_rete(u, nameserver_da_resolv(resolv))
+    passi = [*rete[:1], *passi_macchina(u), *rete[1:]]
+    if interop is None:
+        interop = interop_wsl_accesa()
+    if interop:
+        print(
+            "avviso: l'interop di WSL è accesa: l'esecutore può lanciare programmi di Windows, che non passano dalla "
+            "sua rete chiusa. Per chiuderla: [interop] enabled=false in /etc/wsl.conf (spegne l'interop per tutti).",
+            file=sys.stderr,
+        )
     prova = getattr(args, "prova", False)
 
     try:
