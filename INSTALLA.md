@@ -56,7 +56,11 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
 
 1. **La macchina:** `bottega installa macchina --prova`, mostra le righe, poi `bottega installa macchina`. Crea due
    utenti di sistema (`bottega-runner` con le chiavi di GitHub, `bottega-esecutore` per i modelli, senza chiavi), un
-   gruppo, lo spazio dei giri e il solo `sudo` che serve: il runner può diventare l'esecutore, mai root.
+   gruppo, lo spazio dei giri e il solo `sudo` che serve: il runner può diventare l'esecutore, mai root. Chiude anche
+   la rete dell'esecutore con una regola `nftables` (serve il pacchetto `nftables`), caricata da un'unità systemd
+   all'avvio: internet e i server DNS di `/etc/resolv.conf` sì; la rete di casa, gli indirizzi privati e i servizi
+   della macchina no. Sul loopback l'esecutore apre solo connessioni TCP verso i server suoi (le sue prove possono
+   aprirne). Se l'utente ha un'altra regola per quell'utente, o un firewall che riscrive tutto il ruleset, avvisalo.
 2. **L'accesso a GitHub del runner:** `sudo -u bottega-runner -H gh auth login --web --git-protocol https -s
    repo,workflow,project`. È l'account dell'utente (un solo account): l'utente mette il codice nel browser, una volta. Di' all'utente che questo
    accesso vale per tutti i suoi repo: se preferisce, può usare un account o un token limitato al solo progetto.
