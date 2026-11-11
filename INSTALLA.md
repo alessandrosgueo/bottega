@@ -11,7 +11,8 @@ Il comando è `python3 -m bottega` con `PYTHONPATH=<clone>/attrezzi` (qui sotto:
 
 - Linux, oppure Windows con WSL 2. Per l'esecutore fuori serve systemd (su WSL: `[boot]` `systemd=true` in
   `/etc/wsl.conf`, poi `wsl --shutdown` da Windows: quel passo lo fa l'utente).
-- `git`, `python3` 3.11 o più, `gh` collegato all'account dell'utente (`gh auth status`).
+- `git`, `python3` 3.11 o più, `gh` collegato all'account dell'utente (`gh auth status`). Va bene anche il `gh` dei
+  pacchetti di Ubuntu (2.46): dove mancano i comandi nuovi la bottega usa l'API REST.
 - `sudo`, solo per l'esecutore fuori: si chiede una volta.
 
 ## 1. Il clone e il plugin
