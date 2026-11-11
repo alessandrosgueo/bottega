@@ -201,8 +201,9 @@ class ForgiaGh:
         return int(url_o_num)
 
     def variabile(self, nome: str) -> str | None:
+        # B7 (J4): il gh dei pacchetti di Ubuntu (2.46) non ha `gh variable get`; l'API REST va con ogni gh.
         try:
-            out = self._esegui(["variable", "get", nome, "--repo", self.repo])
+            out = self._esegui(["api", f"repos/{self.repo}/actions/variables/{nome}", "--jq", ".value"])
             return out.strip()
         except ErroreForgia as e:
             if "not found" in str(e).lower():
@@ -246,12 +247,20 @@ class ForgiaGh:
         return "ignoto"
 
     def crea_issue(self, titolo: str, corpo: str, madre: int | None = None) -> int:
-        cmd = ["issue", "create", "--repo", self.repo, "--title", titolo, "--body-file", "-"]
+        # B7 (J4): il gh 2.46 non ha `issue create --parent`. Si crea con l'API REST (titolo e corpo da stdin) e la
+        # figlia si aggancia alla madre con l'API delle sotto-issue, che vuole l'id dell'issue, non il numero.
+        out = self._esegui(
+            ["api", "-X", "POST", f"repos/{self.repo}/issues", "--input", "-"],
+            ingresso=json.dumps({"title": titolo, "body": corpo}),
+        )
+        d = json.loads(out)
+        if not isinstance(d, dict) or not isinstance(d.get("number"), int) or not isinstance(d.get("id"), int):
+            raise ErroreForgia(f"issue «{titolo}»: risposta inattesa")
         if madre is not None:
-            cmd.extend(["--parent", str(madre)])
-        out = self._esegui(cmd, ingresso=corpo)
-        url_o_num = out.strip().split("/")[-1]
-        return int(url_o_num)
+            self._esegui(
+                ["api", "-X", "POST", f"repos/{self.repo}/issues/{madre}/sub_issues", "-F", f"sub_issue_id={d['id']}"]
+            )
+        return d["number"]
 
     def chiudi_issue(self, n: int) -> None:
         self._esegui(["issue", "close", str(n), "--repo", self.repo])

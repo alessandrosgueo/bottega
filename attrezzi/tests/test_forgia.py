@@ -36,8 +36,8 @@ def test_dati_liberi_mai_su_riga_di_comando() -> None:
 
     def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
         chiamate.append((argomenti, ingresso))
-        if argomenti[0] == "issue" and argomenti[1] == "create":
-            return "https://github.com/proprietario/repo/issues/101\n"
+        if argomenti[:4] == ["api", "-X", "POST", "repos/proprietario/repo/issues"]:
+            return json.dumps({"number": 101, "id": 9101})
         if argomenti[0] == "pr" and argomenti[1] == "create":
             return "https://github.com/proprietario/repo/pull/55\n"
         return ""
@@ -49,18 +49,20 @@ def test_dati_liberi_mai_su_riga_di_comando() -> None:
     assert n_issue == 101
 
     args_iss, stdin_iss = chiamate[0]
-    assert "--body-file" in args_iss
-    assert "-" in args_iss
-    assert corpo_issue not in args_iss
-    assert stdin_iss == corpo_issue
-    assert "--parent" in args_iss
-    assert "10" in args_iss
+    assert args_iss == ["api", "-X", "POST", "repos/proprietario/repo/issues", "--input", "-"]
+    assert stdin_iss is not None
+    assert json.loads(stdin_iss) == {"title": "Titolo", "body": corpo_issue}
+    # B7 (J4): la figlia si aggancia alla madre con l'API REST delle sotto-issue (il gh 2.46 non ha `--parent`).
+    assert chiamate[1] == (
+        ["api", "-X", "POST", "repos/proprietario/repo/issues/10/sub_issues", "-F", "sub_issue_id=9101"],
+        None,
+    )
 
     corpo_pr = "Corpo della PR con testo libero"
     n_pr = forgia.apri_pr("bottega/101-ramo", "Titolo PR", corpo_pr)
     assert n_pr == 55
 
-    args_pr, stdin_pr = chiamate[1]
+    args_pr, stdin_pr = chiamate[2]
     assert "--draft" in args_pr
     assert "--body-file" in args_pr
     assert "-" in args_pr
@@ -70,7 +72,7 @@ def test_dati_liberi_mai_su_riga_di_comando() -> None:
     valore_var = "valore_segreto_o_lungo"
     forgia.imposta_variabile("BOTTEGA_QUOTA", valore_var)
 
-    args_var, stdin_var = chiamate[2]
+    args_var, stdin_var = chiamate[3]
     assert args_var == ["variable", "set", "BOTTEGA_QUOTA", "--repo", "proprietario/repo"]
     assert valore_var not in args_var
     assert stdin_var == valore_var
@@ -138,15 +140,39 @@ def test_pr_del_ramo() -> None:
     assert forgia.pr_del_ramo("mancante") is None
 
 
-def test_variabile_trovata_e_mancante() -> None:
+def test_b7_variabile_dall_api_rest() -> None:
+    # B7 (J4): il gh 2.46 del server non ha `gh variable get`; l'API REST va con ogni gh.
+    chiamate: list[list[str]] = []
+
     def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
-        if "ESISTE" in argomenti:
+        chiamate.append(argomenti)
+        if argomenti[1].endswith("/ESISTE"):
             return "2026-11-08T18:00:00Z\n"
-        raise ErroreForgia("variable not found")
+        raise ErroreForgia("gh ha fallito (1): gh: Not Found (HTTP 404)")
 
     forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
     assert forgia.variabile("ESISTE") == "2026-11-08T18:00:00Z"
+    assert chiamate[0] == ["api", "repos/proprietario/repo/actions/variables/ESISTE", "--jq", ".value"]
     assert forgia.variabile("MANCA") is None
+
+
+def test_b7_crea_issue_senza_madre_una_chiamata_sola() -> None:
+    chiamate: list[tuple[list[str], str | None]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append((argomenti, ingresso))
+        return json.dumps({"number": 7, "id": 707})
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    assert forgia.crea_issue("Madre", "corpo") == 7
+    assert len(chiamate) == 1
+    assert not any("sub_issues" in a for a in chiamate[0][0])
+
+
+def test_b7_crea_issue_risposta_storta() -> None:
+    forgia = ForgiaGh("proprietario/repo", esegui=lambda args, ingresso=None: json.dumps({"message": "boh"}))
+    with pytest.raises(ErroreForgia, match="risposta inattesa"):
+        forgia.crea_issue("Titolo", "corpo")
 
 
 def test_avvia_workflow() -> None:
@@ -374,9 +400,9 @@ def test_rv12_pr_del_ramo_solo_aperte() -> None:
 
 def test_rv12_variabile_distingue_mancante_da_errore_generico() -> None:
     def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
-        var = argomenti[2]
+        var = argomenti[1].rsplit("/", 1)[-1]
         if var == "MANCA":
-            raise ErroreForgia("gh ha fallito (1): variable MANCA was not found")
+            raise ErroreForgia("gh ha fallito (1): gh: Not Found (HTTP 404)")
         if var == "RETE_ROTTA":
             raise ErroreForgia("gh ha fallito (1): connection refused")
         return "valore"
