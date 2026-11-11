@@ -108,16 +108,15 @@ def _elegibile_per_etichette(etichette: Sequence[str], liberi: Sequence[str], no
 
 
 def _ricava_fatto_quando(lav_numero: int, forgia: Forgia) -> str | None:
-    """Estrae il comando Fatto quando dal corpo dell'issue o della prima sotto-issue aperta."""
-    try:
-        sotto = forgia.sotto_issue(lav_numero)
-        aperte = [s for s in sotto if s.aperta]
-        if aperte:
-            return fatto_quando(aperte[0].corpo)
-        iss = forgia.issue(lav_numero)
-        return fatto_quando(iss.corpo)
-    except Exception:
-        return None
+    """Estrae il comando Fatto quando dal corpo dell'issue o della prima sotto-issue aperta.
+
+    Un errore della forgia sale a chi chiama, che lo dice (B7, J4): prima diventava un «senza Fatto quando» muto."""
+    sotto = forgia.sotto_issue(lav_numero)
+    aperte = [s for s in sotto if s.aperta]
+    if aperte:
+        return fatto_quando(aperte[0].corpo)
+    iss = forgia.issue(lav_numero)
+    return fatto_quando(iss.corpo)
 
 
 def _recinta(testo: str, limite: int = 60000) -> str:
@@ -471,16 +470,25 @@ def distribuisci(
         comandanti_cf = {c.strip().casefold() for c in configurazione.progetto.comandanti} | {
             forgia.proprietario().strip().casefold()
         }
+        # B7 (J4): ogni lavoro con l'etichetta che si salta lo dice, col motivo.
         try:
             iss = forgia.issue(lav.numero)
             autore = iss.autore.strip().casefold() if iss.autore else ""
-        except Exception:
-            autore = ""
-        if autore not in comandanti_cf:
+            fq = _ricava_fatto_quando(lav.numero, forgia) if autore in comandanti_cf else None
+        except Exception as e:
+            riga = f"lavoro {lav.numero}: la forgia non risponde ({e}), salto"
+            righe.append(riga)
+            print(riga)
             continue
-
-        fq = _ricava_fatto_quando(lav.numero, forgia)
+        if autore not in comandanti_cf:
+            riga = f"lavoro {lav.numero}: l'autore non è fra i comandanti, salto"
+            righe.append(riga)
+            print(riga)
+            continue
         if fq is None:
+            riga = f"lavoro {lav.numero}: senza «Fatto quando», salto"
+            righe.append(riga)
+            print(riga)
             continue
 
         valori_nota = nota(lav.nota)
