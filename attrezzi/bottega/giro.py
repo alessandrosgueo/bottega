@@ -626,7 +626,7 @@ def _base_della_consegna_fatta(
     if len(pezzi) != 3 or pezzi[0] != str(compito) or pezzi[2] != punta:
         return None
     base = pezzi[1]
-    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base):
+    if base == punta or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base):
         return None
     res = _esegui(
         ["git", *OPZIONI_GIT_RUNNER, "merge-base", "--is-ancestor", base, punta],
@@ -875,7 +875,8 @@ def _giro(
             capture_output=True,
             text=True,
         )
-        if res_verify.returncode == 0:
+        ramo_remoto = res_verify.returncode == 0
+        if ramo_remoto:
             base_commit = res_verify.stdout.strip()
         else:
             res_main = _esegui(
@@ -1220,7 +1221,7 @@ def _giro(
         base_consegna = base_commit
         base_ripresa = (
             _base_della_consegna_fatta(d_nota, compito.numero, base_commit, clone_progetto)
-            if cur_head == base_commit
+            if cur_head == base_commit and ramo_remoto
             else None
         )
         if cur_head == base_commit and base_ripresa is None:
@@ -1315,7 +1316,10 @@ def _giro(
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            d_nota["consegnato"] = f"{compito.numero}:{base_commit}:{sha_consegna}"
+            base_segnata = (
+                _base_della_consegna_fatta(d_nota, compito.numero, base_commit, clone_progetto) if ramo_remoto else None
+            ) or base_commit
+            d_nota["consegnato"] = f"{compito.numero}:{base_segnata}:{sha_consegna}"
             board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
 
         # B3-R12: Oracolo su copia fresca
