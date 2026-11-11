@@ -537,7 +537,14 @@ def comando_progetto(
         return 1
 
     # 11. Impostazione segreto
-    if not solo_sessione:
+    if not solo_sessione and getattr(args, "senza_segreto", False):
+        # Chi installa il progetto non è sulla macchina del runner: il segreto si mette da lì, dal suo accesso.
+        runner_utente = getattr(args, "runner", "bottega-runner")
+        print(
+            "segreto BOTTEGA_TOKEN non impostato: sulla macchina del runner lancia "
+            f"`sudo -u {runner_utente} -H sh -c 'gh auth token | gh secret set BOTTEGA_TOKEN --repo {args.repo}'`"
+        )
+    elif not solo_sessione:
         runner_utente = getattr(args, "runner", "bottega-runner")
         if esegui_pipe is None and esegui is not None:
             print("errore: con un esecutore iniettato serve anche la sua pipe", file=sys.stderr)
@@ -784,6 +791,11 @@ def argomenti_installa(parser: argparse.ArgumentParser) -> None:
     )
     p_progetto.add_argument(
         "--bottega", default=None, metavar="OWNER/REPO", help="repo della bottega (di serie: l'origin di questo clone)"
+    )
+    p_progetto.add_argument(
+        "--senza-segreto",
+        action="store_true",
+        help="non imposta BOTTEGA_TOKEN (chi installa non è sulla macchina del runner): stampa il comando da lanciare lì",
     )
     p_progetto.add_argument("--prova", action="store_true", help="mostra i file e i campi senza scrivere")
     p_progetto.add_argument("--cartella", type=Path, default=None, help=argparse.SUPPRESS)
