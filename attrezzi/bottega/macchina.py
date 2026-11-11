@@ -135,10 +135,20 @@ def passo_file(
     )
 
 
+# Il PATH dei comandi di sistema che sudo dà di serie (Ubuntu e Debian).
+_PATH_DI_SISTEMA = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+
+
 def testo_sudoers(u: Utenti) -> str:
-    """Restituisce il testo restrittivo della configurazione sudoers per il runner."""
+    """Restituisce il testo restrittivo della configurazione sudoers per il runner.
+
+    Il `secure_path` dei comandi che il runner lancia come esecutore finisce con la `~/.local/bin` dell'esecutore, dove
+    gli installatori ufficiali mettono i suoi strumenti (uv, le porte): in fondo, così `id`, `kill`, `git` restano
+    quelli di sistema e l'esecutore non li può sostituire coi suoi.
+    """
     return (
         f"Defaults:{u.runner} umask=0007, umask_override\n"
+        f'Defaults:{u.runner} secure_path="{_PATH_DI_SISTEMA}:/home/{u.esecutore}/.local/bin"\n'
         f"{u.runner} ALL=({u.esecutore}) NOPASSWD: ALL\n"
     )
 
