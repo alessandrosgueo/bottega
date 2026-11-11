@@ -59,6 +59,11 @@ e ogni intervento a mano è diventato una correzione con la sua prova.
   un suo utente dell'esecutore.
 - Sul loopback l'esecutore apre solo connessioni TCP verso i server suoi; le prove che parlano UDP sul loopback non
   passano come esecutore.
+- La rete chiusa dell'esecutore vale per IP: socket unix, D-Bus di sistema e Bluetooth restano come li lascia la
+  macchina. L'IP pubblico si aggiorna ogni dieci minuti; i server DNS si leggono all'installazione (se cambiano, si
+  rilancia `installa macchina`).
+- Su WSL con l'interop accesa l'esecutore può lanciare programmi di Windows, che non passano dalla sua rete chiusa:
+  l'installazione lo avvisa.
 - L'oracolo resta aggirabile da un modello che riscrive le prove: lo vede chi rivede il diff.
 - Senza un consigliere col runner i lavori fuori arrivano senza rilettura: la revisione di chi decide resta
   necessaria.

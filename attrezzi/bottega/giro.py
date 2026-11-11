@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -60,6 +61,47 @@ def _esegui(cmd: Sequence[str], **kw: Any) -> subprocess.CompletedProcess:
         kw.setdefault("errors", "replace")
     kw.setdefault("stdin", subprocess.DEVNULL)
     return subprocess.run(list(cmd), **kw)
+
+
+# B8-3: la sentinella della rete dell'esecutore. Prima di lanciare l'esecutore il runner apre un ascoltatore su
+# 127.0.0.1 e l'esecutore prova a raggiungerlo: con la regola di `installa macchina` attiva il SYN-ACK di un processo
+# che non è suo cade e la sonda esce 3. Se la raggiunge, la regola non c'è (avvio fallito, un altro firewall che ha
+# svuotato il ruleset, l'unità fermata): il giro si ferma. Le prove la spengono (conftest), mai il codice di serie.
+SENTINELLA_RETE: bool = True
+_ESITO_RETE_CHIUSA = 3
+_SONDA_RETE = (
+    "import socket, sys\n"
+    "try:\n"
+    "    socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=2).close()\n"
+    "except OSError:\n"
+    f"    sys.exit({_ESITO_RETE_CHIUSA})\n"
+    "sys.exit(0)\n"
+)
+
+
+def rete_dell_esecutore_chiusa(prefisso: Sequence[str]) -> bool:
+    """Vero se l'esecutore non raggiunge un ascoltatore del runner su 127.0.0.1 (la regola della rete vale).
+
+    Senza prefisso non c'è un utente dell'esecutore separato: vero. Solo l'uscita 3 della sonda vale «chiusa»; ogni
+    altro esito (raggiunto, sonda guasta, tempo scaduto, errore nel lanciarla) è falso.
+    """
+    if not prefisso:
+        return True
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ascolto:
+            ascolto.bind(("127.0.0.1", 0))
+            ascolto.listen(1)
+            porta = ascolto.getsockname()[1]
+            esito = subprocess.run(
+                [*prefisso, "python3", "-I", "-c", _SONDA_RETE, str(porta)],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return esito.returncode == _ESITO_RETE_CHIUSA
 
 
 # Parole che chiudono un'issue quando il commit arriva nel ramo principale (anche dopo un'unione).
@@ -501,15 +543,30 @@ def _prepara_fascicolo(
         righe_comm.append(f"{prefix}{c.autore}:\n{testo_pulito}\n")
     (fascicolo_dir / "commenti.md").write_text("\n---\n".join(righe_comm), encoding="utf-8")
 
-    # RV3: Costituzione letta con git show da origin/<principale>
-    res_cost = _esegui(
-        ["git", *OPZIONI_GIT_RUNNER, "show", f"refs/remotes/origin/{ramo_principale}:{costituzione}"],
+    # RV3: Costituzione letta con git show da origin/<principale>. B8-3: solo un file (un percorso che è una cartella
+    # darebbe l'elenco del tree); un percorso configurato che manca si dice nel registro del job.
+    oggetto_cost = f"refs/remotes/origin/{ramo_principale}:{costituzione}"
+    tipo_cost = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "cat-file", "-t", oggetto_cost],
         cwd=str(clone_progetto),
         capture_output=True,
         text=True,
     )
-    if res_cost.returncode == 0 and res_cost.stdout.strip():
-        (fascicolo_dir / "costituzione.md").write_text(res_cost.stdout, encoding="utf-8")
+    if tipo_cost.returncode == 0 and tipo_cost.stdout.strip() == "blob":
+        res_cost = _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "show", oggetto_cost],
+            cwd=str(clone_progetto),
+            capture_output=True,
+            text=True,
+        )
+        if res_cost.returncode == 0 and res_cost.stdout.strip():
+            (fascicolo_dir / "costituzione.md").write_text(res_cost.stdout, encoding="utf-8")
+    elif costituzione != "docs/costituzione.md":
+        print(
+            f"avviso: la costituzione configurata {costituzione} non è un file di origin/{ramo_principale}: "
+            "il fascicolo è senza costituzione",
+            file=sys.stderr,
+        )
 
     # RV3: Quaderni
     modello_slug = re.sub(r"[^a-z0-9]+", "-", candidato.modello.lower()).strip("-")
@@ -875,6 +932,19 @@ def _giro(
     # M3: un processo dell'esecutore sopravvissuto a un consulto o a un giro di prima non deve vedere questo giro.
     # B7-3: e le cartelle dei giri morti non restano nello spazio.
     pulisci_dopo_il_giro(prefisso, spazio, None, time.time())
+
+    # B8-3: con la rete dell'esecutore aperta il giro non parte. Il lavoro si blocca (serve una mano sulla macchina) e
+    # il distributore non riparte da qui: un altro lavoro troverebbe la stessa rete.
+    if SENTINELLA_RETE and prefisso and not rete_dell_esecutore_chiusa(prefisso):
+        msg = (
+            "Giro fermo: la rete dell'esecutore è aperta su questa macchina (la regola di `bottega installa "
+            "macchina` non è attiva). Nessun lavoro fatto: rilanciare `bottega installa macchina` sulla macchina del "
+            "runner, poi rimandare il lavoro."
+        )
+        forgia.commenta(compito.numero, msg, ruolo="esecutore")
+        d_nota["motivo"] = "rete aperta"
+        board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
+        return EsitoGiro("bloccato", motivo="rete aperta")
 
     env_rip = ambiente_ripulito()
 

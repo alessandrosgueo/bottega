@@ -537,6 +537,9 @@ def testo_rete_esecutore(u: Utenti, dns: Sequence[str]) -> str:
       altro utente (un broker, un pannello, un tunnel) cade: le prove dell'esecutore aprono i loro server locali, i
       servizi della macchina restano chiusi. Gli altri protocolli verso `lo` sono rifiutati.
     - Verso gli indirizzi di `_CHIUSE4` fuori dalla macchina e verso ogni IPv6 fuori dalla macchina: rifiutato.
+    - Verso l'IP pubblico della macchina (set `pubblici4`, riempito da `testo_ip_pubblico` ogni dieci minuti): un
+      router col NAT loopback risponde lì anche dalla LAN, coi suoi servizi e gli inoltri di porte. Rifiutato.
+    - Col conntrack spento sul loopback (`notrack`) il segno non varrebbe: rifiutato.
     - Il resto (internet in IPv4): sì.
 
     Le prime due righe rendono la ricarica atomica: `nft -f` toglie e rimette la tabella in una transazione sola.
@@ -562,6 +565,10 @@ def testo_rete_esecutore(u: Utenti, dns: Sequence[str]) -> str:
         f"\t\telements = {{ {', '.join(_CHIUSE4)} }}\n"
         "\t}\n"
         "\n"
+        "\tset pubblici4 {\n"
+        "\t\ttype ipv4_addr\n"
+        "\t}\n"
+        "\n"
         "\tchain uscita {\n"
         "\t\ttype filter hook output priority filter - 10; policy accept;\n"
         f'\t\tmeta skuid "{chi}" jump esecutore\n'
@@ -570,9 +577,11 @@ def testo_rete_esecutore(u: Utenti, dns: Sequence[str]) -> str:
         "\n"
         "\tchain esecutore {\n"
         f"{''.join(righe_dns)}"
+        '\t\toifname "lo" ct state untracked reject\n'
         f'\t\toifname "lo" meta l4proto tcp ct mark set ct mark | {segno} accept\n'
         '\t\toifname "lo" reject\n'
         "\t\tip daddr @chiuse4 reject\n"
+        "\t\tip daddr @pubblici4 reject\n"
         "\t\tmeta nfproto ipv6 reject\n"
         "\t}\n"
         "\n"
@@ -604,6 +613,7 @@ def testo_unita_rete(u: Utenti) -> str:
         f"Description=Bottega: la rete dell'esecutore {u.esecutore}\n"
         "Wants=network-pre.target\n"
         "Before=network-pre.target shutdown.target\n"
+        "After=nftables.service\n"
         "Conflicts=shutdown.target\n"
         "DefaultDependencies=no\n"
         "\n"
@@ -623,19 +633,24 @@ testo_unita_rete.__test__ = False  # type: ignore[attr-defined]
 
 
 def passi_rete(u: Utenti, dns: Sequence[str]) -> list[Passo]:
-    """I passi della rete dell'esecutore: `nft`, il file della regola, l'unità, il carico e l'accensione all'avvio.
+    """I passi della rete dell'esecutore: `nft`, il file della regola, le unità, il carico e l'accensione all'avvio.
 
-    La regola si ricarica sempre (`nft -f` è atomico): un file cambiato vale subito, senza fermare l'unità.
+    La regola si ricarica sempre (`nft -f` è atomico): un file cambiato vale subito, senza fermare l'unità. Ricaricata
+    la regola il set dell'IP pubblico è vuoto: lo riempie subito il programma dell'IP pubblico, poi il suo timer.
     """
     unita = unita_rete(u)
+    ip = unita_ip_pubblico(u)
     return [
         Passo(
             descrizione="nft presente",
             comando=("sh", "-c", "echo 'manca nft: installa il pacchetto nftables' >&2; exit 1"),
-            controllo=("sudo", "-n", "sh", "-c", "command -v nft >/dev/null"),
+            controllo=("sh", "-c", "test -x /usr/sbin/nft"),
         ),
         passo_file(f"rete dell'esecutore in {file_rete(u)}", testo_rete_esecutore(u, dns), file_rete(u), "0644"),
         passo_file(f"unità {unita}", testo_unita_rete(u), f"/etc/systemd/system/{unita}", "0644"),
+        passo_file(f"programma {programma_ip_pubblico(u)}", testo_ip_pubblico(u), programma_ip_pubblico(u), "0755"),
+        passo_file(f"unità {ip}.service", testo_unita_ip_pubblico(u), f"/etc/systemd/system/{ip}.service", "0644"),
+        passo_file(f"timer {ip}.timer", testo_timer_ip_pubblico(u), f"/etc/systemd/system/{ip}.timer", "0644"),
         Passo(descrizione="rete dell'esecutore caricata", comando=("sudo", "-n", "nft", "-f", file_rete(u))),
         Passo(descrizione="configurazione di systemd ricaricata", comando=("sudo", "-n", "systemctl", "daemon-reload")),
         Passo(
@@ -643,4 +658,97 @@ def passi_rete(u: Utenti, dns: Sequence[str]) -> list[Passo]:
             comando=("sudo", "-n", "systemctl", "enable", "--now", unita),
             controllo=("sh", "-c", f"systemctl is-enabled --quiet {unita} && systemctl is-active --quiet {unita}"),
         ),
+        Passo(
+            descrizione="IP pubblico nella rete dell'esecutore",
+            comando=("sudo", "-n", "systemctl", "start", f"{ip}.service"),
+        ),
+        Passo(
+            descrizione=f"timer {ip}.timer acceso",
+            comando=("sudo", "-n", "systemctl", "enable", "--now", f"{ip}.timer"),
+            controllo=(
+                "sh",
+                "-c",
+                f"systemctl is-enabled --quiet {ip}.timer && systemctl is-active --quiet {ip}.timer",
+            ),
+        ),
     ]
+
+
+# --- L'IP pubblico della macchina (B8-3, dalla revisione: G2) ---
+
+# Da dove si legge l'IP pubblico: due servizi, il secondo se il primo non risponde. Solo IPv4: ogni IPv6 fuori dalla
+# macchina è già rifiutato.
+FONTI_IP_PUBBLICO = ("https://api.ipify.org", "https://ifconfig.me/ip")
+
+
+def programma_ip_pubblico(u: Utenti) -> str:
+    """Il percorso del programma che mette l'IP pubblico nella rete dell'esecutore."""
+    return f"/usr/local/lib/bottega/{u.esecutore}-ip-pubblico"
+
+
+def unita_ip_pubblico(u: Utenti) -> str:
+    """L'unità (e il timer, con lo stesso nome) che tiene aggiornato l'IP pubblico."""
+    return f"{u.esecutore}-ip-pubblico"
+
+
+def testo_ip_pubblico(u: Utenti) -> str:
+    """Il programma che mette l'IP pubblico della macchina nel set `pubblici4` della rete dell'esecutore.
+
+    Un router che risponde sul suo IP pubblico anche dalla LAN (NAT loopback, gestione dal lato WAN, inoltri di porte)
+    riaprirebbe la casa all'esecutore. L'IP si legge da fuori; se nessuna fonte risponde con un IPv4 il set resta
+    com'era e il programma esce 1. Il cambio del set è una transazione sola.
+    """
+    t = tabella_rete(u)
+    fonti = " ".join(FONTI_IP_PUBBLICO)
+    return (
+        "#!/bin/sh\n"
+        f"# L'IP pubblico nella rete dell'esecutore {u.esecutore}, scritto da `bottega installa macchina`.\n"
+        "set -u\n"
+        f"for fonte in {fonti}; do\n"
+        '\tip=$(curl -fsS -m 10 "$fonte" 2>/dev/null) || continue\n'
+        "\tprintf '%s\\n' \"$ip\" | grep -Eqx '([0-9]{1,3}[.]){3}[0-9]{1,3}' || continue\n"
+        f"\tprintf 'flush set inet {t} pubblici4\\nadd element inet {t} pubblici4 {{ %s }}\\n' \"$ip\" "
+        "| /usr/sbin/nft -f - && exit 0\n"
+        "done\n"
+        "echo \"IP pubblico non letto: la rete dell'esecutore resta com'era\" >&2\n"
+        "exit 1\n"
+    )
+
+
+testo_ip_pubblico.__test__ = False  # type: ignore[attr-defined]
+
+
+def testo_unita_ip_pubblico(u: Utenti) -> str:
+    """L'unità che lancia il programma dell'IP pubblico, dopo la rete dell'esecutore e con la rete su."""
+    return (
+        "[Unit]\n"
+        f"Description=Bottega: l'IP pubblico nella rete dell'esecutore {u.esecutore}\n"
+        f"After=network-online.target {unita_rete(u)}\n"
+        "Wants=network-online.target\n"
+        f"Requires={unita_rete(u)}\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart={programma_ip_pubblico(u)}\n"
+    )
+
+
+testo_unita_ip_pubblico.__test__ = False  # type: ignore[attr-defined]
+
+
+def testo_timer_ip_pubblico(u: Utenti) -> str:
+    """Il timer dell'IP pubblico: un minuto dopo l'avvio, poi ogni dieci minuti."""
+    return (
+        "[Unit]\n"
+        f"Description=Bottega: l'IP pubblico nella rete dell'esecutore {u.esecutore}, ogni dieci minuti\n"
+        "\n"
+        "[Timer]\n"
+        "OnBootSec=1min\n"
+        "OnUnitActiveSec=10min\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+
+testo_timer_ip_pubblico.__test__ = False  # type: ignore[attr-defined]

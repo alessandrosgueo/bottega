@@ -60,7 +60,12 @@ firmare le unioni e scrive la sua riga in `.github/bottega/firme-ammesse`, che e
    la rete dell'esecutore con una regola `nftables` (serve il pacchetto `nftables`), caricata da un'unità systemd
    all'avvio: internet e i server DNS di `/etc/resolv.conf` sì; la rete di casa, gli indirizzi privati e i servizi
    della macchina no. Sul loopback l'esecutore apre solo connessioni TCP verso i server suoi (le sue prove possono
-   aprirne). Se l'utente ha un'altra regola per quell'utente, o un firewall che riscrive tutto il ruleset, avvisalo.
+   aprirne). Anche l'IP pubblico della macchina è chiuso (un router col NAT loopback risponde lì dalla LAN): un timer
+   lo rilegge ogni dieci minuti. Se l'utente ha un'altra regola per quell'utente, o un firewall che riscrive tutto il
+   ruleset, avvisalo: ogni giro controlla prima che la regola valga (una sentinella su `127.0.0.1`) e, se non vale,
+   blocca il lavoro senza lanciare l'esecutore. Se i server DNS della macchina cambiano, rilancia `installa
+   macchina`. Su WSL con l'interop accesa la regola non basta (l'esecutore lancia programmi di Windows): il comando
+   lo avvisa, e lo dici all'utente.
 2. **L'accesso a GitHub del runner:** `sudo -u bottega-runner -H gh auth login --web --git-protocol https -s
    repo,workflow,project`. È l'account dell'utente (un solo account): l'utente mette il codice nel browser, una volta. Di' all'utente che questo
    accesso vale per tutti i suoi repo: se preferisce, può usare un account o un token limitato al solo progetto.

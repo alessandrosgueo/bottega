@@ -228,7 +228,9 @@ def test_b8_passi_rete_in_ordine() -> None:
     u = Utenti(esecutore="bottega-esecutore")
     passi = passi_rete(u, ["192.0.2.53"])
 
-    assert len(passi) == 6
+    # B8-3: dopo i tre file della rete vengono i tre dell'IP pubblico; in fondo l'avvio dell'IP pubblico e il suo timer.
+    assert len(passi) == 11
+    passi = [*passi[:3], *passi[6:9]]
 
     # 1. verifica presenza nft
     cmd0 = " ".join(passi[0].comando)
@@ -325,6 +327,7 @@ def test_b8_comando_macchina_carica_la_rete() -> None:
                 or (cmd[:2] == ("sh", "-c") and "manca nft" not in cmd_str)
                 or "cmp -s" in cmd_str
                 or "command -v nft" in cmd_str
+                or "test -x /usr/sbin/nft" in cmd_str
             )
             return (1, "") if e_controllo else (0, "")
 
