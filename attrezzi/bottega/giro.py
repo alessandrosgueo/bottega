@@ -146,6 +146,28 @@ class EsitoGiro:
     dettagli: dict[str, Any] = field(default_factory=dict)
 
 
+# B9-R5: il consulto è una riga che comincia col segno (tolti gli spazi e gli `*` in testa), non la coda del testo:
+# l'esecutore può scrivere la domanda in testa al rapporto, con le opzioni dopo. Un segno citato a metà riga non conta.
+SEGNO_DOMANDA = "DOMANDA PER CHI DECIDE:"
+_RIGA_DOMANDA = re.compile(rf"^([ \t*]*)({re.escape(SEGNO_DOMANDA)})", re.MULTILINE)
+
+
+def domanda_del_consulto(testo: str) -> str | None:
+    """B9-R5: la domanda di un consulto, o `None` se il testo non ne ha.
+
+    Vale una riga che, tolti gli spazi e gli `*` in testa, comincia con `DOMANDA PER CHI DECIDE:`. La domanda è il testo
+    dall'ultima riga che lo fa fino alla fine, a partire dal segno (un grassetto che lo chiude, `**…:**`, si toglie).
+    """
+    trovate = list(_RIGA_DOMANDA.finditer(testo or ""))
+    if not trovate:
+        return None
+    ultima = trovate[-1]
+    domanda = testo[ultima.start(2):]
+    if "*" in ultima.group(1):
+        domanda = SEGNO_DOMANDA + domanda[len(SEGNO_DOMANDA):].removeprefix("**")
+    return domanda.strip()
+
+
 def recinta_testo_modello(testo: str, limite: int = 60000) -> str:
     """Recinta il testo del modello in un blocco di codice sicuro troncato a limite caratteri.
 
@@ -1159,7 +1181,10 @@ def _giro(
             "davanti a un numero d'issue.\n"
             "3. Alla fine scrivi il rapporto come ultimo messaggio.\n"
             "4. Se sei bloccato o se una scelta contraddice il piano o tocca le quattro barriere, "
-            "chiudi con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa.\n"
+            "scrivi una riga che comincia con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa (le opzioni "
+            "possono seguire, fino alla fine del rapporto).\n"
+            "5. Se in commenti.md l'ultimo esito dell'oracolo è ROSSO, il ramo porta già la consegna di prima: "
+            "correggi ciò che l'oracolo segnala e committa la correzione.\n"
         )
         consulti_effettuati = 0
         lanci_esecutore: list[Lancio] = []
@@ -1179,12 +1204,10 @@ def _giro(
             )
             lanci_esecutore.append(lancio)
 
-            # RV7: Il consulto parte solo con esito == "fatto" e se l'ultima riga non vuota comincia con DOMANDA PER CHI DECIDE:
-            righe_lancio = [r.strip() for r in lancio.testo.splitlines() if r.strip()]
-            e_consulto = (
-                lancio.esito == "fatto"
-                and bool(righe_lancio and righe_lancio[-1].startswith("DOMANDA PER CHI DECIDE:"))
-            )
+            # RV7, B9-R5: il consulto parte solo con esito == "fatto" e se una riga del testo comincia con
+            # DOMANDA PER CHI DECIDE: (tolti gli spazi e gli `*` in testa); la domanda va dall'ultima di quelle righe alla fine.
+            domanda = domanda_del_consulto(lancio.testo) if lancio.esito == "fatto" else None
+            e_consulto = domanda is not None
 
             if e_consulto:
                 consulti_effettuati += 1
@@ -1194,8 +1217,6 @@ def _giro(
                     _rilancia_distributore(forgia)
                     return EsitoGiro("in_attesa", motivo="troppi consulti")
 
-                idx = lancio.testo.rfind("DOMANDA PER CHI DECIDE:")
-                domanda = lancio.testo[idx:].strip()
                 forgia.commenta(compito.numero, f"Consulto dell'esecutore:\n\n{recinta_testo_modello(domanda)}", ruolo="esecutore")
 
                 compito_cons = Compito(funzione="consigliare", fuori=True)
@@ -1632,6 +1653,30 @@ def _giro(
                 forgia.commenta(pr_num, "compito senza rilettura", ruolo="consigliere")
         else:
             forgia.commenta(pr_num, "compito senza rilettura", ruolo="consigliere")
+
+        # B9-R4: un oracolo rosso non chiude il compito e non consegna il lavoro (la PR e il commento col suo esito
+        # restano visibili). Il ramo porta già la consegna rossa e il giro dopo riparte da lì: la chiave `consegnato`
+        # si toglie (B7-2: con quella il giro dopo riprenderebbe dall'oracolo senza lasciare all'esecutore il modo di
+        # correggere). Conta un tentativo, come ogni giro che non porta a una consegna buona; al terzo serve chi decide.
+        if not oracolo_ok:
+            tentativi = int(d_nota.get("tentativi", 0)) + 1
+            d_nota["tentativi"] = str(tentativi)
+            d_nota["motivo"] = "oracolo rosso"
+            d_nota.pop("consegnato", None)
+            if tentativi >= 3:
+                board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
+                forgia.commenta(
+                    compito.numero,
+                    "Lavoro bloccato: oracolo rosso tre volte, serve chi decide. Il ramo porta la consegna dell'ultimo "
+                    "tentativo; l'esito dell'oracolo è nei commenti qui sopra.",
+                    ruolo="esecutore",
+                )
+                # Come gli altri lavori bloccati: il distributore riparte subito per gli altri lavori pronti.
+                _rilancia_distributore(forgia)
+                return EsitoGiro("bloccato", motivo="oracolo rosso", pr=pr_num, oracolo_ok=False)
+            board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
+            _rilancia_distributore(forgia)
+            return EsitoGiro("errore", motivo="oracolo rosso", pr=pr_num, oracolo_ok=False)
 
         # B3-R4: Chiusura sotto-issue o completamento madre
         if compito.numero != iss_madre.numero:
