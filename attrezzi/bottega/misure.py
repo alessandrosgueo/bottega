@@ -39,6 +39,10 @@ OPZIONI_ESITO: tuple[str, ...] = ("unito com'era", "corretto", "rifiutato")
 # La voce di `Misure parziali` di un compito eseguito da più candidati: non entra in risultati e costi.
 PIU_ESECUTORI = "più esecutori"
 
+# L'intestazione del commento che il giro scrive sul lavoro madre quando una misura non entra sulla board (B10-R1):
+# `bottega segui` la cerca fra i commenti per avvisare.
+INTESTAZIONE_MISURE_PERSE = "Misure non scritte sulla board"
+
 
 def _di_piu_esecutori(lavoro: Lavoro) -> bool:
     voci = [v.strip() for v in (lavoro.campi.get("Misure parziali") or "").split(",")]
