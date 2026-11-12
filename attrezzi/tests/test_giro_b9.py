@@ -195,7 +195,7 @@ def test_oracolo_rosso_al_terzo_tentativo_blocca(tmp_path: Path) -> None:
     assert d_nota["motivo"] == "oracolo rosso"
     assert "consegnato" not in d_nota
     testi = [c.corpo for c in forgia.commenti(2)]
-    assert any("oracolo rosso tre volte" in t and "serve chi decide" in t for t in testi)
+    assert any("tre tentativi, l'ultimo con l'oracolo rosso" in t and "serve chi decide" in t for t in testi)
     assert _rilanci_distributore(forgia) == 1  # come gli altri lavori bloccati
 
 
@@ -296,7 +296,7 @@ def test_oracolo_rosso_senza_sotto_issue_al_terzo_blocca(tmp_path: Path) -> None
 
     assert esito.esito == "bloccato"
     assert board.lavoro(1).stato == "bloccato"
-    assert any("oracolo rosso tre volte" in c.corpo for c in forgia.commenti(1))
+    assert any("tre tentativi, l'ultimo con l'oracolo rosso" in c.corpo for c in forgia.commenti(1))
     assert _consegne_in_board(board) == []
     assert _rilanci_distributore(forgia) == 1  # come gli altri lavori bloccati
 
@@ -414,10 +414,145 @@ def test_segno_citato_a_meta_riga_non_e_un_consulto(tmp_path: Path) -> None:
         ("**DOMANDA PER CHI DECIDE:** in grassetto", "DOMANDA PER CHI DECIDE: in grassetto"),
         ("Prima.\nDOMANDA PER CHI DECIDE: vecchia\nPoi.\nDOMANDA PER CHI DECIDE: nuova\nfine", "DOMANDA PER CHI DECIDE: nuova\nfine"),
         ("Cito `DOMANDA PER CHI DECIDE:` a metà riga.", None),
-        ("domanda per chi decide: minuscolo", None),
+        ("domanda per chi decide: minuscolo", "DOMANDA PER CHI DECIDE: minuscolo"),
         ("Nessuna domanda.\n", None),
         ("", None),
     ],
 )
 def test_domanda_del_consulto(testo: str, atteso: str | None) -> None:
     assert domanda_del_consulto(testo) == atteso
+
+
+@pytest.mark.parametrize(
+    "riga",
+    [
+        "- DOMANDA PER CHI DECIDE: A o B?",
+        "+ DOMANDA PER CHI DECIDE: A o B?",
+        "1. DOMANDA PER CHI DECIDE: A o B?",
+        "2) DOMANDA PER CHI DECIDE: A o B?",
+        "## DOMANDA PER CHI DECIDE: A o B?",
+        "**DOMANDA PER CHI DECIDE**: A o B?",
+        "> DOMANDA PER CHI DECIDE: A o B?",
+        "__DOMANDA PER CHI DECIDE:__ A o B?",
+        "- **DOMANDA PER CHI DECIDE**: A o B?",
+        "Domanda per chi decide: A o B?",
+    ],
+)
+def test_domanda_con_formattazione_in_testa_e_un_consulto(riga: str) -> None:
+    """RED sul codice di oggi (B9-R5 stretta): consulti persi se il segno ha un elenco, un titolo, una citazione, la
+    chiusura del grassetto prima dei due punti o le maiuscole diverse."""
+    domanda = domanda_del_consulto("Rapporto.\n\n" + riga + "\n- A\n- B\n")
+    assert domanda == "DOMANDA PER CHI DECIDE: A o B?\n- A\n- B"
+
+
+@pytest.mark.parametrize(
+    "testo",
+    [
+        "Ho aggiunto il test:\n\n```python\n    DOMANDA PER CHI DECIDE: finta\n```\nTutto verde.",
+        "Esempio:\n  ~~~\nDOMANDA PER CHI DECIDE: finta\n  ~~~\nFine.",
+        "Cito `DOMANDA PER CHI DECIDE:` e `- DOMANDA PER CHI DECIDE:` a metà riga.",
+    ],
+)
+def test_segno_in_un_blocco_recintato_o_citato_non_conta(testo: str) -> None:
+    """RED sul codice di oggi (la riga dentro il recinto conta); l'ultimo caso è una guardia."""
+    assert domanda_del_consulto(testo) is None
+
+
+def test_un_recinto_mai_chiuso_non_nasconde_la_domanda() -> None:
+    """Chi decide (dopo la revisione): un blocco aperto e dimenticato non deve far perdere una domanda."""
+    testo = "Esempio non chiuso:\n```\nDOMANDA PER CHI DECIDE: e adesso?\n- A\n"
+    assert domanda_del_consulto(testo) == "DOMANDA PER CHI DECIDE: e adesso?\n- A"
+
+
+def test_domanda_dopo_un_blocco_recintato_conta() -> None:
+    testo = "```\nDOMANDA PER CHI DECIDE: finta\n```\n\n- DOMANDA PER CHI DECIDE: vera?\n- A\n"
+    assert domanda_del_consulto(testo) == "DOMANDA PER CHI DECIDE: vera?\n- A"
+
+
+def test_domanda_in_elenco_numerato_parte_il_consulto(tmp_path: Path) -> None:
+    """RED sul codice di oggi: la riga comincia con `1.`, il consulto va perso e si conta «nessun commit»."""
+    testo = "1. DOMANDA PER CHI DECIDE: quale file?\n\nContesto.\n- A: uno\n- B: due\n"
+    esito, forgia, board, porta = _giro_con_rapporto(tmp_path, testo)
+
+    assert esito.esito == "in_attesa"
+    consigliere = next(lancio for lancio in porta.lanci if lancio["sola_lettura"])
+    domanda = consigliere["prompt"].split("\n\n", 1)[1]
+    assert domanda.startswith("DOMANDA PER CHI DECIDE: quale file?")
+    assert "- B: due" in domanda
+    assert "tentativi" not in nota(board.lavoro(1).nota)
+
+
+# --- Un guasto prima del giro non diventa un anello (gestore di `giro()`) ---------------------------------------
+
+
+class ForgiaGuasta(ForgiaFinta):
+    """Una forgia che non risponde: l'errore cade prima dell'avvio del giro."""
+
+    def issue(self, n: int) -> Issue:
+        raise RuntimeError("HTTP 500: forgia guasta")
+
+
+def _forgia_guasta() -> tuple[ForgiaGuasta, BoardFinta]:
+    iss = Issue(numero=1, titolo="Compito sciolto", corpo=_brief("true"), stato="OPEN")
+    return ForgiaGuasta(issues=[iss]), BoardFinta(
+        lavori=[Lavoro(numero=1, titolo="Compito sciolto", stato="pronto")]
+    )
+
+
+def test_guasto_prima_del_giro_conta_un_tentativo_e_resta_pronto(tmp_path: Path) -> None:
+    """RED sul codice di oggi: la nota non porta `tentativi` né `motivo`."""
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    forgia, board = _forgia_guasta()
+    porta = PortaFinta()
+
+    esito = _giro(tmp_path, clone, forgia, board, porta)
+
+    assert esito.esito == "errore"
+    assert "errore prima del giro" in (esito.motivo or "")
+    assert board.lavoro(1).stato == "pronto"
+    d_nota = nota(board.lavoro(1).nota)
+    assert d_nota["tentativi"] == "1"
+    assert d_nota["motivo"] == "errore prima del giro"
+    assert _rilanci_distributore(forgia) == 0
+
+
+def test_guasto_prima_del_giro_al_terzo_blocca_con_commento(tmp_path: Path) -> None:
+    """RED sul codice di oggi: il lavoro torna `pronto` per sempre (anello orario col giro di riserva)."""
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    forgia, board = _forgia_guasta()
+    porta = PortaFinta()
+
+    esiti = [_giro(tmp_path, clone, forgia, board, porta, minuti=10 * n).esito for n in range(3)]
+
+    assert esiti == ["errore", "errore", "bloccato"]
+    assert board.lavoro(1).stato == "bloccato"
+    assert nota(board.lavoro(1).nota)["tentativi"] == "3"
+    testi = [c.corpo for c in forgia.commenti(1)]
+    assert len(testi) == 1
+    assert "errore prima del giro tre volte" in testi[0]
+    assert "HTTP 500: forgia guasta" in testi[0]
+    assert "```" in testi[0]
+    assert _rilanci_distributore(forgia) == 1
+
+
+def test_guasto_prima_del_giro_con_la_board_muta_fa_come_prima(tmp_path: Path) -> None:
+    """Se la board non risponde nemmeno nel gestore: si prova `pronto` e l'errore si ignora."""
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    forgia, board = _forgia_guasta()
+    chiamate: list[tuple] = []
+
+    def lavoro_guasto(numero: int):
+        raise RuntimeError("board muta")
+
+    def stato_registrato(numero: int, stato: str, nota: str | None = None) -> None:
+        chiamate.append((numero, stato, nota))
+
+    board.lavoro = lavoro_guasto  # type: ignore[method-assign]
+    board.stato = stato_registrato  # type: ignore[method-assign]
+
+    esito = _giro(tmp_path, clone, forgia, board, PortaFinta())
+
+    assert esito.esito == "errore"
+    assert "errore prima del giro" in (esito.motivo or "")
+    assert chiamate[-1] == (1, "pronto", None)
+    assert _rilanci_distributore(forgia) == 0
