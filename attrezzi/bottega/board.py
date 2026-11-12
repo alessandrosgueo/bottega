@@ -621,7 +621,9 @@ class BoardComando:
                 except subprocess.TimeoutExpired:
                     return 124, "", f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}"
 
-            codice, stdout, stderr = ritenta(prova, argomenti, lettura=True)
+            codice, stdout, stderr = ritenta(
+                prova, argomenti, lettura=True, nome=f"adattatore {argomenti[-1]}"
+            )
             if codice == 124:
                 raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}")
             if codice != 0:

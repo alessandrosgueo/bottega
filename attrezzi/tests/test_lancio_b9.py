@@ -454,7 +454,7 @@ def test_comando_segui_casi(capsys: pytest.CaptureFixture[str]):
                     ]
                 ),
             ),
-            "gh run list --limit 20 --json databaseId,workflowName,status,conclusion,createdAt,updatedAt": (
+            "gh workflow list --all --json name,path": (
                 0,
                 "[]",
             ),
@@ -475,7 +475,7 @@ def test_comando_segui_casi(capsys: pytest.CaptureFixture[str]):
                 0,
                 json.dumps([{"state": "open"}]),
             ),
-            "gh run list --limit 20 --json databaseId,workflowName,status,conclusion,createdAt,updatedAt": (
+            "gh workflow list --all --json name,path": (
                 0,
                 "[]",
             ),
@@ -497,6 +497,15 @@ def test_comando_segui_casi(capsys: pytest.CaptureFixture[str]):
             if passi[0] == 0:
                 return 0, json.dumps([{"state": "open"}])
             return 0, json.dumps([{"state": "closed"}])
+        if "workflow list" in cmd_str:
+            return 0, json.dumps(
+                [
+                    {
+                        "name": "bottega-esecutore-test",
+                        "path": ".github/workflows/bottega-esecutore-test.yml",
+                    }
+                ]
+            )
         if "run list" in cmd_str:
             return 0, json.dumps(
                 [
@@ -539,7 +548,18 @@ def test_comando_segui_casi(capsys: pytest.CaptureFixture[str]):
                 0,
                 json.dumps([{"state": "open"}]),
             ),
-            "gh run list --limit 20 --json databaseId,workflowName,status,conclusion,createdAt,updatedAt": (
+            "gh workflow list --all --json name,path": (
+                0,
+                json.dumps(
+                    [
+                        {
+                            "name": "bottega-esecutore-test",
+                            "path": ".github/workflows/bottega-esecutore-test.yml",
+                        }
+                    ]
+                ),
+            ),
+            "gh run list --workflow .github/workflows/bottega-esecutore-test.yml --limit 10 --json databaseId,status,conclusion,createdAt,updatedAt": (
                 0,
                 json.dumps(
                     [
@@ -578,7 +598,18 @@ def test_comando_segui_casi(capsys: pytest.CaptureFixture[str]):
                 0,
                 json.dumps([{"state": "open"}]),
             ),
-            "gh run list --limit 20 --json databaseId,workflowName,status,conclusion,createdAt,updatedAt": (
+            "gh workflow list --all --json name,path": (
+                0,
+                json.dumps(
+                    [
+                        {
+                            "name": "bottega-esecutore-test",
+                            "path": ".github/workflows/bottega-esecutore-test.yml",
+                        }
+                    ]
+                ),
+            ),
+            "gh run list --workflow .github/workflows/bottega-esecutore-test.yml --limit 10 --json databaseId,status,conclusion,createdAt,updatedAt": (
                 0,
                 json.dumps(
                     [
@@ -672,3 +703,95 @@ def test_esecutore_gh_tiene_solo_lo_stdout_se_riesce(tmp_path: Path) -> None:
     assert codice == 0 and json.loads(uscita) == {"a": 1}
     codice, uscita = esecutore_gh([str(script), "3"])
     assert codice == 3 and "A new release" in uscita
+
+
+def test_segui_falso_fermo_con_venti_giri_di_altri_workflow() -> None:
+    """Un giro dell'esecutore in corso da ore, ma fuori dai 20 giri più recenti del repo (commenti, CI)."""
+    import argparse
+    t0 = datetime(2026, 11, 12, 10, 0, tzinfo=UTC)
+    orologio = FintoOrologio(t0)
+    board = FintaBoard({42: Lavoro(numero=42, titolo="L", stato="in corso")})
+    altri = [
+        {
+            "databaseId": 100 + i,
+            "workflowName": "bottega-distributore",
+            "status": "completed",
+            "conclusion": "skipped",
+            "createdAt": f"2026-11-12T09:{30 + i}:00Z",
+            "updatedAt": f"2026-11-12T09:{30 + i}:05Z",
+        }
+        for i in range(20)
+    ]
+
+    def esegui(cmd: Sequence[str], _=None) -> tuple[int, str]:
+        s = " ".join(cmd)
+        if "sub_issues" in s:
+            return 0, json.dumps([{"state": "open"}])
+        if "workflow list" in s:
+            return 0, json.dumps([{"name": "bottega-esecutore-test", "path": ".github/workflows/esecutore.yml"}])
+        if "run list" in s and "--workflow" in s:
+            return 0, json.dumps(
+                [
+                    {
+                        "databaseId": 999,
+                        "status": "in_progress",
+                        "conclusion": None,
+                        "createdAt": "2026-11-12T08:00:00Z",
+                        "updatedAt": "2026-11-12T08:00:00Z",
+                    }
+                ]
+            )
+        if "run list" in s:
+            return 0, json.dumps(altri)
+        return 0, ""
+
+    args = argparse.Namespace(numero=42, repo="o/r", intervallo=300, fermo=1200.0, tetto=18000.0)
+    rc = comando_segui(args, esegui=esegui, dormi=orologio.dormi, adesso=orologio.adesso, board=board)
+    assert rc != 4, "fermo dichiarato con un giro dell'esecutore ancora in corso"
+
+
+def test_lancia_legge_solo_il_primo_giro_visto() -> None:
+    """Al primo `run list` c'è solo un giro nato da un altro evento; il nostro nasce 5 s dopo e avvia il lavoro."""
+    import argparse
+    t0 = datetime(2026, 11, 12, 10, 0, 0, tzinfo=UTC)
+    orologio = FintoOrologio(t0)
+    polls = [0]
+
+    def esegui(cmd: Sequence[str], _=None) -> tuple[int, str]:
+        s = " ".join(cmd)
+        if "issue view" in s:
+            return 0, json.dumps({"labels": []})
+        if "issue edit" in s:
+            return 0, ""
+        if "run list" in s:
+            polls[0] += 1
+            giri = [{"databaseId": 1, "createdAt": "2026-11-12T10:00:01Z"}]
+            if polls[0] > 1:
+                giri.insert(0, {"databaseId": 2, "createdAt": "2026-11-12T10:00:03Z"})
+                giri.insert(0, {"databaseId": 3, "createdAt": "2026-11-12T10:00:06Z"})
+            return 0, json.dumps(giri)
+        if "run view 1" in s and "--json" in s:
+            return 0, json.dumps({"status": "completed", "conclusion": "success"})
+        if "run view 2" in s and "--json" in s:
+            return 0, json.dumps({"status": "completed", "conclusion": "cancelled"})
+        if "run view 3" in s and "--json" in s:
+            return 0, json.dumps({"status": "completed", "conclusion": "success"})
+        if "run view 1 --log" in s:
+            return 0, "distributore\tpasso\tlavoro 7: assegnato a «X» (b), workflow f avviato\n"
+        if "run view 2 --log" in s:
+            return 0, "giro annullato\n"
+        if "run view 3 --log" in s:
+            return 0, "distributore\tpasso\tlavoro 42: assegnato a «X» (b), workflow f avviato\n"
+        return 1, "inatteso " + s
+
+    args = argparse.Namespace(numero=42, repo="o/r", attesa=180, tetto=900)
+    rc = comando_lancia(args, esegui=esegui, dormi=orologio.dormi, adesso=orologio.adesso)
+    assert rc == 0
+
+
+def test_esito_prima_riga_non_decisiva() -> None:
+    registro = (
+        "lavoro 42: in corso da oltre 7 ore, reimpostato a pronto\n"
+        "lavoro 42: assegnato a «X» (b), workflow f avviato\n"
+    )
+    assert esito_del_lavoro(registro, 42)[0] == "avviato"
