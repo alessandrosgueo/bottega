@@ -8,6 +8,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, Protocol
 
+from bottega.ritenta import ritenta
+
 
 @dataclass(frozen=True)
 class Lavoro:
@@ -303,19 +305,26 @@ class BoardProject:
         self._tipo_proprietario: str | None = None
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
-        try:
-            risultato = subprocess.run(
-                ["gh", *argomenti],
-                input=ingresso,
-                text=True,
-                capture_output=True,
-                timeout=120,
-            )
-        except subprocess.TimeoutExpired:
-            raise ErroreBoard(f"gh non ha risposto in 120 secondi: {argomenti[:2]}") from None
-        if risultato.returncode != 0:
-            raise ErroreBoard(f"gh ha fallito ({risultato.returncode}): {risultato.stderr.strip()}")
-        return risultato.stdout
+        def prova() -> tuple[int, str, str]:
+            try:
+                risultato = subprocess.run(
+                    ["gh", *argomenti],
+                    input=ingresso,
+                    text=True,
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+                return risultato.returncode, risultato.stdout, risultato.stderr
+            except subprocess.TimeoutExpired:
+                return 124, "", f"gh non ha risposto in 120 secondi: {argomenti[:2]}"
+
+        codice, stdout, stderr = ritenta(prova, argomenti)
+        if codice == 124:
+            raise ErroreBoard(f"gh non ha risposto in 120 secondi: {argomenti[:2]}")
+        if codice != 0:
+            raise ErroreBoard(f"gh ha fallito ({codice}): {stderr.strip()}")
+        return stdout
 
     def _leggi_progetto(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[int, tuple[str, Lavoro]]]:
         cursor: str | None = None
@@ -578,9 +587,30 @@ class BoardComando:
         self._cmd = tuple(cmd)
         self._esegui_custom = esegui
 
-    def _esegui(self, argomenti: list[str], ingresso: str | None = None) -> str:
+    def _esegui(self, argomenti: list[str], ingresso: str | None = None, *, lettura: bool = False) -> str:
         if self._esegui_custom is not None:
             return self._esegui_custom(argomenti, ingresso)
+        if lettura:
+            def prova() -> tuple[int, str, str]:
+                try:
+                    res = subprocess.run(
+                        argomenti,
+                        input=ingresso,
+                        text=True,
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                    )
+                    return res.returncode, res.stdout, res.stderr
+                except subprocess.TimeoutExpired:
+                    return 124, "", f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}"
+
+            codice, stdout, stderr = ritenta(prova, argomenti, lettura=True)
+            if codice == 124:
+                raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}")
+            if codice != 0:
+                raise ErroreBoard(f"Comando {argomenti} fallito ({codice}): {stderr.strip()}")
+            return stdout
         try:
             risultato = subprocess.run(
                 argomenti,
@@ -588,6 +618,7 @@ class BoardComando:
                 text=True,
                 capture_output=True,
                 timeout=120,
+                check=False,
             )
         except subprocess.TimeoutExpired:
             raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}") from None
@@ -596,17 +627,17 @@ class BoardComando:
         return risultato.stdout
 
     def pronti(self) -> list[Lavoro]:
-        out = self._esegui([*self._cmd, "pronti"])
+        out = self._esegui([*self._cmd, "pronti"], lettura=True)
         dati = json.loads(out)
         return [_dati_a_lavoro(d) for d in dati]
 
     def in_corso(self) -> list[Lavoro]:
-        out = self._esegui([*self._cmd, "in-corso"])
+        out = self._esegui([*self._cmd, "in-corso"], lettura=True)
         dati = json.loads(out)
         return [_dati_a_lavoro(d) for d in dati]
 
     def elenco(self) -> list[Lavoro]:
-        out = self._esegui([*self._cmd, "elenco"])
+        out = self._esegui([*self._cmd, "elenco"], lettura=True)
         dati = json.loads(out)
         return [_dati_a_lavoro(d) for d in dati]
 
