@@ -24,6 +24,7 @@ class Lavoro:
     nota: str = ""
     repo: str | None = None
     campi: dict[str, str] = field(default_factory=dict)
+    aperta: bool = True
 
 
 class ErroreBoard(Exception):
@@ -85,6 +86,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -96,6 +98,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -165,6 +168,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -176,6 +180,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -423,6 +428,7 @@ class BoardProject:
                 elif "date" in fv and fv["date"] is not None:
                     valori[fn] = str(fv["date"])
 
+            aperta = content.get("state", "OPEN") == "OPEN"
             lav = Lavoro(
                 numero=num,
                 titolo=titolo,
@@ -433,6 +439,7 @@ class BoardProject:
                 nota=valori.get("Nota del giro", ""),
                 repo=item_repo,
                 campi=valori,
+                aperta=aperta,
             )
             items[num] = (item_id, lav)
 
@@ -442,6 +449,8 @@ class BoardProject:
         _, _, items = self._leggi_progetto()
         risultato: list[Lavoro] = []
         for _, lav in items.values():
+            if not lav.aperta:
+                continue
             if lav.stato == "pronto" or (lav.esito == "correzioni" and lav.stato != "in corso"):
                 risultato.append(lav)
         return risultato
@@ -465,6 +474,8 @@ class BoardProject:
         if numero not in items:
             return False
         _, lav = items[numero]
+        if not lav.aperta:
+            return False
         if not (lav.stato == "pronto" or (lav.esito == "correzioni" and lav.stato != "in corso")):
             return False
 
@@ -560,6 +571,11 @@ _CAMPI_LAVORO = {f.name for f in fields(Lavoro)}
 
 def _dati_a_lavoro(d: dict[str, Any]) -> Lavoro:
     d_filtrato = {k: v for k, v in d.items() if k in _CAMPI_LAVORO}
+    val_aperta = d.get("aperta")
+    if isinstance(val_aperta, bool):
+        d_filtrato["aperta"] = val_aperta
+    else:
+        d_filtrato["aperta"] = True
     if "campi" in d_filtrato and isinstance(d_filtrato["campi"], dict):
         d_filtrato["campi"] = {
             str(k): _formatta_numero_str(v) if isinstance(v, (int, float)) else str(v)
@@ -629,7 +645,7 @@ class BoardComando:
     def pronti(self) -> list[Lavoro]:
         out = self._esegui([*self._cmd, "pronti"], lettura=True)
         dati = json.loads(out)
-        return [_dati_a_lavoro(d) for d in dati]
+        return [lav for d in dati if (lav := _dati_a_lavoro(d)).aperta]
 
     def in_corso(self) -> list[Lavoro]:
         out = self._esegui([*self._cmd, "in-corso"], lettura=True)
