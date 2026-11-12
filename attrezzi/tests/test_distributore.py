@@ -1773,7 +1773,7 @@ def _distribuisci_uno(forgia: ForgiaFinta) -> tuple[list[str], BoardFinta]:
 
 def test_b7_senza_fatto_quando_lo_dice() -> None:
     righe, board = _distribuisci_uno(ForgiaFinta([Issue(numero=1, titolo="Compito", corpo="Brief senza prova")]))
-    assert "lavoro 1: senza «Fatto quando», salto" in righe
+    assert any(r.startswith("lavoro 1: senza «Fatto quando» nel corpo del lavoro") for r in righe)
     assert not any(r[0] == "prendi" for r in board.registro)
 
 

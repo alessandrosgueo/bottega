@@ -107,16 +107,18 @@ def _elegibile_per_etichette(etichette: Sequence[str], liberi: Sequence[str], no
     return False
 
 
-def _ricava_fatto_quando(lav_numero: int, forgia: Forgia) -> str | None:
-    """Estrae il comando Fatto quando dal corpo dell'issue o della prima sotto-issue aperta.
+def _ricava_fatto_quando(lav_numero: int, forgia: Forgia) -> tuple[str, str | None]:
+    """Estrae il comando Fatto quando dal corpo dell'issue o della prima sotto-issue aperta, con dove l'ha cercato.
 
-    Un errore della forgia sale a chi chiama, che lo dice (B7, J4): prima diventava un «senza Fatto quando» muto."""
+    Un errore della forgia sale a chi chiama, che lo dice (B7, J4): prima diventava un «senza Fatto quando» muto.
+    Il «dove» (B11) nomina il compito: un compito di correzione aggiunto a mano senza il suo «Fatto quando» fermava il
+    lavoro con un messaggio che non diceva quale."""
     sotto = forgia.sotto_issue(lav_numero)
     aperte = [s for s in sotto if s.aperta]
     if aperte:
-        return fatto_quando(aperte[0].corpo)
+        return f"nel compito #{aperte[0].numero}", fatto_quando(aperte[0].corpo)
     iss = forgia.issue(lav_numero)
-    return fatto_quando(iss.corpo)
+    return "nel corpo del lavoro", fatto_quando(iss.corpo)
 
 
 def _recinta(testo: str, limite: int = 60000) -> str:
@@ -488,7 +490,7 @@ def distribuisci(
         try:
             iss = forgia.issue(lav.numero)
             autore = iss.autore.strip().casefold() if iss.autore else ""
-            fq = _ricava_fatto_quando(lav.numero, forgia) if autore in comandanti_cf else None
+            dove_fq, fq = _ricava_fatto_quando(lav.numero, forgia) if autore in comandanti_cf else ("", None)
         except Exception as e:
             riga = f"lavoro {lav.numero}: la forgia non risponde ({e}), salto"
             righe.append(riga)
@@ -500,7 +502,10 @@ def distribuisci(
             print(riga)
             continue
         if fq is None:
-            riga = f"lavoro {lav.numero}: senza «Fatto quando», salto"
+            riga = (
+                f"lavoro {lav.numero}: senza «Fatto quando» {dove_fq} (serve la sezione «## Fatto quando» con il "
+                "comando in un blocco recintato), salto"
+            )
             righe.append(riga)
             print(riga)
             continue
