@@ -63,17 +63,25 @@ lavoro non deve restare fermo senza che nessuno lo sappia, e un compito rosso no
   chiave `consegnato` tolta dalla nota (la ripresa B7-2 non deve saltare all'oracolo), stato `pronto` e distributore
   rilanciato; al terzo, `bloccato` col commento «oracolo rosso tre volte: serve chi decide». Il giro dopo trova la
   consegna sul ramo e l'esito dell'oracolo fra i commenti del fascicolo. Vale anche per un lavoro senza sotto-issue.
-- **B9-R5. La domanda è una riga, non la coda:** il consulto parte se una riga del testo finale, tolti gli spazi e i
-  `*` in testa, comincia con `DOMANDA PER CHI DECIDE:`; la domanda è il testo da quella riga (l'ultima che lo fa) alla
-  fine. Una citazione fra apici inversi a metà riga non conta.
+- **B9-R5. La domanda è una riga, non la coda:** il consulto parte se una riga del testo finale, tolti in testa spazi,
+  `-`, `+`, `>`, `#`, `*`, `_` e un numero d'elenco, comincia con `DOMANDA PER CHI DECIDE` (senza maiuscole, la
+  formattazione può chiudersi prima dei due punti); la domanda è il testo da quella riga (l'ultima che lo fa) alla fine.
+  Una citazione a metà riga e le righe dentro un blocco di codice recintato non contano. *(Allargato dopo la revisione:
+  la prima versione toglieva solo spazi e `*`, e perdeva le domande scritte come titolo o come voce d'elenco.)*
 - **B9-R6. `bottega lancia N` e `bottega segui N`** (`attrezzi/bottega/lancio.py`, nuovo):
   - `lancia`: mette l'etichetta `bottega: fuori` (se c'è già, avvia il distributore), aspetta il giro del distributore
     nato dopo, ne legge il registro e dice che cosa ha deciso per **quel** lavoro. Esce `0` avviato, `2` finestra di
     manutenzione, `3` bottega occupata, `4` ramo principale rosso, `1` nessuna riga o un guasto.
   - `segui`: guarda il lavoro finché non succede qualcosa per chi decide, ed esce `0` finito (lavoro consegnato o
     tutte le sotto-issue chiuse), `2` in attesa (una domanda), `3` bloccato, `4` fermo (nessun giro dell'esecutore in
-    coda o in corso da `--fermo` secondi, di serie 1200, col lavoro pronto o in corso), `5` un giro dell'esecutore
-    finito male dopo l'inizio, `6` tempo scaduto (`--tetto`, di serie 18000). Il verdetto è una funzione pura.
+    coda o in corso da `--fermo` secondi, di serie 1200, col lavoro pronto o in corso), `6` tempo scaduto (`--tetto`,
+    di serie 18000). Un giro dell'esecutore finito male è un avviso, non un'uscita: con B9-R4 la catena va avanti, e se
+    si ferma lo dice il fermo. Il verdetto è una funzione pura. I giri si leggono workflow per workflow (quelli che
+    cominciano con `bottega-esecutore`); `lancia` legge tutti i giri del distributore nati dopo il lancio, finché uno
+    parla di quel lavoro.
+- **B9-R7. Un guasto fisso prima del giro si blocca** (dopo la revisione): col giro di riserva un errore prima del giro
+  ripartirebbe ogni ora per sempre. Conta un tentativo come gli altri (`motivo=errore prima del giro`) e al terzo il
+  lavoro va `bloccato`.
 
 ## Compiti
 
