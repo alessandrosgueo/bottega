@@ -118,6 +118,8 @@ le vuole le fa una volta a mano.
 - `bottega ferma --repo <owner>/<repo>` spegne i workflow della bottega del progetto; `bottega riparti` li riaccende.
 - `bottega aggiorna --repo <owner>/<repo> --tag <tag>`, nel clone del progetto: una PR che porta i workflow al
   commit del tag nuovo della bottega.
+  `bottega aggiorna` cambia solo i riferimenti dei workflow. Chi ha installato prima della 0.2.1 aggiunge a mano il
+  giro di riserva e la condizione di `notte:`, copiandoli dal modello.
 - Togliere (a mano, in quest'ordine): `sudo systemctl disable --now bottega-runner-<owner>-<repo>.service` e
   `sudo rm /etc/systemd/system/bottega-runner-<owner>-<repo>.service`; poi la registrazione, col token di rimozione
   solo nell'ambiente (mai scritto né in un argomento): `export ACTIONS_RUNNER_INPUT_TOKEN="$(gh api -X POST
