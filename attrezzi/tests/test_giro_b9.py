@@ -529,7 +529,7 @@ def test_guasto_prima_del_giro_al_terzo_blocca_con_commento(tmp_path: Path) -> N
     assert nota(board.lavoro(1).nota)["tentativi"] == "3"
     testi = [c.corpo for c in forgia.commenti(1)]
     assert len(testi) == 1
-    assert "errore prima del giro tre volte" in testi[0]
+    assert "tre tentativi in tutto" in testi[0]
     assert "HTTP 500: forgia guasta" in testi[0]
     assert "```" in testi[0]
     assert _rilanci_distributore(forgia) == 1
@@ -556,3 +556,27 @@ def test_guasto_prima_del_giro_con_la_board_muta_fa_come_prima(tmp_path: Path) -
     assert "errore prima del giro" in (esito.motivo or "")
     assert chiamate[-1] == (1, "pronto", None)
     assert _rilanci_distributore(forgia) == 0
+
+
+def test_guasto_prima_del_giro_non_tocca_un_lavoro_consegnato(tmp_path: Path) -> None:
+    """Rilettura delle correzioni: un lavoro già consegnato non torna pronto né si blocca."""
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    iss = Issue(numero=1, titolo="Compito sciolto", corpo=_brief("true"), stato="OPEN")
+    forgia = ForgiaGuasta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito sciolto", stato="consegnato", nota="tentativi=2")])
+
+    esito = _giro(tmp_path, clone, forgia, board, PortaFinta())
+
+    assert esito.esito == "errore"
+    assert board.lavoro(1).stato == "consegnato"
+    assert board.lavoro(1).nota == "tentativi=2"
+
+
+def test_segno_dopo_un_numero_e_molti_spazi_resta_lineare() -> None:
+    """Rilettura delle correzioni: `1.` seguito da 30000 spazi impiegava ~9 s (regex quadratica)."""
+    import time
+
+    inizio = time.monotonic()
+    assert domanda_del_consulto("1." + " " * 30000 + "x") is None
+    assert domanda_del_consulto("1.   **DOMANDA PER CHI DECIDE:** sì?") == "DOMANDA PER CHI DECIDE: sì?"
+    assert time.monotonic() - inizio < 1.0

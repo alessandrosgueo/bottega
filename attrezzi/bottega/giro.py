@@ -153,7 +153,7 @@ class EsitoGiro:
 # recintato non conta.
 SEGNO_DOMANDA = "DOMANDA PER CHI DECIDE:"
 _RIGA_DOMANDA = re.compile(
-    r"^(?P<testa>[ \t\-+>#*_]*(?:\d+[.)][ \t]+[ \t\-+>#*_]*)?)DOMANDA PER CHI DECIDE(?P<chiusura>[*_]*):",
+    r"^(?P<testa>[ \t\-+>#*_]*(?:\d+[.)][ \t]+(?:[\-+>#*_][ \t\-+>#*_]*)?)?)DOMANDA PER CHI DECIDE(?P<chiusura>[*_]*):",
     re.IGNORECASE,
 )
 _RECINTO = re.compile(r"^[ \t]*(`{3,}|~{3,})(?P<resto>.*)$")
@@ -878,6 +878,9 @@ def giro(
         motivo = f"errore prima del giro: {exc}"
         try:
             lav_ora = board.lavoro(lavoro)
+            if lav_ora is not None and lav_ora.stato == "consegnato":
+                # Un lavoro già consegnato non torna pronto né si blocca per un giro caduto prima di cominciare.
+                return EsitoGiro("errore", motivo=motivo)
             d_errore = nota(lav_ora.nota if lav_ora else "")
             tentativi = int(d_errore.get("tentativi", 0)) + 1
             d_errore["tentativi"] = str(tentativi)
@@ -896,7 +899,7 @@ def giro(
         try:
             forgia.commenta(
                 lavoro,
-                "Lavoro bloccato: errore prima del giro tre volte, serve chi decide.\n\n"
+                "Lavoro bloccato: tre tentativi in tutto, l'ultimo caduto prima del giro, serve chi decide.\n\n"
                 f"{recinta_testo_modello(str(exc))}",
                 ruolo="esecutore",
             )
