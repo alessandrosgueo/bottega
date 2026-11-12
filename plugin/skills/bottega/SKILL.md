@@ -41,9 +41,10 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
   configurazione.
 - **La configurazione** del progetto è `.github/bottega/bottega.toml`: botteghe, candidati per funzione, chi può
   comandare, l'adattatore della board (il comando del progetto, se ne ha uno, attraverso cui i workflow scrivono sul
-  Project). La crea l'installazione, che la CLI segue da `INSTALLA.md` nel clone della bottega. **Senza
-  configurazione, o senza runner self-hosted** (alcuni repo non li ammettono), la bottega lavora solo in sessione:
-  decide il modello della sessione, eseguono i suoi sotto-agenti più economici.
+  Project; il suo contratto è `docs/adattatore.md` nel clone della bottega). La crea l'installazione, che la CLI
+  segue da `INSTALLA.md` nel clone della bottega. **Senza configurazione, o senza runner self-hosted** (alcuni repo
+  non li ammettono), la bottega lavora solo in sessione: decide il modello della sessione, eseguono i suoi sotto-agenti
+  più economici.
 - **Project:** la board di GitHub del progetto (GitHub Projects): lavori, campi, misure.
 - **Ruling:** una decisione scritta nel piano, numerata, con il valore esatto («R3. Il timeout è 15 s»), che toglie un
   giudizio a chi esegue.
@@ -141,7 +142,9 @@ piano lascia spazio, chi esegue decide e lo scrive come Ruling.
    Ruling, e dice cosa ha controllato e cosa no.
 2. **I rilievi** li pesa chi decide, per il loro effetto, e li conta per **origine**: piano, brief o esecuzione. I gravi
    si correggono con una prova che li fissa; i minori diventano issue del progetto. Un errore che torna va nella
-   costituzione.
+   costituzione. Per ogni compito chi decide scrive l'esito e i rilievi con `bottega misura <N> --esito
+   unito|corretto|rifiutato --rilievi-piano … --rilievi-brief … --rilievi-esecuzione …`: il distributore impara solo da
+   lì, e un compito senza esito non conta.
 3. **L'unione** nel ramo principale è di chi decide, `--no-ff`, **firmata**: è il sigillo. Chi decide unisce in locale
    con `git merge --no-ff -S` e spinge; si firmano solo le unioni, così un commit di lavoro non diventa mai una punta
    da rilasciare. Un'unione dal sito di GitHub è firmata da GitHub e non passa la verifica (un attrezzo di rilascio che

@@ -522,6 +522,35 @@ def _rilancia_distributore(forgia: Forgia) -> None:
         pass
 
 
+def _motivo_misure_perse(board: Board, compito_numero: int) -> str:
+    """Perché le misure del compito non sono entrate: il compito non è sull'elenco, o la board ha sbagliato."""
+    try:
+        compito = board.lavoro(compito_numero)
+    except Exception as exc:
+        print(f"misure: rilettura del #{compito_numero} fallita: {exc}", file=sys.stderr)
+        compito = None
+    if compito is None:
+        return "il compito non è nell'elenco dell'adattatore (docs/adattatore.md)"
+    return "errore della board, vedi il log del giro"
+
+
+def _commenta_misure_perse(
+    board: Board,
+    forgia: Forgia,
+    compito_numero: int,
+    lavoro_numero: int,
+    perse: Sequence[tuple[str, int | float | str]],
+) -> None:
+    """Commenta sul lavoro madre le misure non scritte (B10-R1). Un errore si stampa su stderr e basta."""
+    try:
+        motivo = _motivo_misure_perse(board, compito_numero)
+        riga = " · ".join(f"{nome}: {valore}" for nome, valore in perse)
+        testo = f"{misure.INTESTAZIONE_MISURE_PERSE} per il compito #{compito_numero} (motivo: {motivo}).\n\n{riga}"
+        forgia.commenta(lavoro_numero, testo, ruolo="esecutore")
+    except Exception as exc:
+        print(f"misure: commento delle misure perse del #{compito_numero} non scritto: {exc}", file=sys.stderr)
+
+
 def _scrivi_misure(
     board: Board,
     compito_numero: int,
@@ -529,8 +558,15 @@ def _scrivi_misure(
     durata_secondi: int,
     consulti: int,
     token_esecutore: int,
-) -> None:
-    """Scrive le misure del compito sulla board nel finally del giro (B5-R6)."""
+    *,
+    forgia: Forgia | None = None,
+    lavoro_numero: int | None = None,
+) -> list[tuple[str, int | float | str]]:
+    """Scrive le misure del compito sulla board nel finally del giro (B5-R6).
+
+    Restituisce le misure che non sono entrate sulla board (B10-R1). Se ce ne sono e il giro conosce il lavoro madre,
+    le commenta su quel lavoro; senza misure perse non legge né commenta nulla in più.
+    """
     lav = None
     try:
         lav = board.lavoro(compito_numero)
@@ -543,10 +579,12 @@ def _scrivi_misure(
     # segna «più esecutori» e non entra né nei risultati né nei costi di un candidato. Chi ha misurato per primo sta in
     # `Misurato da` (l'id del candidato), che scrive solo il giro: `Esecutore` lo riscrive `prendi` prima del giro.
     precedente = (lav.campi.get("Misurato da") or "").strip() if lav is not None else ""
+    misurato_da_persa = False
     if not precedente:
         try:
             board.campo(compito_numero, "Misurato da", candidato.id)
         except Exception as exc:
+            misurato_da_persa = True
             print(f"misure: errore scrittura Misurato da per #{compito_numero}: {exc}", file=sys.stderr)
     if precedente and precedente.lower() != candidato.id.lower():
         voci = [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
@@ -567,10 +605,21 @@ def _scrivi_misure(
         except Exception as exc:
             print(f"misure: errore scrittura {nome_campo} per #{compito_numero}: {exc}", file=sys.stderr)
 
-    misure.somma(board, compito_numero, "Durata", durata_secondi)
-    misure.somma(board, compito_numero, "Giri", 1)
-    misure.somma(board, compito_numero, "Consulti", consulti)
-    misure.somma(board, compito_numero, "Token esecutore", token_esecutore)
+    perse: list[tuple[str, int | float | str]] = []
+    for nome_misura, quanto in (
+        ("Durata", durata_secondi),
+        ("Giri", 1),
+        ("Consulti", consulti),
+        ("Token esecutore", token_esecutore),
+    ):
+        if not misure.somma(board, compito_numero, nome_misura, quanto):
+            perse.append((nome_misura, quanto))
+    if misurato_da_persa:
+        perse.append(("Misurato da", candidato.id))
+
+    if perse and forgia is not None and lavoro_numero is not None:
+        _commenta_misure_perse(board, forgia, compito_numero, lavoro_numero, perse)
+    return perse
 
 
 def _prepara_fascicolo(
@@ -1795,6 +1844,8 @@ def _giro(
                     durata_secondi=durata_sec,
                     consulti=consulti_effettuati,
                     token_esecutore=token_tot,
+                    forgia=forgia,
+                    lavoro_numero=lavoro,
                 )
             except Exception as exc:
                 print(f"misure: errore in _scrivi_misure: {exc}", file=sys.stderr)

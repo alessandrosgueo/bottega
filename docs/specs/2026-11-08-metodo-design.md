@@ -116,7 +116,8 @@ fa, per il massimo risultato al minimo costo. La scelta viva lo serve, non lo so
 
 Un progetto che ha già un suo comando per la board lo collega come **adattatore**: i workflow non scrivono sul Project
 da soli ma passano da lui, con cinque operazioni (leggere i lavori pronti, prenderne uno, cambiarne lo stato, scrivere
-una consegna, scrivere un campo). Senza adattatore i workflow usano `gh` direttamente.
+una consegna, scrivere un campo). Senza adattatore i workflow usano `gh` direttamente. Il contratto intero (otto
+sottocomandi, chi sta in quale elenco) è in `docs/adattatore.md`.
 
 Niente cartelle condivise, niente copie, niente script di sincronia: ciò che serve a più macchine passa da git o da
 GitHub.

@@ -42,3 +42,6 @@ libreria standard), i workflow, i quaderni e la casistica. Diventerà pubblico: 
 - Un `kill -KILL -1` passato da un prefisso finto con `exec "$@"` parte come chi lancia le prove e uccide tutti i suoi
   processi: la sessione, l'editor, il Lavorante. È successo due volte in B6.4, prima che il codice chiedesse `id -u`
   attraverso il prefisso (B6.4).
+- Un errore che finisce solo su stderr di un runner non lo legge nessuno: ciò che si perde (una misura, un campo) va
+  scritto dove chi decide guarda, coi valori per ricopiarlo. Un contratto fra la bottega e un progetto (l'adattatore
+  della board) si scrive in un documento, non si deduce dal codice (B10).

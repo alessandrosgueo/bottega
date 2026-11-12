@@ -388,3 +388,35 @@ vincolo che li deve ammettere.
 **Esito:** con B la scelta in un minuto (il campo ammesso, il suo valore chiuso in un tipo, il controllo che manca come
 debito) e il compito finito al primo giro.
 **Fonte:** dal vivo 2026-11-12
+
+### CICLO-27. Le misure che la board non prende
+
+**Scenario:** il giro scrive le misure di ogni compito sulla board attraverso l'adattatore del progetto. L'adattatore
+dà a `elenco` solo i lavori madre, non i compiti: il giro non ritrova il compito e ogni misura si perde, con una riga su
+stderr del runner. Per giorni il distributore sceglie l'esecutore «su 0 risultati», e il suo commento lo dice.
+**Domanda:** come se ne accorge chi decide, e che cosa fa?
+**Opzioni:**
+- A) legge i log dei runner di tanto in tanto
+- B) la bottega scrive la perdita dove chi decide guarda (un commento sul lavoro, un avviso di `bottega segui`) coi
+  valori da ricopiare; il contratto dell'adattatore è scritto, e il progetto lo corregge
+- C) le misure non contano: si va avanti
+**Scelta:** B
+**Perché:** ciò che la bottega impara sta tutto nelle misure; un errore che va solo su stderr non lo legge nessuno. Un
+«0 risultati» dopo molti compiti è già un segnale: chi decide lo guarda.
+**Esito:** con B (0.2.2) l'adattatore corretto in un'ora, le misure di una tappa ricopiate a mano con `bottega misura`.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-28. L'esito del compito che nessuno scrive
+
+**Scenario:** chi decide rivede ogni compito, pesa i rilievi e unisce, ma non scrive l'esito del compito sulla board
+(`Esito del compito`). Il distributore conta i risultati solo da quel campo.
+**Domanda:** quando si scrive l'esito, e chi lo scrive?
+**Opzioni:**
+- A) mai: la revisione basta
+- B) chi decide, dopo la revisione finale, per ogni compito: `bottega misura <N> --esito … --rilievi-…`
+- C) il giro, quando consegna
+**Scelta:** B
+**Perché:** l'esito è il giudizio di chi rivede (unito com'era, corretto, rifiutato) e i rilievi hanno un'origine che
+solo lui conosce; il giro sa solo che le prove erano verdi. Senza esiti la scelta del candidato non impara mai.
+**Esito:** la skill lo dice ora al punto dei rilievi della fine della tappa.
+**Fonte:** dal vivo 2026-11-12

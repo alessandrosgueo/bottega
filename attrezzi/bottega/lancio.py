@@ -23,6 +23,7 @@ from bottega.configurazione import (
     leggi_configurazione,
 )
 from bottega.forgia import ForgiaGh
+from bottega.misure import INTESTAZIONE_MISURE_PERSE
 
 ESITI_LANCIO: dict[str, int] = {
     "avviato": 0,
@@ -31,6 +32,9 @@ ESITI_LANCIO: dict[str, int] = {
     "rosso": 4,
     "assente": 1,
 }
+
+# Il segno del ruolo esecutore in testa ai commenti della bottega (come segni.segna): `bottega segui` lo cerca.
+_MARCA_ESECUTORE = "<!-- bottega:esecutore -->"
 
 
 @dataclass(frozen=True)
@@ -387,6 +391,63 @@ def argomenti_segui(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _avvisi_misure_perse(
+    esegui_fn: Callable[[Sequence[str], Mapping[str, str] | None], tuple[int, str]],
+    numero: int,
+    repo_args: Sequence[str],
+    inizio: datetime,
+    visti: set[str | int],
+) -> None:
+    """Stampa un avviso per ogni commento dell'esecutore con misure non scritte sulla board (B10-R2).
+
+    Solo i commenti creati da `inizio` in poi, e ciascuno una volta sola (`visti` ne ricorda gli id). L'avviso non
+    cambia il verdetto: un errore di lettura si stampa su stderr e il passo va avanti.
+    """
+    codice, uscita = _esegui_chiamata(
+        esegui_fn, ["gh", "issue", "view", str(numero), "--json", "comments", *repo_args]
+    )
+    if codice != 0:
+        motivo = uscita.strip() if uscita.strip() else f"codice {codice}"
+        print(f"avviso: {motivo}", file=sys.stderr)
+        return
+
+    try:
+        dati = json.loads(uscita)
+    except json.JSONDecodeError as exc:
+        print(f"avviso: commenti #{numero}: {exc}", file=sys.stderr)
+        return
+    commenti = dati.get("comments") if isinstance(dati, dict) else None
+    if not isinstance(commenti, list):
+        print(f"avviso: commenti #{numero}: risposta inattesa", file=sys.stderr)
+        return
+
+    for commento in commenti:
+        if not isinstance(commento, dict):
+            continue
+        id_commento = commento.get("id")
+        corpo = commento.get("body")
+        creato_testo = commento.get("createdAt")
+        if not isinstance(id_commento, (str, int)) or id_commento in visti:
+            continue
+        if not isinstance(corpo, str) or _MARCA_ESECUTORE not in corpo or INTESTAZIONE_MISURE_PERSE not in corpo:
+            continue
+        if not isinstance(creato_testo, str):
+            continue
+        try:
+            creato = datetime.fromisoformat(creato_testo)
+        except ValueError:
+            continue
+        if _differenza_secondi(inizio, creato) < 0:
+            continue
+
+        visti.add(id_commento)
+        righe = [riga.strip() for riga in corpo.splitlines()]
+        riga_avviso = next((r for r in righe if r.startswith(INTESTAZIONE_MISURE_PERSE)), None)
+        if riga_avviso is None:
+            riga_avviso = next(r for r in righe if INTESTAZIONE_MISURE_PERSE in r)
+        print(f"avviso: {riga_avviso}")
+
+
 def comando_segui(
     args: argparse.Namespace,
     esegui: Callable[[Sequence[str], Mapping[str, str] | None], tuple[int, str]]
@@ -435,6 +496,7 @@ def comando_segui(
 
     inizio = adesso_fn()
     visti: set[int] = set()
+    commenti_visti: set[str | int] = set()
 
     while True:
         ora = adesso_fn()
@@ -557,6 +619,9 @@ def comando_segui(
         for r_id in rossi_nuovi:
             visti.add(r_id)
             print(f"avviso: giro {r_id} finito male")
+
+        # 4b. Misure non scritte sulla board, dai commenti dell'esecutore (B10-R2); l'avviso non cambia il verdetto
+        _avvisi_misure_perse(esegui_fn, numero, repo_args, inizio, commenti_visti)
 
         # 5. Stampa riga breve del passo
         aperti = sum(1 for f in figli if f)
