@@ -8,6 +8,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, Protocol
 
+from bottega.ritenta import ritenta
+
 
 @dataclass(frozen=True)
 class Lavoro:
@@ -22,6 +24,7 @@ class Lavoro:
     nota: str = ""
     repo: str | None = None
     campi: dict[str, str] = field(default_factory=dict)
+    aperta: bool = True
 
 
 class ErroreBoard(Exception):
@@ -83,6 +86,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -94,6 +98,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -163,6 +168,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -174,6 +180,7 @@ query($owner: String!, $number: Int!, $cursor: String) {
               number
               title
               url
+              state
               repository {
                 nameWithOwner
               }
@@ -303,19 +310,26 @@ class BoardProject:
         self._tipo_proprietario: str | None = None
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
-        try:
-            risultato = subprocess.run(
-                ["gh", *argomenti],
-                input=ingresso,
-                text=True,
-                capture_output=True,
-                timeout=120,
-            )
-        except subprocess.TimeoutExpired:
-            raise ErroreBoard(f"gh non ha risposto in 120 secondi: {argomenti[:2]}") from None
-        if risultato.returncode != 0:
-            raise ErroreBoard(f"gh ha fallito ({risultato.returncode}): {risultato.stderr.strip()}")
-        return risultato.stdout
+        def prova() -> tuple[int, str, str]:
+            try:
+                risultato = subprocess.run(
+                    ["gh", *argomenti],
+                    input=ingresso,
+                    text=True,
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+                return risultato.returncode, risultato.stdout, risultato.stderr
+            except subprocess.TimeoutExpired:
+                return 124, "", f"gh non ha risposto in 120 secondi: {argomenti[:2]}"
+
+        codice, stdout, stderr = ritenta(prova, argomenti)
+        if codice == 124:
+            raise ErroreBoard(f"gh non ha risposto in 120 secondi: {argomenti[:2]}")
+        if codice != 0:
+            raise ErroreBoard(f"gh ha fallito ({codice}): {stderr.strip()}")
+        return stdout
 
     def _leggi_progetto(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[int, tuple[str, Lavoro]]]:
         cursor: str | None = None
@@ -414,6 +428,7 @@ class BoardProject:
                 elif "date" in fv and fv["date"] is not None:
                     valori[fn] = str(fv["date"])
 
+            aperta = content.get("state", "OPEN") == "OPEN"
             lav = Lavoro(
                 numero=num,
                 titolo=titolo,
@@ -424,6 +439,7 @@ class BoardProject:
                 nota=valori.get("Nota del giro", ""),
                 repo=item_repo,
                 campi=valori,
+                aperta=aperta,
             )
             items[num] = (item_id, lav)
 
@@ -433,6 +449,8 @@ class BoardProject:
         _, _, items = self._leggi_progetto()
         risultato: list[Lavoro] = []
         for _, lav in items.values():
+            if not lav.aperta:
+                continue
             if lav.stato == "pronto" or (lav.esito == "correzioni" and lav.stato != "in corso"):
                 risultato.append(lav)
         return risultato
@@ -456,6 +474,8 @@ class BoardProject:
         if numero not in items:
             return False
         _, lav = items[numero]
+        if not lav.aperta:
+            return False
         if not (lav.stato == "pronto" or (lav.esito == "correzioni" and lav.stato != "in corso")):
             return False
 
@@ -551,6 +571,11 @@ _CAMPI_LAVORO = {f.name for f in fields(Lavoro)}
 
 def _dati_a_lavoro(d: dict[str, Any]) -> Lavoro:
     d_filtrato = {k: v for k, v in d.items() if k in _CAMPI_LAVORO}
+    val_aperta = d.get("aperta")
+    if isinstance(val_aperta, bool):
+        d_filtrato["aperta"] = val_aperta
+    else:
+        d_filtrato["aperta"] = True
     if "campi" in d_filtrato and isinstance(d_filtrato["campi"], dict):
         d_filtrato["campi"] = {
             str(k): _formatta_numero_str(v) if isinstance(v, (int, float)) else str(v)
@@ -578,9 +603,32 @@ class BoardComando:
         self._cmd = tuple(cmd)
         self._esegui_custom = esegui
 
-    def _esegui(self, argomenti: list[str], ingresso: str | None = None) -> str:
+    def _esegui(self, argomenti: list[str], ingresso: str | None = None, *, lettura: bool = False) -> str:
         if self._esegui_custom is not None:
             return self._esegui_custom(argomenti, ingresso)
+        if lettura:
+            def prova() -> tuple[int, str, str]:
+                try:
+                    res = subprocess.run(
+                        argomenti,
+                        input=ingresso,
+                        text=True,
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                    )
+                    return res.returncode, res.stdout, res.stderr
+                except subprocess.TimeoutExpired:
+                    return 124, "", f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}"
+
+            codice, stdout, stderr = ritenta(
+                prova, argomenti, lettura=True, nome=f"adattatore {argomenti[-1]}"
+            )
+            if codice == 124:
+                raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}")
+            if codice != 0:
+                raise ErroreBoard(f"Comando {argomenti} fallito ({codice}): {stderr.strip()}")
+            return stdout
         try:
             risultato = subprocess.run(
                 argomenti,
@@ -588,6 +636,7 @@ class BoardComando:
                 text=True,
                 capture_output=True,
                 timeout=120,
+                check=False,
             )
         except subprocess.TimeoutExpired:
             raise ErroreBoard(f"l'adattatore non ha risposto in 120 secondi: {argomenti[-2:]}") from None
@@ -596,17 +645,17 @@ class BoardComando:
         return risultato.stdout
 
     def pronti(self) -> list[Lavoro]:
-        out = self._esegui([*self._cmd, "pronti"])
+        out = self._esegui([*self._cmd, "pronti"], lettura=True)
         dati = json.loads(out)
-        return [_dati_a_lavoro(d) for d in dati]
+        return [lav for d in dati if (lav := _dati_a_lavoro(d)).aperta]
 
     def in_corso(self) -> list[Lavoro]:
-        out = self._esegui([*self._cmd, "in-corso"])
+        out = self._esegui([*self._cmd, "in-corso"], lettura=True)
         dati = json.loads(out)
         return [_dati_a_lavoro(d) for d in dati]
 
     def elenco(self) -> list[Lavoro]:
-        out = self._esegui([*self._cmd, "elenco"])
+        out = self._esegui([*self._cmd, "elenco"], lettura=True)
         dati = json.loads(out)
         return [_dati_a_lavoro(d) for d in dati]
 

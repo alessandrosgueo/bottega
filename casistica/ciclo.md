@@ -255,3 +255,105 @@ stessa, in silenzio, a ogni giro.
 **Esito:** con A il distributore installato (un'espressione `${{ … }}` su più righe) risultava un rischio e ogni giro
 sarebbe restato in attesa; l'ha trovato la terza rilettura. La prova B è rossa sul codice di prima (B6-R24).
 **Fonte:** dal vivo 2026-11-09
+
+### CICLO-18. Il lancio che non parte
+
+**Scenario:** chi decide mette l'etichetta del lavoro e si mette ad aspettare errori e domande. L'etichetta cade dentro
+la finestra di manutenzione: il distributore scrive «nessun lavoro avviato» ed esce verde.
+**Domanda:** come si lancia un lavoro?
+**Opzioni:**
+- A) si mette l'etichetta e si aspetta un errore o una domanda
+- B) si lancia con un comando che legge che cosa il distributore ha deciso per quel lavoro, e l'attesa guarda anche
+  il silenzio (nessun giro da troppo tempo)
+**Scelta:** B
+**Perché:** un lancio che non parte non dà errori: senza leggere la riga del distributore si aspetta a vuoto.
+**Esito:** con A tre ore perse; da B9 `bottega lancia` esce `2` nella finestra e `bottega segui` esce `4` sul fermo.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-19. Il giro caduto prima di cominciare
+
+**Scenario:** un giro dell'esecutore riceve un `HTTP 503` di GitHub alla prima lettura. Il lavoro torna `pronto`, ma
+il giro dopo lo avrebbe chiamato il giro appena caduto: la catena è ferma, e il solo giro pianificato è quello di notte.
+**Domanda:** che cosa lo riprende?
+**Opzioni:**
+- A) il giro di notte
+- B) un ritentativo breve sugli errori passeggeri (solo letture, o richieste mai arrivate) e un giro di riserva ogni
+  ora
+- C) il distributore rilanciato subito dopo ogni errore
+**Scelta:** B
+**Perché:** un errore passeggero passa in pochi secondi; un guasto fisso con C diventerebbe un anello di workflow; A
+lascia il lavoro fermo per ore.
+**Esito:** con A il lavoro restava fermo fino al giorno dopo; ripreso a mano, poi B9-R1 e B9-R2.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-20. Il lavoro chiuso con l'etichetta sopra
+
+**Scenario:** un lavoro chiuso a mano conserva l'etichetta e un `Esito` = `correzioni` di una revisione vecchia. Il
+distributore lo prende come pronto («correzioni e non in corso»), lo riapre e lo rimanda all'esecutore; il lavoro nuovo
+aspetta.
+**Domanda:** chi deve accorgersene?
+**Opzioni:**
+- A) chi decide, togliendo sempre etichette ed esiti prima di chiudere
+- B) la board: un'issue chiusa non è mai pronta, qualunque siano i campi
+**Scelta:** B
+**Perché:** una regola sul gesto di chi chiude si dimentica; lo stato dell'issue c'è già.
+**Esito:** con A un giro sprecato e il lavoro nuovo saltato; B9-R3.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-21. L'oracolo rosso in una tappa
+
+**Scenario:** un lavoro con sei compiti sullo stesso ramo. L'oracolo del quarto è rosso (una prova di un compito di
+prima cade); il giro apre la PR, scrive l'esito, chiude il compito e passa al quinto.
+**Domanda:** che cosa fa il giro con un oracolo rosso?
+**Opzioni:**
+- A) consegna comunque: la PR dice l'esito, chi decide guarderà
+- B) non chiude il compito: lo rimette pronto con l'esito fra i commenti, al terzo rosso lo blocca per chi decide
+**Scelta:** B
+**Perché:** in una tappa il compito dopo parte dalla base del compito prima; un rosso consegnato diventa il problema di
+un altro esecutore, che non ha il permesso di toccarlo.
+**Esito:** con A il quinto esecutore ha trovato la suite rossa e si è fermato con una domanda; B9-R4 (cambia B3-R12).
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-22. La domanda in testa al rapporto
+
+**Scenario:** l'esecutore scrive `DOMANDA PER CHI DECIDE:` come prima riga del rapporto, poi la diagnosi e le opzioni.
+Il giro cerca il segno solo nell'ultima riga.
+**Domanda:** dove si riconosce una domanda?
+**Opzioni:**
+- A) solo nell'ultima riga, come dice la regola data all'esecutore
+- B) in ogni riga che comincia col segno; la domanda va da lì alla fine
+**Scelta:** B
+**Perché:** il modello rispetta il senso della regola più della sua forma; un segno a inizio riga non nasce per caso,
+mentre una citazione a metà riga non conta.
+**Esito:** con A due domande perse nello stesso giorno: una, con i commit già fatti, è finita in consegna con
+l'oracolo rosso; l'altra il giro l'ha contata «nessun commit» e ha rilanciato lo stesso compito senza risposta. B9-R5.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-23. La regola del piano troppo larga
+
+**Scenario:** il piano dà a un divieto «tutte le entità del dominio». L'esecutore vede che un compito dopo ammetterà
+una di quelle entità a un altro proponente, restringe il divieto alle entità che il piano voleva proteggere e lo
+scrive come Ruling.
+**Domanda:** che cosa fa chi decide alla revisione?
+**Opzioni:**
+- A) rifiuta: il piano diceva tutte
+- B) accetta, perché il Ruling è scritto e protegge ciò che il piano voleva, e corregge il piano
+**Scelta:** B
+**Perché:** il Ruling dichiarato è il caso per cui esiste; il piano aveva scritto più di quanto aveva deciso.
+**Esito:** con B il compito dopo è passato senza scontri su quelle voci.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-24. Le prove negative che un compito dopo rende positive
+
+**Scenario:** in una tappa, un compito prova un caso rifiutato con un proponente che un compito dopo ammetterà. Il
+compito dopo non può toccare le prove degli altri e si ferma.
+**Domanda:** come si scrivono le prove negative di una tappa?
+**Opzioni:**
+- A) con l'esempio più naturale, e si aggiustano dopo
+- B) con un ingresso che nessun compito della tappa ammetterà (lo dice il piano), e il brief dei compiti dopo permette
+  di allineare le prove di prima solo nei punti che li toccano, come Ruling
+**Scelta:** B
+**Perché:** il divieto di toccare le prove altrui protegge dalle scorciatoie, ma senza una via d'uscita scritta un
+cambio voluto dal piano ferma la tappa.
+**Esito:** con A una domanda e un'ora persa; la risposta ha dato le regole di B.
+**Fonte:** dal vivo 2026-11-12

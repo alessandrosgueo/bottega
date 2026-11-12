@@ -744,7 +744,7 @@ def test_segnali_prove_cambiate(tmp_path: Path):
     assert "bottega: prove cambiate" in etichette_pr
 
 
-def test_oracolo_rosso_non_blocca_consegna(tmp_path: Path):
+def test_oracolo_rosso_non_consegna_e_torna_all_esecutore(tmp_path: Path):
     from bottega.giro import giro
 
     origin, clone = _crea_ambiente_git(tmp_path)
@@ -781,12 +781,16 @@ def test_oracolo_rosso_non_blocca_consegna(tmp_path: Path):
         caso=caso,
     )
 
-    assert esito.esito == "consegnato"
+    # B9-R4 (prima B3-R12: «un oracolo rosso non blocca la consegna»): la PR e il commento restano, il lavoro no
+    assert esito.esito == "errore"
+    assert esito.motivo == "oracolo rosso"
     assert esito.oracolo_ok is False
     assert esito.pr is not None
     # Commento oracolo rosso
     comms = forgia.commenti(1)
     assert any("ROSSO" in c.corpo for c in comms)
+    assert board.lavoro(1).stato == "pronto"
+    assert not any(r[0] == "consegna" for r in board.registro)
 
 
 def test_consulto_massimo_due(tmp_path: Path):
@@ -2018,9 +2022,12 @@ def test_attacco_14_oracolo_timeout_rosso(tmp_path: Path, monkeypatch: pytest.Mo
         adesso=adesso,
         caso=caso,
     )
-    assert esito.esito == "consegnato"
+    # B9-R4: l'oracolo scaduto è rosso e il lavoro non si consegna (prima B3-R12: «consegnato»)
+    assert esito.esito == "errore"
+    assert esito.motivo == "oracolo rosso"
     assert esito.oracolo_ok is False
     assert any("Esito dell'oracolo: ROSSO" in c.corpo for c in forgia._commenti.get(1, []))
+    assert board.lavoro(1).stato == "pronto"
 
 
 def test_rv2_clone_con_rebase_apply_o_superficiale(tmp_path: Path):

@@ -182,7 +182,11 @@ piano lascia spazio, chi esegue decide e lo scrive come Ruling.
   principale e il ramo solo come dati) e nessun runner self-hosted per loro: lì il modello sarebbe l'utente del
   runner.
 - **Fermi:** tre tentativi a giro; un lavoro che fallisce un giro intero diventa «bloccato» e torna a chi decide; ramo
-  principale rosso = niente lavori nuovi; una porta che non risponde lascia un solo avviso e nessun lavoro toccato.
+  principale rosso = niente lavori nuovi; una porta che non risponde lascia un solo avviso e nessun lavoro toccato. Un
+  oracolo rosso non chiude il compito: torna all'esecutore, e al terzo rosso a chi decide.
+- **Lanciare e aspettare:** `bottega lancia <N>` mette l'etichetta e dice se il distributore ha avviato davvero quel
+  lavoro (una finestra di manutenzione o una bottega occupata non danno errori); `bottega segui <N>` aspetta e sveglia
+  chi decide sulla fine, su una domanda, su un blocco e sul silenzio (nessun giro da troppo tempo).
 - **L'interruttore**, dalla macchina di chi decide: `bottega ferma` spegne tutti i workflow della bottega del progetto,
   `bottega riparti` li riaccende.
 - **L'installazione** la fa la CLI seguendo `INSTALLA.md` del clone della bottega: `bottega installa macchina`,

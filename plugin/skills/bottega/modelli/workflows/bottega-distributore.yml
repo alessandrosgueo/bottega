@@ -9,8 +9,12 @@ on:
   issue_comment:
     types: [created]
   schedule:
-    # Segnaposto: ora del giro di notte in UTC (es. '0 2 * * *')
-    - cron: '0 2 * * *' # <ora in UTC>
+    # Il giro di notte, in UTC: l'installazione lo scrive dall'ora della notte della configurazione.
+    # Mai al minuto 0: GitHub salta o ritarda gli eventi pianificati allo scoccare dell'ora.
+    - cron: '17 2 * * *' # <ora in UTC>
+    # Il giro di riserva, ogni ora: riprende un lavoro rimasto pronto (un giro caduto prima di cominciare, un
+    # lancio dentro la finestra di manutenzione). Con la bottega occupata non fa nulla.
+    - cron: '47 * * * *' # <riserva>
   workflow_dispatch:
     inputs:
       notte:
@@ -49,6 +53,6 @@ jobs:
       bottega_repo: <proprietario>/bottega
       bottega_ref: <sha>
       runner: '["<etichetta del runner>"]'
-      notte: ${{ github.event_name == 'schedule' || inputs.notte == true }}
+      notte: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 2 * * *') || inputs.notte == true }}
     secrets:
       BOTTEGA_TOKEN: ${{ secrets.BOTTEGA_TOKEN }}

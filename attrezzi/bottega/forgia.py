@@ -7,7 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from bottega.segni import RUOLI, ruolo, segna
+from bottega.ritenta import ritenta
+from bottega.segni import ruolo, segna
 
 _REGEX_SEGNO = re.compile(r"^<!--\s*bottega:[a-z]+\s*-->\s*", re.IGNORECASE)
 
@@ -99,15 +100,24 @@ class ForgiaGh:
             self._etichette_create.add(nome)
 
     def _esegui_di_serie(self, argomenti: list[str], ingresso: str | None = None) -> str:
-        risultato = subprocess.run(
-            ["gh", *argomenti],
-            input=ingresso,
-            text=True,
-            capture_output=True,
-        )
-        if risultato.returncode != 0:
-            raise ErroreForgia(f"gh ha fallito ({risultato.returncode}): {risultato.stderr.strip()}")
-        return risultato.stdout
+        def prova() -> tuple[int, str, str]:
+            try:
+                risultato = subprocess.run(
+                    ["gh", *argomenti],
+                    input=ingresso,
+                    text=True,
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+                return risultato.returncode, risultato.stdout, risultato.stderr
+            except subprocess.TimeoutExpired:
+                return 124, "", "gh non ha risposto in 120 secondi"
+
+        codice, stdout, stderr = ritenta(prova, argomenti)
+        if codice != 0:
+            raise ErroreForgia(f"gh ha fallito ({codice}): {stderr.strip()}")
+        return stdout
 
     def issue(self, n: int) -> Issue:
         out = self._esegui([

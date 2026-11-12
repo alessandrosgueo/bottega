@@ -262,6 +262,21 @@ def crea_campi(esegui_gh: Callable[[list[str]], str], proprietario: str, numero:
     return creati
 
 
+def minuto_sicuro(minuto: int) -> int:
+    """Restituisce il minuto sicuro: 0 diventa 17, gli altri restano invariati."""
+    return 17 if minuto == 0 else minuto
+
+
+def cron_di_riserva(cron_notte: str | None) -> str:
+    """Calcola il cron di riserva ogni ora a partire dal cron di notte (o '47 * * * *' se None)."""
+    if not cron_notte:
+        return "47 * * * *"
+    parti = cron_notte.strip().split()
+    minuto = int(parti[0])
+    minuto_riserva = minuto_sicuro((minuto + 30) % 60)
+    return f"{minuto_riserva} * * * *"
+
+
 def cron_della_notte(notte: str, fuso: str, oggi: date) -> str:
     """Calcola la stringa cron 'M H * * *' in UTC per l'ora locale del fuso alla data oggi."""
     parti = [int(p) for p in notte.strip().split(":")]
@@ -331,14 +346,49 @@ def file_dell_installazione(
     notte = cfg.progetto.notte or mappa_valori.get("notte")
     fuso = cfg.progetto.fuso or mappa_valori.get("fuso", "Europe/Rome")
     if notte:
-        cron = cron_della_notte(notte, fuso, date.today())
+        parti = [int(p) for p in str(notte).strip().split(":")]
+        if len(parti) != 2:
+            raise ErroreProgetto(f"Ora della notte non valida: {notte}")
+        ore, minuti = parti
+        notte_effettiva = f"{ore:02d}:{minuti:02d}"
+        cron = cron_della_notte(notte_effettiva, fuso, date.today())
+        # Il minuto da evitare è quello in UTC: con un fuso a mezz'ora (05:30 a UTC+5:30) il minuto locale non è 0 ma
+        # quello del cron sì. Si sposta l'ora locale di 17 minuti, così il commento dice l'ora vera.
+        spostato = minuto_sicuro(int(cron.split()[0])) != int(cron.split()[0])
+        if spostato:
+            totale = (ore * 60 + minuti + 17) % (24 * 60)
+            notte_effettiva = f"{totale // 60:02d}:{totale % 60:02d}"
+            cron = cron_della_notte(notte_effettiva, fuso, date.today())
+        riserva = cron_di_riserva(cron)
+        nota_spostato = "; spostato dal minuto 0" if spostato else ""
+
         testo_dist = re.sub(
-            r"- cron: ['\"].*?['\"]\s*(?:#.*)?",
-            f"- cron: '{cron}'  # {notte} ({fuso}), l'ora legale cambia lo scarto",
+            r"^[ \t]*- cron:[^\n]*#\s*<ora in UTC>",
+            f"    - cron: '{cron}'  # {notte_effettiva} ({fuso}), l'ora legale cambia lo scarto{nota_spostato}",
             testo_dist,
+            flags=re.MULTILINE,
         )
+        testo_dist = re.sub(
+            r"^[ \t]*- cron:[^\n]*#\s*<riserva>",
+            f"    - cron: '{riserva}'  # il giro di riserva, ogni ora",
+            testo_dist,
+            flags=re.MULTILINE,
+        )
+        testo_dist = testo_dist.replace("'17 2 * * *'", f"'{cron}'")
     else:
-        testo_dist = testo_dist.replace("# <ora in UTC>", "# nessun giro notturno programmato")
+        testo_dist = re.sub(r"(?:[ \t]*#[^\n]*\n){2}[ \t]*- cron:[^\n]*#\s*<ora in UTC>\n?", "", testo_dist)
+        testo_dist = re.sub(
+            r"^[ \t]*- cron:[^\n]*#\s*<riserva>",
+            "    - cron: '47 * * * *'  # il giro di riserva, ogni ora",
+            testo_dist,
+            flags=re.MULTILINE,
+        )
+        testo_dist = re.sub(
+            r"^[ \t]*notte:\s*\${{.*$",
+            "      notte: ${{ inputs.notte == true }}",
+            testo_dist,
+            flags=re.MULTILINE,
+        )
 
     if "etichetta del runner" not in mappa_valori and "runner" in mappa_valori:
         mappa_valori["etichetta del runner"] = mappa_valori["runner"]

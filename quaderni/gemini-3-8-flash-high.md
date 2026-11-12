@@ -14,3 +14,9 @@ alto del modello (`--effort max` non esiste).
 - Può lasciare percorsi della macchina nelle prove: il controllo pubblico prima di ogni commit li ferma (B3.7).
 - Lancia le prove come attività in sottofondo e poi aspetta una notifica che non arriva: il giro scade dopo un'ora
   senza aver scritto niente. Il brief dice di lanciare le prove in primo piano (B4.1).
+- Scrive `DOMANDA PER CHI DECIDE:` in **testa** al rapporto, con diagnosi e opzioni dopo, anche quando il brief dice
+  di chiudere con quella riga (due volte su due nello stesso giorno, con o senza commit): il giro riconosce la riga
+  ovunque (B9-R5); il brief lo ripete lo stesso.
+- Legge i compiti vicini nel piano: davanti a una regola troppo larga che avrebbe urtato un compito dopo l'ha ristretta
+  e l'ha scritta come Ruling (B9, casistica CICLO-23). Le domande che fa sono buone: diagnosi giusta e opzioni
+  concrete.
