@@ -420,3 +420,23 @@ stderr del runner. Per giorni il distributore sceglie l'esecutore «su 0 risulta
 solo lui conosce; il giro sa solo che le prove erano verdi. Senza esiti la scelta del candidato non impara mai.
 **Esito:** la skill lo dice ora al punto dei rilievi della fine della tappa.
 **Fonte:** dal vivo 2026-11-12
+
+### CICLO-29. Il giro lento
+
+**Scenario:** i giri dell'esecutore durano da 20 a 60 minuti a compito e la quota finisce a metà di un compito. Le
+prove sembrano il collo di bottiglia, ma le trascrizioni dicono altro: 373 passi del modello in 55 minuti, circa 5
+secondi l'uno, letture a finestre di 40 righe, file riscritti interi, prove lanciate in sottofondo e controllate a
+ripetizione, il «Fatto quando» lanciato tre volte prima dell'oracolo.
+**Domanda:** dove si guadagna tempo, e quota?
+**Opzioni:**
+- A) un modello più veloce o un livello più basso
+- B) meno passi: il prompt del giro e il quaderno del modello chiedono letture grandi, comandi uniti, modifiche mirate,
+  prove in primo piano e il «Fatto quando» una volta; l'oracolo stretto al pacchetto toccato, la prova completa a
+  fine tappa
+- C) più giri in parallelo
+**Scelta:** B
+**Perché:** ogni passo rilegge il contesto, quindi meno passi vuol dire meno tempo e meno quota insieme; il parallelo
+accorcia l'attesa ma consuma la stessa quota, e va solo dove i compiti toccano file diversi. Prima di cambiare il prompt
+si leggono le trascrizioni: il giro non dice dove va il tempo.
+**Esito:** prompt del giro e quaderno in 0.2.3; il progetto ha aggiunto il suo quaderno e un comando per il formato.
+**Fonte:** dal vivo 2026-11-12

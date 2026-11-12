@@ -1300,6 +1300,13 @@ def _giro(
             "possono seguire, fino alla fine del rapporto).\n"
             "5. Se in commenti.md l'ultimo esito dell'oracolo è ROSSO, il ramo porta già la consegna di prima: "
             "correggi ciò che l'oracolo segnala e committa la correzione.\n"
+            # B11: il tempo di un giro va nei passi del modello (circa 5 s l'uno, ognuno rilegge il contesto), non
+            # nelle prove (Jarvis, 2026-11-12: 373 passi in 55 minuti, 174 letture a finestre di 40 righe).
+            "6. Lavora in pochi passi: ogni passo costa tempo e quota. Leggi i file interi o a blocchi grandi; cerca "
+            "tutti i nomi che ti servono con un solo comando; unisci i comandi che non devi guardare uno per uno; "
+            "modifica poche righe alla volta invece di riscrivere un file che esiste. Lancia le prove in primo piano "
+            "e aspetta che finiscano, senza controllarle a ripetizione; il comando di «Fatto quando» lancialo una "
+            "volta sola, alla fine, prima del commit: dopo di te lo rilancia l'oracolo.\n"
         )
         consulti_effettuati = 0
         lanci_esecutore: list[Lancio] = []

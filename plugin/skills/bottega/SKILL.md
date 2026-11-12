@@ -126,7 +126,11 @@ PR.
 - una modifica fuori brief ma sensata si tiene (per esempio un difetto di un compito prima, corretto con una prova);
   un file toccato che il rapporto tace è un motivo per rileggere tutto il diff;
 - **le correzioni** in sessione vanno allo stesso agente; fuori sono un commento che indica il commit del compito,
-  più l'esito `correzioni` nel campo «Esito»: è il campo che fa ripartire il lavoro, non il commento.
+  più l'esito `correzioni` nel campo «Esito»: è il campo che fa ripartire il lavoro, non il commento. Una correzione
+  grande diventa un compito nuovo, una sotto-issue del lavoro, col suo brief e il suo «Fatto quando» (senza, il
+  distributore salta il lavoro e dice quale compito); e il ramo della tappa non si spinge mentre un giro gira, perché
+  il giro spingerebbe sopra una base vecchia. Correzioni indipendenti che toccano file diversi possono andare fuori
+  dal lavoro, in parallelo, in sessione o con altri esecutori, e si uniscono al ramo della tappa alla fine.
 
 **Il consulto.** Chi esegue si ferma con `DOMANDA PER CHI DECIDE:` e una domanda precisa quando la scelta contraddice
 il piano o tocca una delle quattro barriere, o quando è bloccato. In sessione risponde chi decide allo stesso agente.

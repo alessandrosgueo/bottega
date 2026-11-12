@@ -20,3 +20,14 @@ alto del modello (`--effort max` non esiste).
 - Legge i compiti vicini nel piano: davanti a una regola troppo larga che avrebbe urtato un compito dopo l'ha ristretta
   e l'ha scritta come Ruling (B9, casistica CICLO-23). Le domande che fa sono buone: diagnosi giusta e opzioni
   concrete.
+- Il tempo di un giro va nei suoi passi, non nelle prove: circa 5 secondi a passo anche per leggere 40 righe, e ogni
+  passo rilegge il contesto, quindi consuma quota. Fa uno strumento per passo e legge i file a finestre di 40 righe
+  (un giro dal vivo: 373 passi in 55 minuti, 174 letture). Il prompt del giro chiede pochi passi (B11); il brief lo
+  ripete per i lavori lunghi.
+- `run_command` va in sottofondo dopo `WaitMsBeforeAsync` (lo sceglie lui, di solito 5-10 secondi), poi controlla la
+  prova a ripetizione con `manage_task` o `ps aux`, un passo a controllo (47 più 13 in un giro): il brief chiede
+  `WaitMsBeforeAsync` alto (900000) per le prove lunghe (B11).
+- Riscrive interi i file che esistono (lo stesso file tre volte, un minuto ognuna): il brief chiede modifiche mirate
+  (B11).
+- Lancia da sé il comando di «Fatto quando», anche più volte, prima che lo rilanci l'oracolo: il brief chiede di
+  lanciarlo una volta, alla fine (B11).
