@@ -93,3 +93,16 @@ elencare.
 
 `uv run pytest -q` verde nel ramo `b9`, il controllo pubblico verde, la casistica con i casi nuovi, una revisione e
 una rilettura del diff delle correzioni; poi la versione `0.2.1`.
+
+## Misure
+
+| Compito | Chi | Durata | Token | Giri | Note |
+|---|---|---|---|---|---|
+| B9.1 i ritentativi | Lavorante (Flash high) | 13 min | 329 271 | 1 | Chi decide ha tolto una sentinella attorno a `time.sleep`. |
+| B9.2 i giri pianificati | Lavorante (Flash high) | 9 min | 380 999 | 1 | Chi decide: il minuto da evitare è quello in UTC (un fuso a mezz'ora dava minuto 0); prova aggiunta. |
+| B9.3 i lavori chiusi | Lavorante (Flash high) | 20 min | 435 263 | 1 | Nessuno. |
+| B9.4 l'oracolo e la domanda | capobottega (Sonnet high) | 24 min | 203 130 | 1 | Chi decide: anche il terzo rosso rilancia il distributore, come gli altri blocchi. |
+| B9.5 lancia e segui | Lavorante (Flash high) | 26 min | 398 823 | 1 | Chi decide: un esecutore che dà solo lo stdout (gli avvisi di `gh` su stderr rompevano il JSON). |
+
+I quattro Lavoranti e il capobottega hanno girato insieme, su cinque worktree. Ruff non c'è nel repo: la regola dei
+brief che lo chiedeva era sbagliata.

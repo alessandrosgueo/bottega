@@ -48,9 +48,11 @@ fuori servono anche systemd, `sudo` (una volta) e `nftables`.
 
 ## Stato
 
-Versione 0.2.0. Costruita in nove tappe (B0-B8), più di novecento prove. Il collaudo è stato fatto dal vivo,
+Versione 0.2.1. Costruita in dieci tappe (B0-B9), più di mille prove. Il collaudo è stato fatto dal vivo,
 adottandola in un progetto vero: cinque lavori dell'esecutore fuori, più di quindici compiti, sono arrivati alla PR,
-e ogni intervento a mano è diventato una correzione con la sua prova.
+e ogni intervento a mano è diventato una correzione con la sua prova. La 0.2.1 chiude i fermi silenziosi visti dal
+vivo: ritentativi sugli errori passeggeri di GitHub, un giro di riserva ogni ora, un oracolo rosso che non chiude il
+compito, la domanda riconosciuta in ogni riga, `bottega lancia` e `bottega segui`.
 
 **Limiti noti:**
 - Il token del runner (`BOTTEGA_TOKEN`) è l'accesso `gh` di chi installa e vale su tutti i suoi repo. Un token a grana
