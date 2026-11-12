@@ -146,26 +146,63 @@ class EsitoGiro:
     dettagli: dict[str, Any] = field(default_factory=dict)
 
 
-# B9-R5: il consulto è una riga che comincia col segno (tolti gli spazi e gli `*` in testa), non la coda del testo:
-# l'esecutore può scrivere la domanda in testa al rapporto, con le opzioni dopo. Un segno citato a metà riga non conta.
+# B9-R5: il consulto è una riga che comincia col segno, non la coda del testo: l'esecutore può scrivere la domanda in
+# testa al rapporto, con le opzioni dopo. Davanti al segno valgono gli spazi, i segni di elenco, citazione, titolo e
+# grassetto (`-`, `+`, `>`, `#`, `*`, `_`) e un numero d'elenco (`1.`, `1)`); la formattazione può chiudersi prima dei
+# due punti (`**DOMANDA PER CHI DECIDE**:`); le maiuscole non contano. Il segno a metà riga o in un blocco di codice
+# recintato non conta.
 SEGNO_DOMANDA = "DOMANDA PER CHI DECIDE:"
-_RIGA_DOMANDA = re.compile(rf"^([ \t*]*)({re.escape(SEGNO_DOMANDA)})", re.MULTILINE)
+_RIGA_DOMANDA = re.compile(
+    r"^(?P<testa>[ \t\-+>#*_]*(?:\d+[.)][ \t]+[ \t\-+>#*_]*)?)DOMANDA PER CHI DECIDE(?P<chiusura>[*_]*):",
+    re.IGNORECASE,
+)
+_RECINTO = re.compile(r"^[ \t]*(`{3,}|~{3,})(?P<resto>.*)$")
 
 
 def domanda_del_consulto(testo: str) -> str | None:
     """B9-R5: la domanda di un consulto, o `None` se il testo non ne ha.
 
-    Vale una riga che, tolti gli spazi e gli `*` in testa, comincia con `DOMANDA PER CHI DECIDE:`. La domanda è il testo
-    dall'ultima riga che lo fa fino alla fine, a partire dal segno (un grassetto che lo chiude, `**…:**`, si toglie).
+    Vale una riga che comincia col segno (vedi sopra), fuori da un blocco di codice recintato (righe che cominciano con
+    tre o più apici inversi o tilde, anche indentate; un recinto mai chiuso non nasconde niente). La domanda è il testo
+    dall'ultima riga che lo fa fino alla fine, e comincia sempre con `DOMANDA PER CHI DECIDE:` (normalizzato); la
+    formattazione che si chiude subito dopo i due punti (`**…:**`) si toglie.
     """
-    trovate = list(_RIGA_DOMANDA.finditer(testo or ""))
-    if not trovate:
+    testo = testo or ""
+    ultima: tuple[int, re.Match[str]] | None = None
+    recinto: str | None = None
+    # Le righe col segno dentro un recinto restano da parte: contano solo se il recinto non si chiude più (un blocco
+    # aperto e dimenticato non deve nascondere una domanda: perderla costa più di un consulto in più).
+    sospese: list[tuple[int, re.Match[str]]] = []
+    posizione = 0
+    for riga in testo.split("\n"):
+        inizio = posizione
+        posizione += len(riga) + 1
+        m_recinto = _RECINTO.match(riga)
+        if recinto is not None:
+            apici = m_recinto.group(1) if m_recinto else ""
+            if apici and apici[0] == recinto[0] and len(apici) >= len(recinto) and not m_recinto.group("resto").strip():
+                recinto = None
+                sospese = []
+                continue
+            m_dentro = _RIGA_DOMANDA.match(riga)
+            if m_dentro:
+                sospese.append((inizio + m_dentro.end(), m_dentro))
+            continue
+        if m_recinto:
+            recinto = m_recinto.group(1)
+            continue
+        m = _RIGA_DOMANDA.match(riga)
+        if m:
+            ultima = (inizio + m.end(), m)
+    if recinto is not None and sospese:
+        ultima = sospese[-1]
+    if ultima is None:
         return None
-    ultima = trovate[-1]
-    domanda = testo[ultima.start(2):]
-    if "*" in ultima.group(1):
-        domanda = SEGNO_DOMANDA + domanda[len(SEGNO_DOMANDA):].removeprefix("**")
-    return domanda.strip()
+    fine_segno, m = ultima
+    resto = testo[fine_segno:]
+    if resto[:1] in ("*", "_") and set("*_") & set(m.group("testa") + m.group("chiusura")):
+        resto = resto.lstrip("*_")
+    return (SEGNO_DOMANDA + resto).strip()
 
 
 def recinta_testo_modello(testo: str, limite: int = 60000) -> str:
@@ -816,9 +853,11 @@ def giro(
 ) -> EsitoGiro:
     """Esegue un giro dell'esecutore per il lavoro e la bottega indicati. Non solleva mai (RV5).
 
-    Un errore prima dell'avvio (forgia o board che non rispondono, bottega sconosciuta) lascia il lavoro
-    `pronto` senza rilanciare il distributore: lo riprende il giro programmato, così un guasto fisso
-    non diventa un anello di workflow.
+    Un errore prima dell'avvio (forgia o board che non rispondono, bottega sconosciuta) conta un tentativo nella nota
+    (`tentativi`, `motivo=errore prima del giro`) e lascia il lavoro `pronto` senza rilanciare il distributore: lo
+    riprende il giro programmato (di riserva, B9-R2). Al terzo tentativo il lavoro è `bloccato`, con un commento che
+    porta l'errore, e il distributore riparte come per gli altri blocchi: un guasto fisso non diventa un anello orario.
+    Se la board non risponde nemmeno lì, il lavoro si rimette `pronto` come prima.
     """
     try:
         return _giro(
@@ -836,11 +875,35 @@ def giro(
             segno=segno,
         )
     except Exception as exc:
+        motivo = f"errore prima del giro: {exc}"
         try:
-            board.stato(lavoro, "pronto")
+            lav_ora = board.lavoro(lavoro)
+            d_errore = nota(lav_ora.nota if lav_ora else "")
+            tentativi = int(d_errore.get("tentativi", 0)) + 1
+            d_errore["tentativi"] = str(tentativi)
+            d_errore["motivo"] = "errore prima del giro"
+            nota_nuova = scrivi_nota(d_errore)
+            board.stato(lavoro, "bloccato" if tentativi >= 3 else "pronto", nota=nota_nuova)
+        except Exception:
+            # La board non risponde, o la nota non si legge: come prima, si prova `pronto` e si ignora l'errore.
+            try:
+                board.stato(lavoro, "pronto")
+            except Exception:
+                pass
+            return EsitoGiro("errore", motivo=motivo)
+        if tentativi < 3:
+            return EsitoGiro("errore", motivo=motivo)
+        try:
+            forgia.commenta(
+                lavoro,
+                "Lavoro bloccato: errore prima del giro tre volte, serve chi decide.\n\n"
+                f"{recinta_testo_modello(str(exc))}",
+                ruolo="esecutore",
+            )
         except Exception:
             pass
-        return EsitoGiro("errore", motivo=f"errore prima del giro: {exc}")
+        _rilancia_distributore(forgia)
+        return EsitoGiro("bloccato", motivo=motivo)
 
 
 def _giro(
@@ -1667,8 +1730,8 @@ def _giro(
                 board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
                 forgia.commenta(
                     compito.numero,
-                    "Lavoro bloccato: oracolo rosso tre volte, serve chi decide. Il ramo porta la consegna dell'ultimo "
-                    "tentativo; l'esito dell'oracolo è nei commenti qui sopra.",
+                    "Lavoro bloccato: tre tentativi, l'ultimo con l'oracolo rosso, serve chi decide. Il ramo porta la "
+                    "consegna dell'ultimo tentativo; l'esito dell'oracolo è nei commenti qui sopra.",
                     ruolo="esecutore",
                 )
                 # Come gli altri lavori bloccati: il distributore riparte subito per gli altri lavori pronti.
