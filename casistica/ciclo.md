@@ -357,3 +357,34 @@ compito dopo non può toccare le prove degli altri e si ferma.
 cambio voluto dal piano ferma la tappa.
 **Esito:** con A una domanda e un'ora persa; la risposta ha dato le regole di B.
 **Fonte:** dal vivo 2026-11-12
+
+### CICLO-25. Il brief che vieta il file dove sta la correzione
+
+**Scenario:** dopo una revisione, chi decide scrive a un esecutore di correggere un difetto in un file di prove e, per
+non urtare un altro esecutore, gli vieta la cartella dei sorgenti. Il codice da cambiare sta proprio lì.
+**Domanda:** che cosa fa l'esecutore?
+**Opzioni:**
+- A) cambia il file vietato, perché la correzione lo richiede
+- B) scrive le prove, le lascia ferme col perché e dice a chi decide dove sta la correzione, con una bozza
+**Scelta:** B
+**Perché:** un divieto del brief protegge un altro lavoro in corso; romperlo in silenzio lo rende inutile. Chi decide,
+prima di vietare un percorso, controlla dove vive il codice da cambiare.
+**Esito:** con B un giro in più, la bozza pronta e la correzione fatta subito dopo dallo stesso esecutore.
+**Fonte:** dal vivo 2026-11-12
+
+### CICLO-26. I dati di un comando che il vincolo non ammette
+
+**Scenario:** il brief detta i dati di un comando (un campo che lo script di destinazione richiede); il catalogo dei
+vincoli, scritto in una tappa di prima, non ammette nessun campo per quel comando, e una sua prova lo fissa.
+**Domanda:** che cosa fa l'esecutore?
+**Opzioni:**
+- A) scrive il codice come dice il brief: le prove diranno
+- B) si ferma prima di scrivere codice e porta a chi decide la contraddizione, con le opzioni e il loro costo
+- C) cambia il vincolo da sé
+**Scelta:** B
+**Perché:** con A il comando sarebbe sempre rifiutato e nessuno se ne accorgerebbe prima dell'unione; con C un
+esecutore allargherebbe da sé un confine di sicurezza. Chi decide, prima di dettare i dati di un comando, legge il
+vincolo che li deve ammettere.
+**Esito:** con B la scelta in un minuto (il campo ammesso, il suo valore chiuso in un tipo, il controllo che manca come
+debito) e il compito finito al primo giro.
+**Fonte:** dal vivo 2026-11-12
