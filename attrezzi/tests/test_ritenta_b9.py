@@ -264,3 +264,52 @@ def test_9_board_comando_ritenta(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ErroreBoard):
         board.stato(1, "in_corso")
     assert chiamate_stato == 1
+
+
+def test_10_avviso_col_nome(capsys: pytest.CaptureFixture[str]) -> None:
+    chiamate = 0
+    dormite: list[float] = []
+
+    def prova() -> tuple[int, str, str]:
+        nonlocal chiamate
+        chiamate += 1
+        if chiamate == 1:
+            return 1, "", _ERR_503
+        return 0, "ok", ""
+
+    ris = ritenta(
+        prova,
+        ["issue", "comment", "3"],
+        nome="mio-servizio",
+        dormi=dormite.append,
+    )
+    assert ris == (0, "ok", "")
+    assert chiamate == 2
+    catturato = capsys.readouterr()
+    assert "avviso: mio-servizio: errore passeggero, riprovo fra 10 s" in catturato.err
+
+
+def test_11_board_comando_avviso_nome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("bottega.ritenta.ATTESE_S", (0.0,))
+    board = BoardComando(["adattatore", "bottega"])
+
+    passi_pronti = [
+        subprocess.CompletedProcess(
+            args=["adattatore"], returncode=1, stdout="", stderr=_ERR_503
+        ),
+        subprocess.CompletedProcess(
+            args=["adattatore"], returncode=0, stdout="[]", stderr=""
+        ),
+    ]
+
+    def run_pronti(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return passi_pronti.pop(0)
+
+    monkeypatch.setattr("subprocess.run", run_pronti)
+    assert board.pronti() == []
+    catturato = capsys.readouterr()
+    assert (
+        "avviso: adattatore pronti: errore passeggero, riprovo fra 0 s" in catturato.err
+    )

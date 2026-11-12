@@ -13,7 +13,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bottega.board import Board, BoardComando, BoardProject
@@ -58,15 +58,20 @@ def esito_del_lavoro(registro: str, numero: int) -> tuple[str, str]:
     pattern_lavoro = re.compile(rf"\b(lavoro {numero}: .*)")
     righe = registro.splitlines()
 
+    righe_lavoro: list[str] = []
     for riga in righe:
         m = pattern_lavoro.search(riga)
         if m:
-            testo = m.group(1).strip()
-            if "avviato" in testo:
-                return "avviato", testo
-            if "occupata" in testo:
-                return "occupata", testo
-            return "assente", testo
+            righe_lavoro.append(m.group(1).strip())
+
+    if righe_lavoro:
+        for riga_lav in righe_lavoro:
+            if "avviato" in riga_lav:
+                return "avviato", riga_lav
+        for riga_lav in righe_lavoro:
+            if "occupata" in riga_lav:
+                return "occupata", riga_lav
+        return "assente", righe_lavoro[-1]
 
     for riga in righe:
         if "finestra di manutenzione" in riga and "nessun lavoro avviato" in riga:
@@ -196,7 +201,7 @@ def comando_lancia(
     tetto = getattr(args, "tetto", 900)
 
     inizio = adesso_fn()
-    inizio_sec = inizio.replace(microsecond=0)
+    soglia_creazione = inizio - timedelta(seconds=60)
 
     # 1. Verifica etichette
     codice, uscita = _esegui_chiamata(
@@ -235,8 +240,11 @@ def comando_lancia(
         print(f"lancio non verificato: {motivo}", file=sys.stderr)
         return 1
 
-    # 2. Attesa comparsa giro distributore
-    giri_trovati: list[tuple[int, datetime]] = []
+    # 2. Attesa comparsa giro distributore ed esame dei registri
+    letti: set[int] = set()
+    giri_visti: set[int] = set()
+    ultima_riga = f"nessuna riga per il lavoro {numero}"
+
     while True:
         cmd_list = [
             "gh",
@@ -258,75 +266,90 @@ def comando_lancia(
 
         try:
             elenco = json.loads(uscita)
-            if isinstance(elenco, list):
-                for item in elenco:
-                    creato = datetime.fromisoformat(item["createdAt"])
-                    if _differenza_secondi(inizio_sec, creato) >= 0:
-                        giri_trovati.append((int(item["databaseId"]), creato))
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             print(f"lancio non verificato: {exc}", file=sys.stderr)
             return 1
 
-        if giri_trovati:
-            break
+        nuovi: list[tuple[int, datetime]] = []
+        if isinstance(elenco, list):
+            for item in elenco:
+                if isinstance(item, dict) and "databaseId" in item and "createdAt" in item:
+                    try:
+                        creato = datetime.fromisoformat(item["createdAt"])
+                        id_giro = int(item["databaseId"])
+                    except (ValueError, TypeError):
+                        continue
+                    if _differenza_secondi(soglia_creazione, creato) >= 0:
+                        giri_visti.add(id_giro)
+                        if id_giro not in letti:
+                            nuovi.append((id_giro, creato))
 
-        if _differenza_secondi(inizio, adesso_fn()) >= attesa:
-            print(f"nessun giro del distributore entro {attesa} s", file=sys.stderr)
-            return 1
+        nuovi.sort(key=lambda t: (t[1], t[0]))
 
-        dormi(10)
+        for id_giro, _ in nuovi:
+            letti.add(id_giro)
+            inizio_giro = adesso_fn()
+            giro_annullato = False
+            while True:
+                cmd_status = [
+                    "gh",
+                    "run",
+                    "view",
+                    str(id_giro),
+                    "--json",
+                    "status,conclusion",
+                    *repo_args,
+                ]
+                codice, uscita = _esegui_chiamata(esegui_fn, cmd_status)
+                if codice != 0:
+                    motivo = uscita.strip() if uscita.strip() else f"codice {codice}"
+                    print(f"lancio non verificato: {motivo}", file=sys.stderr)
+                    return 1
 
-    # 3. Attesa completamento e verifica registro per ogni giro dal più vecchio
-    giri_trovati.sort(key=lambda t: (t[1], t[0]))
-    ultima_riga = ""
-    for id_giro, _ in giri_trovati:
-        inizio_giro = adesso_fn()
-        while True:
-            cmd_status = [
-                "gh",
-                "run",
-                "view",
-                str(id_giro),
-                "--json",
-                "status",
-                *repo_args,
-            ]
-            codice, uscita = _esegui_chiamata(esegui_fn, cmd_status)
+                try:
+                    info = json.loads(uscita)
+                except (json.JSONDecodeError, KeyError, ValueError) as exc:
+                    print(f"lancio non verificato: {exc}", file=sys.stderr)
+                    return 1
+
+                if info.get("status") == "completed":
+                    if info.get("conclusion") == "cancelled":
+                        giro_annullato = True
+                    break
+
+                if _differenza_secondi(inizio_giro, adesso_fn()) >= tetto:
+                    print(
+                        f"lancio non verificato: giro {id_giro} non completato entro {tetto} s",
+                        file=sys.stderr,
+                    )
+                    return 1
+
+                dormi(10)
+
+            if giro_annullato:
+                continue
+
+            cmd_log = ["gh", "run", "view", str(id_giro), "--log", *repo_args]
+            codice, log_uscita = _esegui_chiamata(esegui_fn, cmd_log)
             if codice != 0:
-                motivo = uscita.strip() if uscita.strip() else f"codice {codice}"
+                motivo = log_uscita.strip() if log_uscita.strip() else f"codice {codice}"
                 print(f"lancio non verificato: {motivo}", file=sys.stderr)
                 return 1
 
-            try:
-                info = json.loads(uscita)
-            except (json.JSONDecodeError, KeyError, ValueError) as exc:
-                print(f"lancio non verificato: {exc}", file=sys.stderr)
-                return 1
+            esito, riga = esito_del_lavoro(log_uscita, numero)
+            ultima_riga = riga
+            if esito != "assente":
+                print(f"giro {id_giro}: {riga}")
+                return ESITI_LANCIO[esito]
 
-            if info.get("status") == "completed":
+        if not nuovi:
+            if _differenza_secondi(inizio, adesso_fn()) >= attesa:
                 break
-
-            if _differenza_secondi(inizio_giro, adesso_fn()) >= tetto:
-                print(
-                    f"lancio non verificato: giro {id_giro} non completato entro {tetto} s",
-                    file=sys.stderr,
-                )
-                return 1
-
             dormi(10)
 
-        cmd_log = ["gh", "run", "view", str(id_giro), "--log", *repo_args]
-        codice, log_uscita = _esegui_chiamata(esegui_fn, cmd_log)
-        if codice != 0:
-            motivo = log_uscita.strip() if log_uscita.strip() else f"codice {codice}"
-            print(f"lancio non verificato: {motivo}", file=sys.stderr)
-            return 1
-
-        esito, riga = esito_del_lavoro(log_uscita, numero)
-        if esito != "assente":
-            print(f"giro {id_giro}: {riga}")
-            return ESITI_LANCIO[esito]
-        ultima_riga = riga
+    if not giri_visti:
+        print(f"nessun giro del distributore entro {attesa} s", file=sys.stderr)
+        return 1
 
     print(ultima_riga, file=sys.stderr)
     return 1
@@ -455,44 +478,79 @@ def comando_segui(
             except (json.JSONDecodeError, KeyError, ValueError) as exc:
                 print(f"avviso: sub_issues #{numero}: {exc}", file=sys.stderr)
 
-        # 3. Giri Actions da gh run list
+        # 3. Giri Actions da gh workflow list e gh run list
         giri: list[Giro] = []
-        cmd_giri = [
+        cmd_wf = [
             "gh",
-            "run",
+            "workflow",
             "list",
-            "--limit",
-            "20",
+            "--all",
             "--json",
-            "databaseId,workflowName,status,conclusion,createdAt,updatedAt",
+            "name,path",
             *repo_args,
         ]
-        codice_giri, uscita_giri = _esegui_chiamata(esegui_fn, cmd_giri)
-        if codice_giri != 0:
+        codice_wf, uscita_wf = _esegui_chiamata(esegui_fn, cmd_wf)
+        if codice_wf != 0:
             motivo = (
-                uscita_giri.strip() if uscita_giri.strip() else f"codice {codice_giri}"
+                uscita_wf.strip() if uscita_wf.strip() else f"codice {codice_wf}"
             )
             print(f"avviso: {motivo}", file=sys.stderr)
         else:
             try:
-                dati_giri = json.loads(uscita_giri)
-                if isinstance(dati_giri, list):
-                    for item in dati_giri:
-                        wf = item.get("workflowName") or ""
-                        if wf.startswith("bottega-esecutore"):
-                            giri.append(
-                                Giro(
-                                    id=int(item["databaseId"]),
-                                    stato=str(item.get("status", "")),
-                                    conclusione=item.get("conclusion"),
-                                    creato=datetime.fromisoformat(item["createdAt"]),
-                                    aggiornato=datetime.fromisoformat(
-                                        item["updatedAt"]
-                                    ),
-                                )
-                            )
+                dati_wf = json.loads(uscita_wf)
+                percorsi_wf: list[str] = []
+                if isinstance(dati_wf, list):
+                    for item in dati_wf:
+                        if isinstance(item, dict):
+                            nome_wf = item.get("name") or ""
+                            if nome_wf.startswith("bottega-esecutore") and "path" in item:
+                                percorsi_wf.append(str(item["path"]))
             except (json.JSONDecodeError, KeyError, ValueError) as exc:
-                print(f"avviso: run list: {exc}", file=sys.stderr)
+                print(f"avviso: workflow list: {exc}", file=sys.stderr)
+                percorsi_wf = []
+
+            for path_wf in percorsi_wf:
+                cmd_run = [
+                    "gh",
+                    "run",
+                    "list",
+                    "--workflow",
+                    path_wf,
+                    "--limit",
+                    "10",
+                    "--json",
+                    "databaseId,status,conclusion,createdAt,updatedAt",
+                    *repo_args,
+                ]
+                codice_run, uscita_run = _esegui_chiamata(esegui_fn, cmd_run)
+                if codice_run != 0:
+                    motivo = (
+                        uscita_run.strip()
+                        if uscita_run.strip()
+                        else f"codice {codice_run}"
+                    )
+                    print(f"avviso: {motivo}", file=sys.stderr)
+                else:
+                    try:
+                        dati_run = json.loads(uscita_run)
+                        if isinstance(dati_run, list):
+                            for item in dati_run:
+                                if isinstance(item, dict):
+                                    giri.append(
+                                        Giro(
+                                            id=int(item["databaseId"]),
+                                            stato=str(item.get("status", "")),
+                                            conclusione=item.get("conclusion"),
+                                            creato=datetime.fromisoformat(
+                                                item["createdAt"]
+                                            ),
+                                            aggiornato=datetime.fromisoformat(
+                                                item["updatedAt"]
+                                            ),
+                                        )
+                                    )
+                    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+                        print(f"avviso: run list: {exc}", file=sys.stderr)
 
         # 4. Giri rossi nuovi
         rossi_nuovi = giri_rossi_nuovi(giri, inizio, visti)

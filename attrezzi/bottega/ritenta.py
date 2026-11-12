@@ -127,16 +127,20 @@ def ritenta(
     *,
     lettura: bool | None = None,
     dormi: Callable[[float], None] | None = None,
+    nome: str | None = None,
 ) -> tuple[int, str, str]:
     """Chiama prova() e ripete su errori passeggeri secondo le regole B9-R1 (`dormi` di serie: `time.sleep`, letto
     alla chiamata, così le prove possono sostituirlo)."""
     funzione_dormi = dormi if dormi is not None else time.sleep
     is_lettura = lettura if lettura is not None else di_sola_lettura(argomenti)
 
-    primo = argomenti[0] if len(argomenti) > 0 else ""
-    secondo = argomenti[1] if len(argomenti) > 1 else ""
-    parti = [p for p in (primo, secondo) if p]
-    nome_cmd = f"gh {' '.join(parti)}".strip()
+    if nome is not None:
+        nome_cmd = nome
+    else:
+        primo = argomenti[0] if len(argomenti) > 0 else ""
+        secondo = argomenti[1] if len(argomenti) > 1 else ""
+        parti = [p for p in (primo, secondo) if p]
+        nome_cmd = f"gh {' '.join(parti)}".strip()
 
     risultato = prova()
     if risultato[0] == 0:
