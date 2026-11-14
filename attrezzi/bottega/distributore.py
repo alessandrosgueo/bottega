@@ -17,7 +17,7 @@ Solo libreria standard.
 import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -362,6 +362,78 @@ def _gestisci_evento_commento(
     return True, []
 
 
+def _segna_nota_esiti(board: Board, lav: Lavoro, stato_esiti: str) -> None:
+    """Aggiorna la chiave esiti nella nota del giro senza cambiare lo stato Bottega del lavoro."""
+    valori = nota(lav.nota)
+    valori["esiti"] = stato_esiti
+    board.campo(lav.numero, "Nota del giro", scrivi_nota(valori))
+
+
+def _scrivi_esiti_dei_chiusi(
+    lavori: Sequence[Lavoro],
+    forgia: Forgia,
+    board: Board,
+    adesso: datetime,
+) -> list[str]:
+    """Scrive «Esito del compito» ai compiti lavorati dei lavori chiusi non ancora spazzati."""
+    righe: list[str] = []
+    per_numero = {lav.numero: lav for lav in lavori}
+    candidati = sorted(
+        (
+            lav for lav in lavori
+            if not lav.aperta and lav.stato.strip() and "esiti" not in nota(lav.nota)
+        ),
+        key=lambda lav: lav.numero,
+        reverse=True,
+    )[:10]
+
+    adesso_norm = adesso if adesso.tzinfo is not None else adesso.replace(tzinfo=timezone.utc)
+
+    for lav in candidati:
+        try:
+            chiusura = forgia.chiusura(lav.numero)
+            if chiusura is None:
+                continue
+            motivo, quando = chiusura
+            quando_norm = quando if quando.tzinfo is not None else quando.replace(tzinfo=timezone.utc)
+            if (adesso_norm - quando_norm) > timedelta(days=7):
+                _segna_nota_esiti(board, lav, "vecchi")
+                continue
+
+            if motivo == "completed":
+                esito_nuovo = "unito com'era"
+            elif motivo == "not_planned":
+                esito_nuovo = "rifiutato"
+            else:
+                _segna_nota_esiti(board, lav, "saltati")
+                continue
+
+            sotto = forgia.sotto_issue(lav.numero)
+            numeri_compiti = [s.numero for s in sotto] if sotto else [lav.numero]
+
+            scritti = 0
+            gia_scritti = 0
+            for num_comp in numeri_compiti:
+                comp_lav = per_numero.get(num_comp)
+                if comp_lav is None or misure.numero(comp_lav, "Giri") <= 0:
+                    continue
+                if (comp_lav.campi.get("Esito del compito") or "").strip():
+                    gia_scritti += 1
+                    continue
+                board.campo(num_comp, "Esito del compito", esito_nuovo)
+                scritti += 1
+
+            _segna_nota_esiti(board, lav, "scritti")
+            etichetta_esito = "uniti com'erano" if esito_nuovo == "unito com'era" else "rifiutati"
+            riga = f"lavoro {lav.numero}: esiti scritti ({scritti} {etichetta_esito}, {gia_scritti} già scritti)"
+            righe.append(riga)
+            print(riga)
+        except Exception as exc:
+            print(f"distributore: errore esiti lavoro {lav.numero}: {exc}", file=sys.stderr)
+
+    return righe
+
+
 def distribuisci(
     *,
     configurazione: Configurazione,
@@ -385,13 +457,17 @@ def distribuisci(
     adesso_fuso = adesso.astimezone(fuso_cfg) if adesso.tzinfo else adesso.replace(tzinfo=fuso_cfg)
 
     try:
-        lavori_elenco = board.elenco()
+        lavori_elenco: list[Lavoro] | None = board.elenco()
         risultati_storici = misure.risultati(lavori_elenco, configurazione)
         costi_relativi = misure.costi_propri(lavori_elenco, configurazione)
     except Exception as exc:
         print(f"distributore: errore lettura elenco board: {exc}", file=sys.stderr)
+        lavori_elenco = None
         risultati_storici = {}
         costi_relativi = None
+
+    if lavori_elenco is not None:
+        righe.extend(_scrivi_esiti_dei_chiusi(lavori_elenco, forgia, board, adesso_fuso))
 
     # RV13: gestione comandi da issue_comment nell'evento GITHUB_EVENT_PATH
     procedi, righe_ev = _gestisci_evento_commento(
