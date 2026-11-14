@@ -1774,9 +1774,17 @@ def _giro(
                 msg_rev = f"Revisione del consigliere ({cand_cons.nome}):\n\n{recinta_testo_modello(lancio_rev.testo)}"
                 forgia.commenta(pr_num, msg_rev, ruolo="consigliere")
             else:
-                forgia.commenta(pr_num, "compito senza rilettura", ruolo="consigliere")
+                forgia.commenta(
+                    pr_num,
+                    f"compito senza rilettura: il lancio del consigliere è finito con «{lancio_rev.esito}»",
+                    ruolo="consigliere",
+                )
         else:
-            forgia.commenta(pr_num, "compito senza rilettura", ruolo="consigliere")
+            forgia.commenta(
+                pr_num,
+                f"compito senza rilettura: {scelta_cons.perche}",
+                ruolo="consigliere",
+            )
 
         # B9-R4: un oracolo rosso non chiude il compito e non consegna il lavoro (la PR e il commento col suo esito
         # restano visibili). Il ramo porta già la consegna rossa e il giro dopo riparte da lì: la chiave `consegnato`
