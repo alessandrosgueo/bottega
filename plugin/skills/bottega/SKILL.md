@@ -255,7 +255,9 @@ un brief per ogni compito.
   nessun segreto e nessun runner self-hosted per quei job ([impianto.md](impianto.md)).
 - **Fermi:** tre tentativi a giro; un lavoro che fallisce un giro intero diventa «bloccato» e torna a chi decide; ramo
   principale rosso = niente lavori nuovi; una porta che non risponde lascia un solo avviso e nessun lavoro toccato. Un
-  oracolo rosso non chiude il compito: torna all'esecutore, e al terzo rosso a chi decide.
+  oracolo rosso non chiude il compito: torna all'esecutore, e al terzo rosso a chi decide. Se il rosso viene dal
+  «Fatto quando» e non dal codice (un comando che fuori non gira), chi decide corregge il «Fatto quando», prova lui
+  l'oracolo sul ramo e va avanti: un altro giro spenderebbe quota per rifare ciò che c'è già.
 - **Lanciare e aspettare:** `bottega lancia <N>` mette l'etichetta e dice se il distributore ha avviato davvero quel
   lavoro (una finestra di manutenzione o una bottega occupata non danno errori); `bottega segui <N>` aspetta e sveglia
   chi decide sulla fine, su una domanda, su un blocco e sul silenzio (nessun giro da troppo tempo).
