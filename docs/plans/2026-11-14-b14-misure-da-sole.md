@@ -118,6 +118,25 @@ compito l'esito `unito com'era`. Per quel caso resta `bottega misura <N> --esito
     cambio ai punti che le chiamano. L'orologio è `time.monotonic`, iniettabile nelle prove.
   - Niente campi nuovi e niente commenti nuovi: solo il log. Il flusso del giro non cambia (stessi esiti, stesse
     scritture, stesso ordine).
+- **R10.** Il fascicolo entra nel prompt (`giro.py`). Le misure su 46 giri riusciti di un progetto vero, incrociati
+  con le trascrizioni del modello: il 75% del tempo è il modello (mediana 698 s e 69 passi a giro), il 18% il dopo
+  (consegna, oracolo, rilettura, misure), il 7% la preparazione. Un passo dura 8,9 s di media qualunque strumento usi
+  (una lettura di file 6,8 s): il tempo è la latenza del passo, non il comando. L'85% dei passi è esplorazione (letture
+  e ricerche). Oggi il fascicolo sono sei file da leggere, almeno sei passi a giro.
+  - Il prompt porta, dopo le istruzioni, i pezzi del fascicolo **per intero**, ognuno sotto un titolo `### <nome del
+    file>` e dentro un recinto: nell'ordine `brief.md`, `stato.md`, `costituzione.md`, `quaderno.md`, `lavoro.md`,
+    `commenti.md`. I file nella cartella del fascicolo si scrivono come oggi.
+  - **I file del brief.** Se il brief ha una sezione `## File` (un elenco puntato di percorsi fra apici inversi,
+    relativi alla radice del repo), il giro aggiunge quei file dalla copia dell'esecutore, nell'ordine, dopo i pezzi
+    del fascicolo. Entra solo un file regolare, UTF-8, fino a 40 KiB, il cui percorso risolto sta sotto la copia
+    risolta e non sotto `.git/` né `.bottega/`. Ogni altro percorso si salta, e il prompt lo dice su una riga
+    (`saltato <percorso>: <motivo>`), senza mai il contenuto.
+  - **Il tetto:** tutto il prompt sta in 96 KiB (byte UTF-8). I pezzi entrano nell'ordine finché ci stanno; quello
+    che non ci sta resta fuori per intero (mai un pezzo troncato) e il prompt lo elenca sotto «Da leggere nel
+    fascicolo» (o «Da leggere nel repo» per i file del brief).
+  - Il prompt di ripresa dopo un consulto usa la stessa composizione.
+  - Il modello del brief (`modelli/brief.md`) prende la sezione `## File`, facoltativa: i file che chi esegue dovrà
+    leggere per intero (quelli da cambiare e quelli da imitare); ognuno risparmia almeno un passo.
 - **R8.** Le prove nuove usano `BoardFinta` e `ForgiaFinta` (`attrezzi/bottega/finta.py`) e una trascrizione finta
   come in `attrezzi/tests/test_segno.py`. Un caso rosso prima del codice per ogni Ruling.
 
@@ -130,6 +149,8 @@ Ciò che le prove non coprono e la revisione finale deve guardare:
 - `tocca` dentro `lancia` e `segui`: nessun cambio dei codici d'uscita, nemmeno con board rotta o `gh` assente;
 - un segno contato due volte (la stessa finestra su lavoro e compiti) o perso (segno chiuso, somma fallita);
 - `correggi` a metà (issue creata, campo non scritto): il messaggio deve bastare a finire a mano;
+- R10: nessun percorso della sezione «File» deve poter portare nel prompt un file fuori dalla copia dell'esecutore
+  (collegamenti simbolici scritti da un compito di prima, `..`, percorsi assoluti); il tetto in byte;
 - la forma vera delle risposte di `gh api` (404 della madre, `state_reason` nullo).
 
 ## I compiti
@@ -142,6 +163,7 @@ Ciò che le prove non coprono e la revisione finale deve guardare:
 | K4 | R6: il motivo della rilettura mancata | `giro.py`, `tests/test_rilettura_b14.py` (nuovo) | c.s. | `medium` |
 | K5 | R4, R5: il segno da solo | `segno.py`, `lancio.py`, `conti.py`, `correggi.py`, `tests/test_segno_b14.py` (nuovo) | c.s. | `high`: tocca quattro moduli e i codici d'uscita di due comandi |
 | K7 | R9: il giro dice dove va il tempo | `giro.py`, `tests/test_tempi_b14.py` (nuovo) | c.s. | `high`: un file di duemila righe con un `try/finally` lungo, e il flusso non deve cambiare |
+| K8 | R10: il fascicolo nel prompt | `giro.py`, `brief.py`, `modelli/brief.md`, `tests/test_fascicolo_b14.py` (nuovo) | c.s., dopo K7 | `high`: il contenuto dei file va davanti al modello, e un percorso sbagliato porterebbe fuori i file del runner |
 | K6 | skill, pagine, casistica, quaderni, versione 0.2.6 | `plugin/`, `casistica/`, `quaderni/`, `LEGGIMI.md` | chi decide | — |
 
 K1 per primo. K2, K3 e K4 toccano file diversi e partono insieme, ognuno nel suo worktree; si uniscono al ramo della
