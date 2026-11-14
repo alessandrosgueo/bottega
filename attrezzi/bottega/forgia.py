@@ -96,6 +96,8 @@ class ForgiaGh:
         esegui: Callable[[list[str], str | None], str] | None = None,
     ) -> None:
         self.repo = repo
+        # Nei percorsi di `gh api`: senza un repo dato, `gh` riempie i segnaposto dal repo della cartella.
+        self._repo_api = repo or "{owner}/{repo}"
         self._esegui = esegui or self._esegui_di_serie
         self._etichette_create: set[str] = set()
 
@@ -146,7 +148,7 @@ class ForgiaGh:
     def sotto_issue(self, n: int) -> list[Issue]:
         # B7 (J4): l'API REST va con ogni `gh`. `gh issue view --json subIssues` non c'è nella 2.46 di Ubuntu, e nelle
         # versioni nuove risponde un oggetto `{"nodes": [...]}` senza corpo: le sotto-issue andavano perse.
-        out = self._esegui(["api", f"repos/{self.repo}/issues/{n}/sub_issues?per_page=100"])
+        out = self._esegui(["api", f"repos/{self._repo_api}/issues/{n}/sub_issues?per_page=100"])
         voci = json.loads(out)
         if not isinstance(voci, list):
             raise ErroreForgia(f"sotto-issue di #{n}: risposta inattesa")
@@ -169,7 +171,7 @@ class ForgiaGh:
 
     def madre_di(self, n: int) -> int | None:
         try:
-            out = self._esegui(["api", f"repos/{self.repo}/issues/{n}/parent"])
+            out = self._esegui(["api", f"repos/{self._repo_api}/issues/{n}/parent"])
         except ErroreForgia as e:
             # Solo il 404 di GitHub: un «not found» senza codice può essere altro (un comando che manca).
             if "http 404" in str(e).lower():
@@ -181,7 +183,7 @@ class ForgiaGh:
         return d["number"]
 
     def chiusura(self, n: int) -> tuple[str, datetime] | None:
-        out = self._esegui(["api", f"repos/{self.repo}/issues/{n}"])
+        out = self._esegui(["api", f"repos/{self._repo_api}/issues/{n}"])
         d = json.loads(out)
         if not isinstance(d, dict):
             raise ErroreForgia(f"chiusura di #{n}: risposta inattesa")

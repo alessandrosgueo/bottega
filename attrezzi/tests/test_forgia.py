@@ -595,3 +595,22 @@ def test_b14_forgia_finta_madre_e_chiusura() -> None:
     assert finta.issue(altra).aperta is True
     assert finta.chiusura(altra) is None
 
+
+
+def test_b14_senza_repo_i_percorsi_api_usano_i_segnaposto_di_gh() -> None:
+    """Senza un repo dato (una sessione di chi decide) `gh api` riempie i segnaposto dal repo della cartella."""
+    visti: list[list[str]] = []
+
+    def esegui(argomenti: list[str], ingresso: str | None = None) -> str:
+        visti.append(argomenti)
+        if argomenti[1].endswith("/parent"):
+            return '{"number": 7}'
+        if "sub_issues" in argomenti[1]:
+            return "[]"
+        return '{"state": "open"}'
+
+    forgia = ForgiaGh("", esegui=esegui)
+    assert forgia.madre_di(3) == 7
+    assert forgia.sotto_issue(3) == []
+    assert forgia.chiusura(3) is None
+    assert [a[1].split("/issues/")[0] for a in visti] == ["repos/{owner}/{repo}"] * 3

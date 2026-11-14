@@ -2,6 +2,7 @@
 
 import argparse
 from collections.abc import Callable
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import shlex
@@ -16,6 +17,7 @@ from bottega.configurazione import (
 )
 from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
 import bottega.misure as misure
+from bottega.segno import tocca
 
 CAMPI_ORIGINE: dict[str, str] = {
     "piano": "Rilievi del piano",
@@ -279,4 +281,11 @@ def comando_correggi(
 
     print(nuovo)
     print(f"poi: bottega lancia {m}")
+    try:
+        righe_segno = tocca(board, forgia, m, os.environ, Path.cwd(), datetime.now(timezone.utc))
+    except Exception as exc:  # noqa: BLE001 - il segno non cambia mai l'esito del comando
+        motivo = exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)
+        righe_segno = [f"segno: {motivo}"]
+    for riga in righe_segno:
+        print(riga, file=sys.stderr)
     return 0
