@@ -1,5 +1,7 @@
 # bottega
 
+**La visione: ottenere il massimo risultato spendendo il minimo.** Tutto il resto viene da qui.
+
 Un metodo per lavorare con più modelli e più abbonamenti spendendo la quota scarsa solo dove serve. Il modello che
 decide scrive il piano e i brief; un modello più economico, o di un altro fornitore, esegue; il diff si rivede prima
 di unire. La regia è GitHub: issue, Project, Actions.

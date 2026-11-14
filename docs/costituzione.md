@@ -1,5 +1,7 @@
 # Costituzione del repo bottega
 
+**La visione:** ottenere il massimo risultato spendendo il minimo (`plugin/skills/bottega/SKILL.md`, «La visione»).
+
 Il repo della bottega: la skill e le pagine per porta (il plugin, in `plugin/`), il comando `bottega` (Python, sola
 libreria standard), i workflow, i quaderni e la casistica. Diventerà pubblico: chi lo riceve lo installa nella sua CLI.
 

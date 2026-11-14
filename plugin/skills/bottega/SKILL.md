@@ -1,6 +1,6 @@
 ---
 name: bottega
-description: Metodo di lavoro «bottega» per spendere la quota scarsa solo dove serve. Chi decide scrive piano e brief, chi esegue lavora (in sessione o fuori, come PR su GitHub), un consigliere critica e consiglia. Usala all'inizio di ogni sessione su un progetto che ha `.github/bottega/bottega.toml` o `docs/costituzione.md`, per pianificare ed eseguire un lavoro in quei progetti, e quando l'utente dice «bottega».
+description: Metodo di lavoro «bottega», per ottenere il massimo risultato spendendo il minimo di quota. Chi decide scrive piano e brief, chi esegue lavora (in sessione o fuori, come PR su GitHub), un consigliere critica e consiglia. Usala all'inizio di ogni sessione su un progetto che ha `.github/bottega/bottega.toml` o `docs/costituzione.md`, per pianificare ed eseguire un lavoro in quei progetti, e quando l'utente dice «bottega».
 ---
 
 # Bottega
@@ -8,9 +8,26 @@ description: Metodo di lavoro «bottega» per spendere la quota scarsa solo dove
 L'immagine è la bottega di una volta: il maestro disegna, decide e firma; i lavoranti eseguono; un collega di
 un'altra bottega dà il suo parere. Qui le botteghe sono gli **abbonamenti** dell'utente, ognuno con la sua quota.
 
-**Lo scopo è spendere la quota scarsa solo dove serve.** Chi decide prende le decisioni prima, per iscritto, nel piano
-e nel brief. A chi esegue resta il *come*, non il *cosa*. Così il lavoro va ai modelli più economici o alle quote più
-abbondanti, anche di altri fornitori, senza perdere qualità.
+## La visione: il massimo, spendendo il minimo
+
+**Ottenere il massimo risultato spendendo il minimo.** È il cuore del metodo e la ragione per cui esiste. Ogni scelta
+della bottega si misura su questo: chi decide, chi esegue, con quale modello, a che livello, su quale quota.
+
+- **Il modello giusto, non il più forte.** Ogni compito va al candidato più economico che lo porta a termine bene, al
+  livello più basso che basta. Si sale di livello o di modello solo con un motivo scritto nel piano, compito per
+  compito.
+- **Il lavoro più caro è quello di chi decide.** Per questo decide tutto prima, per iscritto: piani che non lasciano
+  dubbi, brief corti, la costituzione invece delle ripetizioni, una tappa intera a chi sa pianificare da sé quando
+  costa meno dei brief.
+- **Si misura, non si indovina.** Ogni compito lascia token, tempo, quota spesa ed esito; la scelta viva e chi decide
+  scelgono sui numeri, non sull'abitudine.
+- **Ogni passo costa.** Ogni passo di un modello rilegge il contesto e spende quota: chi esegue lavora in pochi passi.
+- **Risparmiare non è tagliare.** Prove, revisioni e le quattro barriere non si saltano mai: un errore che passa costa
+  più di quanto si è risparmiato.
+
+**Il modo:** chi decide prende le decisioni prima, per iscritto, nel piano e nel brief. A chi esegue resta il *come*,
+non il *cosa*. Così il lavoro va ai modelli più economici o alle quote più abbondanti, anche di altri fornitori, senza
+perdere qualità.
 
 **Poche regole.** Le barriere ci sono solo dove un errore farebbe un danno vero:
 - segreti;
