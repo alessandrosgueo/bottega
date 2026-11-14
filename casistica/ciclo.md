@@ -487,5 +487,75 @@ sullo stesso bug ha impiegato 56 s e 48k token contro 33 s e 27k di Hydrogen da 
 **Perché:** sui compiti singoli costa più tempo e più quota dell'esecutore da solo, mentre su una tappa intera risparmia
 a chi decide la scrittura di un brief per ogni compito; `su_richiesta = true` impedisce alla scelta viva di prenderlo
 da sola.
-**Esito:** da vedere
+**Esito:** la tappa intera B13 in sessione: 624k token in 14 minuti, senza correzioni. Il collaudo fuori su un bug
+singolo: codice giusto al primo giro, ma 428k token in 18 minuti, circa quattro volte Hydrogen `medium` su lavori di
+misura simile. Conferma B: sui compiti singoli non conviene.
 **Fonte:** deciso dall'utente
+
+### CICLO-33. Compiti paralleli che si rompono solo all'unione
+
+**Scenario:** due compiti indipendenti girano insieme su worktree diversi e ognuno è verde da solo. Dopo l'unione di
+tutti e due, due prove sono rosse: un compito ha cambiato una regola su cui l'altro contava.
+**Domanda:** che cosa si fa?
+**Opzioni:**
+- A) mai più compiti in parallelo
+- B) dopo l'unione di compiti paralleli la suite intera gira prima del compito seguente; la regola in conflitto la
+  decide chi decide con un Ruling, e la correzione va all'esecutore
+- C) chi decide sistema le prove a mano, senza Ruling
+**Scelta:** B
+**Perché:** il parallelo su worktree diversi fa risparmiare tempo. Il conflitto è di regole, non di codice, quindi lo
+decide chi decide.
+**Esito:** un Ruling nuovo e una correzione a un esecutore `medium`. L'esecutore ha chiesto con una domanda di una
+prova che codificava la regola vecchia, invece di forzarla. Suite verde.
+**Fonte:** dal vivo 2026-11-14
+
+### CICLO-34. La revisione finale su un diff piccolo
+
+**Scenario:** il piano chiede la revisione del revisore caro anche su una tappa col diff di prodotto di circa 60
+righe. La sua quota settimanale è scarsa: una revisione da 230k token ne costa 6 punti.
+**Domanda:** chi rivede?
+**Opzioni:**
+- A) il revisore caro, come dice il piano
+- B) chi decide da solo, leggendo tutto il diff, e lo scrive nelle misure come scostamento dal piano
+- C) nessuna revisione
+**Scelta:** B
+**Perché:** il massimo spendendo il minimo. Un diff che si legge in pochi minuti chi decide lo legge comunque, e il
+revisore costerebbe molta quota scarsa per lo stesso controllo.
+**Esito:** tappa unita senza rilievi dopo. Il revisore resta per i diff grandi: nella tappa prima aveva trovato due
+minori veri.
+**Fonte:** dal vivo 2026-11-14
+
+### CICLO-35. Il «Fatto quando» che fuori non gira
+
+**Scenario:** l'esecutore fuori consegna codice giusto, ma l'oracolo è rosso. Il «Fatto quando» lancia le prove
+dentro uno strumento della sessione locale, un tetto di memoria con systemd utente, che sul runner non c'è: fuori il
+tetto lo dà già il servizio del runner. L'esecutore si ferma con una domanda: correggere il «Fatto quando» o cambiare
+lo strumento?
+**Domanda:** che cosa fa chi decide?
+**Opzioni:**
+- A) autorizza la modifica dello strumento perché giri anche sul runner
+- B) corregge il «Fatto quando» con la regola delle prove dei giri fuori e rilancia il giro
+- C) corregge il «Fatto quando», prova lui l'oracolo sul ramo e unisce senza rilanciare, perché il codice è fatto
+**Scelta:** C
+**Perché:** il difetto era nel brief, non nel codice. Un altro giro avrebbe speso quota scarsa per rifare ciò che c'era
+già. Cambiare lo strumento era fuori dal compito.
+**Esito:** oracolo verde, bug riprodotto e visto corretto dal vivo, unione firmata. Lezione per i brief: il «Fatto
+quando» di un lavoro fuori segue la regola delle prove dei giri fuori, scritta nella costituzione del progetto, non
+quella della sessione.
+**Fonte:** dal vivo 2026-11-14
+
+### CICLO-36. Una spinta su main senza le prove
+
+**Scenario:** chi decide spinge su `main` una modifica di soli documenti senza lanciare le prove. La CI diventa rossa,
+perché una prova controlla anche i documenti: nelle pagine delle porte i nomi dei modelli sono vietati.
+**Domanda:** come si evita?
+**Opzioni:**
+- A) i documenti non passano dalle prove
+- B) anche una modifica di soli documenti passa dalle prove intere prima della spinta
+- C) si toglie la prova che controlla i documenti
+**Scelta:** B
+**Perché:** le prove controllano anche i documenti (casistica, pagine delle porte, intestazione della skill): un
+documento rompe la CI quanto il codice.
+**Esito:** la pagina della porta è stata riscritta senza i nomi dei modelli, che ora stanno nella ricognizione. CI
+verde.
+**Fonte:** dal vivo 2026-11-14
