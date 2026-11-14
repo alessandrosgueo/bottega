@@ -14,6 +14,7 @@ from bottega.configurazione import (
     comando_configurazione,
 )
 from bottega.conti import argomenti_conti, comando_conti
+from bottega.correggi import argomenti_correggi, comando_correggi
 from bottega.distributore import argomenti_distribuisci, comando_distribuisci
 from bottega.dividi import argomenti_dividi, comando_dividi
 from bottega.firma import ErroreFirma, argomenti_firma, comando_firma
@@ -55,6 +56,7 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "firma": comando_firma,
     "segno": comando_segno,
     "misura": comando_misura,
+    "correggi": comando_correggi,
     "installa": comando_installa,
     "ferma": comando_ferma,
     "riparti": comando_riparti,
@@ -76,6 +78,7 @@ ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "firma": argomenti_firma,
     "segno": argomenti_segno,
     "misura": argomenti_misura,
+    "correggi": argomenti_correggi,
     "installa": argomenti_installa,
     "ferma": argomenti_ferma,
     "riparti": argomenti_riparti,
