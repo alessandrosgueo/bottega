@@ -15,6 +15,7 @@ liberi = ["<etichetta>"]                        # facoltativo: etichette dei com
 # costituzione = "docs/costituzione.md"         # facoltativo: dove sta la costituzione del progetto
 
 # Una bottega è un abbonamento con la sua quota. L'id (a-z, 0-9 e -) lo sceglie chi configura.
+# Un abbonamento con più quote separate (Antigravity: una per gruppo di modelli) si divide in una bottega per quota.
 [botteghe.principale]
 quota = "scarsa"                  # scarsa, normale o abbondante
 porte = ["claude-code"]           # fra claude-code, antigravity, pi, copilot-cli: come si entra nella bottega
