@@ -44,3 +44,20 @@ per bottega, un 429 su un gruppo ferma anche i modelli degli altri due.
 candidati del secchio esaurito.
 **Esito:** da vedere
 **Fonte:** deciso dall'utente
+
+### PORTE-4. Il consigliere che risponde vuoto
+
+**Scenario:** alla domanda dell'esecutore risponde il consigliere, in sola lettura. Il modello tenta un comando, che
+la sola lettura nega, e chiude con una risposta vuota. Il giro pubblica come risposta l'uscita grezza della porta, il
+JSON, e il lavoro va in attesa di chi decide.
+**Domanda:** che cosa vale una risposta vuota del consigliere?
+**Opzioni:**
+- A) un consiglio: l'esecutore riparte
+- B) nessuna risposta: la domanda passa a chi decide, e il commento lo dice in chiaro invece di mostrare il JSON
+- C) si rilancia il consigliere finché risponde
+**Scelta:** B
+**Perché:** una risposta vuota non decide niente, e rilanciare spende quota scarsa. Il giro passa già la domanda a chi
+decide, perché la risposta non comincia con `RISPOSTA`.
+**Esito:** minore aperto: la porta passa al giro l'uscita intera quando la risposta è vuota, e il commento mostra il
+JSON.
+**Fonte:** dal vivo 2026-11-14
