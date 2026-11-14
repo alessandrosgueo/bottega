@@ -887,6 +887,129 @@ def _esito_del_rifiuto(d_nota: dict[str, str]) -> str:
     return "bloccato"
 
 
+class _InvolucroCronometrato:
+    """Avvolge board o forgia passando ogni attributo e cronometrando le chiamate ai metodi (B14-R9)."""
+
+    def __init__(self, originale: Any, orologio: Callable[[], float]) -> None:
+        object.__setattr__(self, "_involucro_originale", originale)
+        object.__setattr__(self, "_involucro_orologio", orologio)
+        object.__setattr__(self, "_involucro_chiamate", 0)
+        object.__setattr__(self, "_involucro_secondi", 0.0)
+
+    @property
+    def __class__(self) -> type:  # type: ignore[override]
+        return object.__getattribute__(self, "_involucro_originale").__class__
+
+    def __getattr__(self, nome: str) -> Any:
+        originale = object.__getattribute__(self, "_involucro_originale")
+        attr = getattr(originale, nome)
+        if not callable(attr):
+            return attr
+        orologio = object.__getattribute__(self, "_involucro_orologio")
+
+        def avvolto(*args: Any, **kwargs: Any) -> Any:
+            try:
+                inizio = float(orologio())
+            except Exception:
+                inizio = None
+            try:
+                return attr(*args, **kwargs)
+            finally:
+                try:
+                    chiamate = object.__getattribute__(self, "_involucro_chiamate")
+                    object.__setattr__(self, "_involucro_chiamate", chiamate + 1)
+                    if inizio is not None:
+                        delta = max(0.0, float(orologio()) - inizio)
+                        secondi = object.__getattribute__(self, "_involucro_secondi")
+                        object.__setattr__(self, "_involucro_secondi", secondi + delta)
+                except Exception:
+                    pass
+
+        return avvolto
+
+    def __setattr__(self, nome: str, valore: Any) -> None:
+        setattr(object.__getattribute__(self, "_involucro_originale"), nome, valore)
+
+    def __delattr__(self, nome: str) -> None:
+        delattr(object.__getattribute__(self, "_involucro_originale"), nome)
+
+    def __repr__(self) -> str:
+        return repr(object.__getattribute__(self, "_involucro_originale"))
+
+
+def _conteggio_involucro(involucro: Any) -> tuple[int, float]:
+    """Restituisce `(chiamate, secondi)` accumulati dall'involucro cronometrato."""
+    return (
+        int(object.__getattribute__(involucro, "_involucro_chiamate")),
+        float(object.__getattribute__(involucro, "_involucro_secondi")),
+    )
+
+
+class _CronometroFasi:
+    """Misura le fasi del giro senza sovrapposizioni e stampa i tempi senza mai sollevare."""
+
+    def __init__(self, orologio: Callable[[], float]) -> None:
+        self._orologio = orologio
+        self._t_inizio = self._leggi_sicuro()
+        self.fase_corrente: str | None = None
+        self._t_fase_inizio: float | None = None
+        self._fasi: list[tuple[str, int]] = []
+
+    def _leggi_sicuro(self) -> float | None:
+        try:
+            return float(self._orologio())
+        except Exception:
+            return None
+
+    def inizia(self, nome: str, *, ora: float | None = None) -> None:
+        try:
+            if self.fase_corrente is not None:
+                self.chiudi(ora=ora)
+            self.fase_corrente = nome
+            self._t_fase_inizio = ora if ora is not None else self._leggi_sicuro()
+        except Exception:
+            pass
+
+    def chiudi(self, *, ora: float | None = None) -> None:
+        try:
+            if self.fase_corrente is None:
+                return
+            nome = self.fase_corrente
+            t0 = self._t_fase_inizio
+            self.fase_corrente = None
+            self._t_fase_inizio = None
+            t1 = ora if ora is not None else self._leggi_sicuro()
+            sec = int(max(0.0, t1 - t0)) if (t0 is not None and t1 is not None) else 0
+            self._fasi.append((nome, sec))
+            print(f"fase {nome}: {sec} s")
+        except Exception:
+            self.fase_corrente = None
+            self._t_fase_inizio = None
+
+    def passa_a(self, nome: str) -> None:
+        ora = self._leggi_sicuro()
+        self.chiudi(ora=ora)
+        self.inizia(nome, ora=ora)
+
+    def riepilogo(self, board_wrap: Any, forgia_wrap: Any) -> None:
+        try:
+            ora = self._leggi_sicuro()
+            if self.fase_corrente is not None:
+                self.chiudi(ora=ora)
+            totale = int(max(0.0, ora - self._t_inizio)) if (self._t_inizio is not None and ora is not None) else 0
+            b_n, b_s = _conteggio_involucro(board_wrap)
+            f_n, f_s = _conteggio_involucro(forgia_wrap)
+            parti_fasi = ", ".join(f"{nome} {sec} s" for nome, sec in self._fasi)
+            pezzi = [f"totale {totale} s"]
+            if parti_fasi:
+                pezzi.append(parti_fasi)
+            pezzi.append(f"board {b_n} chiamate {int(b_s)} s")
+            pezzi.append(f"forgia {f_n} chiamate {int(f_s)} s")
+            print("tempi del giro: " + "; ".join(pezzi))
+        except Exception:
+            pass
+
+
 def giro(
     lavoro: int,
     bottega: str,
@@ -901,6 +1024,7 @@ def giro(
     adesso: datetime,
     caso: random.Random,
     segno: Path | None = None,
+    orologio: Callable[[], float] | None = None,
 ) -> EsitoGiro:
     """Esegue un giro dell'esecutore per il lavoro e la bottega indicati. Non solleva mai (RV5).
 
@@ -910,54 +1034,64 @@ def giro(
     porta l'errore, e il distributore riparte come per gli altri blocchi: un guasto fisso non diventa un anello orario.
     Se la board non risponde nemmeno lì, il lavoro si rimette `pronto` come prima.
     """
+    orologio_reale = orologio or time.monotonic
+    board_wrap: Any = _InvolucroCronometrato(board, orologio_reale)
+    forgia_wrap: Any = _InvolucroCronometrato(forgia, orologio_reale)
+    cron = _CronometroFasi(orologio_reale)
+    cron.inizia("preparazione", ora=cron._t_inizio)
     try:
-        return _giro(
-            lavoro,
-            bottega,
-            configurazione=configurazione,
-            forgia=forgia,
-            board=board,
-            porte=porte,
-            clone_progetto=clone_progetto,
-            spazio=spazio,
-            prefisso=prefisso,
-            adesso=adesso,
-            caso=caso,
-            segno=segno,
-        )
-    except Exception as exc:
-        motivo = f"errore prima del giro: {exc}"
         try:
-            lav_ora = board.lavoro(lavoro)
-            if lav_ora is not None and lav_ora.stato == "consegnato":
-                # Un lavoro già consegnato non torna pronto né si blocca per un giro caduto prima di cominciare.
-                return EsitoGiro("errore", motivo=motivo)
-            d_errore = nota(lav_ora.nota if lav_ora else "")
-            tentativi = int(d_errore.get("tentativi", 0)) + 1
-            d_errore["tentativi"] = str(tentativi)
-            d_errore["motivo"] = "errore prima del giro"
-            nota_nuova = scrivi_nota(d_errore)
-            board.stato(lavoro, "bloccato" if tentativi >= 3 else "pronto", nota=nota_nuova)
-        except Exception:
-            # La board non risponde, o la nota non si legge: come prima, si prova `pronto` e si ignora l'errore.
+            return _giro(
+                lavoro,
+                bottega,
+                configurazione=configurazione,
+                forgia=forgia_wrap,
+                board=board_wrap,
+                porte=porte,
+                clone_progetto=clone_progetto,
+                spazio=spazio,
+                prefisso=prefisso,
+                adesso=adesso,
+                caso=caso,
+                segno=segno,
+                _cron=cron,
+                _orologio=orologio_reale,
+            )
+        except Exception as exc:
+            motivo = f"errore prima del giro: {exc}"
             try:
-                board.stato(lavoro, "pronto")
+                lav_ora = board_wrap.lavoro(lavoro)
+                if lav_ora is not None and lav_ora.stato == "consegnato":
+                    # Un lavoro già consegnato non torna pronto né si blocca per un giro caduto prima di cominciare.
+                    return EsitoGiro("errore", motivo=motivo)
+                d_errore = nota(lav_ora.nota if lav_ora else "")
+                tentativi = int(d_errore.get("tentativi", 0)) + 1
+                d_errore["tentativi"] = str(tentativi)
+                d_errore["motivo"] = "errore prima del giro"
+                nota_nuova = scrivi_nota(d_errore)
+                board_wrap.stato(lavoro, "bloccato" if tentativi >= 3 else "pronto", nota=nota_nuova)
+            except Exception:
+                # La board non risponde, o la nota non si legge: come prima, si prova `pronto` e si ignora l'errore.
+                try:
+                    board_wrap.stato(lavoro, "pronto")
+                except Exception:
+                    pass
+                return EsitoGiro("errore", motivo=motivo)
+            if tentativi < 3:
+                return EsitoGiro("errore", motivo=motivo)
+            try:
+                forgia_wrap.commenta(
+                    lavoro,
+                    "Lavoro bloccato: tre tentativi in tutto, l'ultimo caduto prima del giro, serve chi decide.\n\n"
+                    f"{recinta_testo_modello(str(exc))}",
+                    ruolo="esecutore",
+                )
             except Exception:
                 pass
-            return EsitoGiro("errore", motivo=motivo)
-        if tentativi < 3:
-            return EsitoGiro("errore", motivo=motivo)
-        try:
-            forgia.commenta(
-                lavoro,
-                "Lavoro bloccato: tre tentativi in tutto, l'ultimo caduto prima del giro, serve chi decide.\n\n"
-                f"{recinta_testo_modello(str(exc))}",
-                ruolo="esecutore",
-            )
-        except Exception:
-            pass
-        _rilancia_distributore(forgia)
-        return EsitoGiro("bloccato", motivo=motivo)
+            _rilancia_distributore(forgia_wrap)
+            return EsitoGiro("bloccato", motivo=motivo)
+    finally:
+        cron.riepilogo(board_wrap, forgia_wrap)
 
 
 def _giro(
@@ -974,8 +1108,12 @@ def _giro(
     adesso: datetime,
     caso: random.Random,
     segno: Path | None = None,
+    _cron: _CronometroFasi | None = None,
+    _orologio: Callable[[], float] | None = None,
 ) -> EsitoGiro:
     """Il corpo del giro; `giro` lo avvolge."""
+    orologio_reale = _orologio or time.monotonic
+    cron = _cron if _cron is not None else _CronometroFasi(orologio_reale)
     if bottega not in configurazione.botteghe:
         raise ValueError(f"Bottega sconosciuta: {bottega!r}")
 
@@ -1314,9 +1452,13 @@ def _giro(
         lancio_partito = False
         tempo_inizio_lancio: float | None = None
 
+        cron.passa_a("esecutore")
         while True:
             if tempo_inizio_lancio is None:
-                tempo_inizio_lancio = time.monotonic()
+                try:
+                    tempo_inizio_lancio = orologio_reale()
+                except Exception:
+                    tempo_inizio_lancio = time.monotonic()
             lancio_partito = True
             lancio = porta_esecutore.lancia(
                 cartella=lavoro_dir,
@@ -1336,6 +1478,7 @@ def _giro(
             if e_consulto:
                 consulti_effettuati += 1
                 if consulti_effettuati > 2:
+                    cron.passa_a("chiusura")
                     d_nota["motivo"] = "troppi consulti"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
@@ -1356,6 +1499,7 @@ def _giro(
                 )
 
                 if not scelta_cons.candidato or scelta_cons.aspetta:
+                    cron.passa_a("chiusura")
                     msg = "Nessun consigliere con quota disponibile per il consulto."
                     forgia.commenta(compito.numero, msg, ruolo="avviso")
                     d_nota["motivo"] = "senza consigliere con quota"
@@ -1395,6 +1539,7 @@ def _giro(
                     shutil.rmtree(dir_cons, ignore_errors=True)
 
                 if lancio_cons.esito == "quota":
+                    cron.passa_a("chiusura")
                     rinnovo_cons = lancio_cons.rinnovo or (adesso + timedelta(hours=1))
                     if rinnovo_cons.tzinfo is None:
                         rinnovo_cons = rinnovo_cons.replace(tzinfo=adesso.tzinfo or timezone.utc)
@@ -1405,6 +1550,7 @@ def _giro(
                     return EsitoGiro("in_attesa", motivo="quota")
 
                 if lancio_cons.esito != "fatto":
+                    cron.passa_a("chiusura")
                     d_nota["motivo"] = lancio_cons.esito
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
@@ -1425,12 +1571,15 @@ def _giro(
                     conversazione_id = lancio.conversazione
                     continue
                 else:
+                    cron.passa_a("chiusura")
                     d_nota["motivo"] = "consulto a chi decide"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
                     return EsitoGiro("in_attesa", motivo="consulto a chi decide")
 
             break
+
+        cron.chiudi()
 
         # RV4: Il lavoro non committato si committa prima di OGNI uscita dopo il lancio
         _committa_lavoro_pendente(lavoro_dir, prefisso, env_rip, f"salvataggio per compito {compito.numero}")
@@ -1453,6 +1602,7 @@ def _giro(
             ).stdout.strip()
 
             if cur_head != base_commit:
+                cron.inizia("consegna")
                 bundle_salv_esec = dir_esec / "salvataggio.bundle"
                 _esegui(
                     [*prefisso, "git", "bundle", "create", str(bundle_salv_esec), nome_ramo],
@@ -1475,6 +1625,7 @@ def _giro(
                     lavoro=lavoro,
                 )
                 if not ok_salv:
+                    cron.passa_a("chiusura")
                     _rilancia_distributore(forgia)
                     return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
                 pr_num = forgia.pr_del_ramo(nome_ramo)
@@ -1482,7 +1633,9 @@ def _giro(
                     titolo_salv = iss_madre.titolo
                     corpo_salv = f"Lavoro: #{iss_madre.numero}\n\nSalvataggio parziale per quota esaurita."
                     forgia.apri_pr(nome_ramo, titolo_salv, corpo_salv)
+                cron.chiudi()
 
+            cron.inizia("chiusura")
             # RV8: attese non viene cresciuta dal giro!
             if lancio.conversazione:
                 d_nota["conversazione"] = lancio.conversazione
@@ -1501,6 +1654,7 @@ def _giro(
 
         # Accesso, errore o ogni altro esito che non è «fatto»: conta un tentativo
         if lancio.esito != "fatto":
+            cron.inizia("chiusura")
             tentativi = int(d_nota.get("tentativi", 0)) + 1
             d_nota["tentativi"] = str(tentativi)
             if tentativi >= 3:
@@ -1534,6 +1688,7 @@ def _giro(
             else None
         )
         if cur_head == base_commit and base_ripresa is None:
+            cron.inizia("chiusura")
             tentativi = int(d_nota.get("tentativi", 0)) + 1
             d_nota["tentativi"] = str(tentativi)
             d_nota["motivo"] = "nessun commit"
@@ -1571,6 +1726,7 @@ def _giro(
                 ruolo="esecutore",
             )
         else:
+            cron.inizia("consegna")
             # Genera bundle di consegna dall'esecutore (RV1)
             bundle_esec = dir_esec / "consegna.bundle"
             _esegui(
@@ -1596,11 +1752,13 @@ def _giro(
                 lavoro=lavoro,
             )
             if not ok_consegna:
+                cron.passa_a("chiusura")
                 _rilancia_distributore(forgia)
                 return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
 
             # RV4: Se il commit è vuoto (nessun file toccato nel diff)
             if not entries_diff:
+                cron.passa_a("chiusura")
                 tentativi = int(d_nota.get("tentativi", 0)) + 1
                 d_nota["tentativi"] = str(tentativi)
                 d_nota["motivo"] = "commit vuoto"
@@ -1630,8 +1788,10 @@ def _giro(
             ) or base_commit
             d_nota["consegnato"] = f"{compito.numero}:{base_segnata}:{sha_consegna}"
             board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
+            cron.chiudi()
 
         # B3-R12: Oracolo su copia fresca
+        cron.inizia("oracolo")
         dir_oracolo = dir_esec / "oracolo"
         bundle_oracolo = dir_giro / "oracolo.bundle"
         _esegui(
@@ -1661,6 +1821,7 @@ def _giro(
             f"{recinta_testo_modello(ultime_40)}"
         )
         forgia.commenta(compito.numero, testo_oracolo, ruolo="esecutore")
+        cron.chiudi()
 
         # RV6: Apertura o recupero PR con testi del modello recintati
         pr_num = forgia.pr_del_ramo(nome_ramo)
@@ -1753,6 +1914,7 @@ def _giro(
             costi_propri=costi_relativi,
         )
         if scelta_cons.candidato and not scelta_cons.aspetta:
+            cron.inizia("rilettura")
             cand_cons = configurazione.candidati[scelta_cons.candidato]
             porta_cons = _ottieni_porta(cand_cons.porta, porte)
             diff_testo = diff_consegna
@@ -1779,6 +1941,7 @@ def _giro(
                     f"compito senza rilettura: il lancio del consigliere è finito con «{lancio_rev.esito}»",
                     ruolo="consigliere",
                 )
+            cron.chiudi()
         else:
             forgia.commenta(
                 pr_num,
@@ -1790,6 +1953,7 @@ def _giro(
         # restano visibili). Il ramo porta già la consegna rossa e il giro dopo riparte da lì: la chiave `consegnato`
         # si toglie (B7-2: con quella il giro dopo riprenderebbe dall'oracolo senza lasciare all'esecutore il modo di
         # correggere). Conta un tentativo, come ogni giro che non porta a una consegna buona; al terzo serve chi decide.
+        cron.inizia("chiusura")
         if not oracolo_ok:
             tentativi = int(d_nota.get("tentativi", 0)) + 1
             d_nota["tentativi"] = str(tentativi)
@@ -1831,6 +1995,8 @@ def _giro(
 
     except Exception as exc:
         # RV5: Nessuna eccezione esce da giro()
+        if "lancio_partito" in locals() and lancio_partito and cron.fase_corrente != "chiusura":
+            cron.passa_a("chiusura")
         tentativi = int(d_nota.get("tentativi", 0)) + 1
         d_nota["tentativi"] = str(tentativi)
         d_nota["motivo"] = f"errore: {exc}"
@@ -1851,8 +2017,14 @@ def _giro(
 
     finally:
         if "lancio_partito" in locals() and lancio_partito:
+            if cron.fase_corrente != "chiusura":
+                cron.passa_a("chiusura")
             try:
-                durata_sec = int(time.monotonic() - tempo_inizio_lancio) if tempo_inizio_lancio is not None else 0
+                try:
+                    fine_lancio = orologio_reale()
+                except Exception:
+                    fine_lancio = time.monotonic()
+                durata_sec = int(max(0.0, fine_lancio - tempo_inizio_lancio)) if tempo_inizio_lancio is not None else 0
                 token_tot = sum(misure.token_dei_contatori(candidato.porta, l.contatori) for l in lanci_esecutore)
                 _scrivi_misure(
                     board=board,
@@ -1866,6 +2038,7 @@ def _giro(
                 )
             except Exception as exc:
                 print(f"misure: errore in _scrivi_misure: {exc}", file=sys.stderr)
+            cron.chiudi()
 
         _uccidi_processi_esecutore(prefisso)
 
