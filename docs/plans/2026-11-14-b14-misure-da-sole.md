@@ -106,6 +106,18 @@ compito l'esito `unito com'era`. Per quel caso resta `bottega misura <N> --esito
   è il perché della scelta quando nessun candidato è scelto (`scelta.perche`), oppure `il lancio del consigliere è
   finito con «<esito>»`.
 - **R7.** Nessun campo nuovo nel Project, nessun cambio al contratto dell'adattatore, nessun cambio ai workflow.
+- **R9.** Il giro dice dove va il tempo (`giro.py`). Su 55 giri di un progetto vero il passo del giro dura 13 minuti
+  di mediana e il log non dice niente fra l'inizio e la fine; da fuori si misura solo che ogni chiamata alla board
+  passa dall'adattatore e dura 9-10 secondi, e un giro ne fa una ventina.
+  - A fine di ogni fase il giro stampa su stdout `fase <nome>: <secondi> s`, coi nomi fissi `preparazione` (dall'inizio
+    al primo lancio dell'esecutore), `esecutore` (i lanci del modello, consulti compresi), `consegna` (patch, controlli,
+    spinta, PR), `oracolo`, `rilettura`, `chiusura` (misure, stato, commenti). Una fase che non c'è stata non si stampa.
+  - Alla fine, anche su errore, una riga sola: `tempi del giro: totale <s> s; <fase> <s> s, …; board <n> chiamate
+    <s> s; forgia <n> chiamate <s> s`.
+  - Board e forgia si contano con un involucro che cronometra ogni metodo chiamato, messo all'ingresso del giro: nessun
+    cambio ai punti che le chiamano. L'orologio è `time.monotonic`, iniettabile nelle prove.
+  - Niente campi nuovi e niente commenti nuovi: solo il log. Il flusso del giro non cambia (stessi esiti, stesse
+    scritture, stesso ordine).
 - **R8.** Le prove nuove usano `BoardFinta` e `ForgiaFinta` (`attrezzi/bottega/finta.py`) e una trascrizione finta
   come in `attrezzi/tests/test_segno.py`. Un caso rosso prima del codice per ogni Ruling.
 
@@ -129,6 +141,7 @@ Ciò che le prove non coprono e la revisione finale deve guardare:
 | K3 | R3: lo spazzino degli esiti | `distributore.py`, `tests/test_esiti_b14.py` (nuovo) | c.s. | `medium` |
 | K4 | R6: il motivo della rilettura mancata | `giro.py`, `tests/test_rilettura_b14.py` (nuovo) | c.s. | `medium` |
 | K5 | R4, R5: il segno da solo | `segno.py`, `lancio.py`, `conti.py`, `correggi.py`, `tests/test_segno_b14.py` (nuovo) | c.s. | `high`: tocca quattro moduli e i codici d'uscita di due comandi |
+| K7 | R9: il giro dice dove va il tempo | `giro.py`, `tests/test_tempi_b14.py` (nuovo) | c.s. | `high`: un file di duemila righe con un `try/finally` lungo, e il flusso non deve cambiare |
 | K6 | skill, pagine, casistica, quaderni, versione 0.2.6 | `plugin/`, `casistica/`, `quaderni/`, `LEGGIMI.md` | chi decide | — |
 
 K1 per primo. K2, K3 e K4 toccano file diversi e partono insieme, ognuno nel suo worktree; si uniscono al ramo della
