@@ -13,6 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from bottega.ci import rischi
+from bottega.quota import nome_variabile
 
 PERCORSO_PREDEFINITO = ".github/bottega/bottega.toml"
 PREFISSO = "bottega.toml"
@@ -23,8 +24,8 @@ QUOTE = ("scarsa", "normale", "abbondante")
 
 _CHIAVI_TOP = ("versione", "progetto", "botteghe", "candidati")
 _CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione", "project", "liberi", "costituzione")
-_CHIAVI_BOTTEGA = ("quota", "porte")
-_CHIAVI_CANDIDATO = ("nome", "bottega", "porta", "modello", "funzioni", "runner")
+_CHIAVI_BOTTEGA = ("quota", "quote", "porte")
+_CHIAVI_CANDIDATO = ("nome", "bottega", "porta", "modello", "funzioni", "runner", "quota", "riserva", "quaderno")
 _ID = re.compile(r"[a-z0-9-]+")
 _ORA = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 _FINESTRA = re.compile(r"((?:[01][0-9]|2[0-3]):[0-5][0-9])-((?:[01][0-9]|2[0-3]):[0-5][0-9])")
@@ -47,11 +48,12 @@ class Progetto:
 
 @dataclass(frozen=True)
 class Bottega:
-    """Un abbonamento con la sua quota e le sue porte."""
+    """Un abbonamento con la sua quota (o i suoi secchi) e le sue porte."""
 
     id: str
     quota: str
     porte: tuple[str, ...]
+    quote: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,9 @@ class Candidato:
     modello: str
     funzioni: tuple[str, ...]
     runner: str | None
+    quota: str | None = None
+    riserva: bool = False
+    quaderno: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,33 @@ class Configurazione:
     progetto: Progetto
     botteghe: dict[str, Bottega]
     candidati: dict[str, Candidato]
+
+
+def peso_del_candidato(cfg: Configurazione, c: Candidato) -> str:
+    """Il peso della quota del candidato: quello del suo secchio, o la `quota` della bottega."""
+    bottega = cfg.botteghe[c.bottega]
+    if bottega.quote:
+        if c.quota is None:
+            raise ValueError(f"il candidato «{c.id}» non indica il secchio per la bottega «{bottega.id}»")
+        return dict(bottega.quote)[c.quota]
+    return bottega.quota
+
+
+def variabile_della_quota(c: Candidato) -> str:
+    """Il nome della variabile di Actions per la quota del candidato."""
+    return nome_variabile(c.bottega, c.quota)
+
+
+def variabili_della_quota(cfg: Configurazione) -> list[str]:
+    """I nomi delle variabili di Actions per tutte le quote configurate, ordinati."""
+    nomi: list[str] = []
+    for bottega in cfg.botteghe.values():
+        if bottega.quote:
+            for secchio, _ in bottega.quote:
+                nomi.append(nome_variabile(bottega.id, secchio))
+        else:
+            nomi.append(nome_variabile(bottega.id))
+    return sorted(nomi)
 
 
 class ErroreConfigurazione(ValueError):
@@ -267,11 +299,45 @@ def _botteghe(dati: dict, errori: list[str]) -> dict[str, Bottega]:
         if corpo is None:
             continue
         _sconosciute(corpo, _CHIAVI_BOTTEGA, percorso, errori)
-        quota = _scelta(corpo, "quota", percorso, QUOTE, "quota", errori)
+        ha_quota = "quota" in corpo
+        ha_quote = "quote" in corpo
+        quota: str | None = None
+        quote: tuple[tuple[str, str], ...] | None = ()
+        if ha_quota and ha_quote:
+            _errore(errori, percorso, "usa «quota» oppure «quote», non tutte e due")
+        elif not ha_quota and not ha_quote:
+            _errore(errori, percorso, "serve «quota» oppure «quote»")
+        elif ha_quota:
+            quota = _scelta(corpo, "quota", percorso, QUOTE, "quota", errori)
+        else:
+            quota = ""
+            quote = _quote_secchi(corpo["quote"], f"{percorso}.quote", errori)
         porte = _scelte(corpo, "porte", percorso, PORTE, "porta", errori)
-        if len(errori) == n and quota is not None and porte is not None:
-            valide[id_] = Bottega(id_, quota, porte)
+        if len(errori) == n and quota is not None and quote is not None and porte is not None:
+            valide[id_] = Bottega(id_, quota, porte, quote)
     return valide
+
+
+def _quote_secchi(valore: object, percorso: str, errori: list[str]) -> tuple[tuple[str, str], ...] | None:
+    """Valida la tabella `quote` di una bottega e restituisce le coppie `(secchio, peso)` ordinate."""
+    tabella = _tabella(valore, percorso, errori)
+    if tabella is None:
+        return None
+    if not tabella:
+        _errore(errori, percorso, "tabella vuota: serve almeno un secchio")
+        return None
+    coppie: list[tuple[str, str]] = []
+    for secchio, peso_val in tabella.items():
+        percorso_secchio = f"{percorso}.{secchio}"
+        _id(secchio, percorso_secchio, errori)
+        peso = _come_testo(peso_val, percorso_secchio, errori)
+        if peso is None:
+            continue
+        if peso not in QUOTE:
+            _errore(errori, percorso_secchio, _fuori_elenco(peso, "quota", QUOTE))
+        else:
+            coppie.append((secchio, peso))
+    return tuple(sorted(coppie))
 
 
 def _candidati(
@@ -309,11 +375,78 @@ def _candidati(
         modello = _testo(tabella, "modello", percorso, errori, obbligatoria=True)
         funzioni = _scelte(tabella, "funzioni", percorso, FUNZIONI, "funzione", errori)
         runner = _testo(tabella, "runner", percorso, errori, obbligatoria=False)
+        quota_cand = _quota_candidato(tabella, percorso, bottega, botteghe, errori)
+        riserva = _booleano(tabella, "riserva", percorso, errori, predefinito=False)
+        quaderno = _testo(tabella, "quaderno", percorso, errori, obbligatoria=False)
         if len(errori) == n and None not in (nome, bottega, porta, modello, funzioni):
-            valide[id_] = Candidato(id_, nome, bottega, porta, modello, funzioni, runner)
+            valide[id_] = Candidato(
+                id_,
+                nome,
+                bottega,
+                porta,
+                modello,
+                funzioni,
+                runner,
+                quota_cand,
+                riserva,
+                quaderno,
+            )
     if not any(_decide(voce) for voce in grezze.values()):
         _errore(errori, "candidati", "nessun candidato con la funzione «decidere»")
     return valide
+
+
+def _quota_candidato(
+    tabella: dict,
+    percorso: str,
+    bottega: str | None,
+    botteghe: dict[str, Bottega],
+    errori: list[str],
+) -> str | None:
+    """Valida la chiave `quota` del candidato contro la sua bottega (obbligatoria coi secchi, vietata senza)."""
+    percorso_quota = f"{percorso}.quota"
+    ha_quota = "quota" in tabella
+    if bottega is not None and bottega in botteghe:
+        b = botteghe[bottega]
+        if b.quote:
+            if not ha_quota:
+                _errore(errori, percorso_quota, f"chiave obbligatoria per la bottega a secchi «{bottega}»")
+                return None
+            secchio = _testo(tabella, "quota", percorso, errori, obbligatoria=False)
+            if secchio is None:
+                return None
+            secchi = {s for s, _ in b.quote}
+            if secchio not in secchi:
+                elenco = ", ".join(s for s, _ in b.quote)
+                _errore(
+                    errori,
+                    percorso_quota,
+                    f"«{secchio}» non è un secchio della bottega «{bottega}» ({elenco})",
+                )
+                return None
+            return secchio
+        if ha_quota:
+            _errore(
+                errori,
+                percorso_quota,
+                f"la bottega «{bottega}» non ha secchi («quote»), non si può indicare «quota»",
+            )
+            return None
+        return None
+    if ha_quota:
+        return _testo(tabella, "quota", percorso, errori, obbligatoria=False)
+    return None
+
+
+def _booleano(tabella: dict, chiave: str, percorso: str, errori: list[str], predefinito: bool) -> bool:
+    """Valida una chiave booleana facoltativa (rifiuta interi e stringhe)."""
+    if chiave not in tabella:
+        return predefinito
+    valore = tabella[chiave]
+    if type(valore) is not bool:
+        _errore(errori, _completa(percorso, chiave), "tipo sbagliato: serve un booleano")
+        return predefinito
+    return valore
 
 
 def _decide(voce: object) -> bool:

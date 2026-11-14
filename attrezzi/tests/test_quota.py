@@ -16,6 +16,16 @@ def test_nome_variabile_converte_in_maiuscolo_e_trattini_in_trattini_bassi() -> 
     assert nome_variabile("a-b-c") == "BOTTEGA_QUOTA_A_B_C"
 
 
+def test_nome_variabile_col_secchio() -> None:
+    assert nome_variabile("google", "argon") == "BOTTEGA_QUOTA_GOOGLE__ARGON"
+    assert nome_variabile("a-b", "c-d") == "BOTTEGA_QUOTA_A_B__C_D"
+    assert nome_variabile("google") == "BOTTEGA_QUOTA_GOOGLE"
+
+
+def test_secchio_e_bottega_omonimi_non_si_scontrano() -> None:
+    assert nome_variabile("google-argon") != nome_variabile("google", "argon")
+
+
 def test_valore_esaurita_richiede_fuso_orario() -> None:
     ingenuo = datetime(2026, 11, 8, 18, 0, 0)
     with pytest.raises(ValueError, match="fuso orario"):
