@@ -23,7 +23,8 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
 ## Le parole
 
 - **Bottega:** un abbonamento con la sua quota (un fornitore e un accesso). Ha i suoi modelli e una quota scarsa,
-  normale o abbondante.
+  normale o abbondante. Un abbonamento con più quote separate (Antigravity: una per gruppo di modelli) diventa una
+  bottega per quota, con la stessa porta.
 - **Porta:** la CLI con cui si entra in una bottega. Una CLI può aprire più botteghe e una bottega può avere più porte.
   Ogni porta ha la sua pagina: [Claude Code](porte/claude-code.md), [Antigravity](porte/antigravity.md),
   [Pi](porte/pi.md), [GitHub Copilot CLI](porte/copilot-cli.md).
