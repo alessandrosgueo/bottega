@@ -21,11 +21,26 @@ VERSIONE_FORMATO = 1
 PORTE = ("claude-code", "antigravity", "pi", "copilot-cli")
 FUNZIONI = ("decidere", "eseguire", "rivedere", "consigliare")
 QUOTE = ("scarsa", "normale", "abbondante")
+TEMPO_MINIMO = 5
+TEMPO_MASSIMO = 270
+TEMPO_PREDEFINITO = 60
 
 _CHIAVI_TOP = ("versione", "progetto", "botteghe", "candidati")
 _CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione", "project", "liberi", "costituzione")
 _CHIAVI_BOTTEGA = ("quota", "quote", "porte")
-_CHIAVI_CANDIDATO = ("nome", "bottega", "porta", "modello", "funzioni", "runner", "quota", "riserva", "quaderno")
+_CHIAVI_CANDIDATO = (
+    "nome",
+    "bottega",
+    "porta",
+    "modello",
+    "funzioni",
+    "runner",
+    "quota",
+    "riserva",
+    "quaderno",
+    "su_richiesta",
+    "tempo",
+)
 _ID = re.compile(r"[a-z0-9-]+")
 _ORA = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 _FINESTRA = re.compile(r"((?:[01][0-9]|2[0-3]):[0-5][0-9])-((?:[01][0-9]|2[0-3]):[0-5][0-9])")
@@ -70,6 +85,8 @@ class Candidato:
     quota: str | None = None
     riserva: bool = False
     quaderno: str | None = None
+    su_richiesta: bool = False
+    tempo: int = TEMPO_PREDEFINITO
 
 
 @dataclass(frozen=True)
@@ -386,6 +403,10 @@ def _candidati(
         quota_cand = _quota_candidato(tabella, percorso, bottega, botteghe, errori)
         riserva = _booleano(tabella, "riserva", percorso, errori, predefinito=False)
         quaderno = _testo(tabella, "quaderno", percorso, errori, obbligatoria=False)
+        su_richiesta = _booleano(tabella, "su_richiesta", percorso, errori, predefinito=False)
+        if su_richiesta and riserva:
+            _errore(errori, f"{percorso}.su_richiesta", "non può essere «true» insieme a «riserva»")
+        tempo = _tempo_candidato(tabella, percorso, errori)
         if len(errori) == n and None not in (nome, bottega, porta, modello, funzioni):
             valide[id_] = Candidato(
                 id_,
@@ -398,6 +419,8 @@ def _candidati(
                 quota_cand,
                 riserva,
                 quaderno,
+                su_richiesta,
+                tempo,
             )
     if not any(_decide(voce) for voce in grezze.values()):
         _errore(errori, "candidati", "nessun candidato con la funzione «decidere»")
@@ -454,6 +477,21 @@ def _booleano(tabella: dict, chiave: str, percorso: str, errori: list[str], pred
     if type(valore) is not bool:
         _errore(errori, _completa(percorso, chiave), "tipo sbagliato: serve un booleano")
         return predefinito
+    return valore
+
+
+def _tempo_candidato(tabella: dict, percorso: str, errori: list[str]) -> int:
+    """Valida la chiave `tempo` del candidato: intero da 5 a 270 minuti (di serie 60)."""
+    completa = _completa(percorso, "tempo")
+    if "tempo" not in tabella:
+        return TEMPO_PREDEFINITO
+    valore = tabella["tempo"]
+    if type(valore) is not int:  # bool è un int per Python: qui no
+        _errore(errori, completa, "tipo sbagliato: serve un numero intero")
+        return TEMPO_PREDEFINITO
+    if not (TEMPO_MINIMO <= valore <= TEMPO_MASSIMO):
+        _errore(errori, completa, f"fuori intervallo: {valore} (serve da {TEMPO_MINIMO} a {TEMPO_MASSIMO})")
+        return TEMPO_PREDEFINITO
     return valore
 
 

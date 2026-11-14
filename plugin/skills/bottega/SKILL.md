@@ -40,8 +40,9 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
 - **Candidato:** un modello di una bottega, da una porta, per una funzione. Il suo nome è un titolo più il nome del
   modello, scelto dall'utente («Maestro …», «Lavorante …»). Può stare di **riserva** (`riserva = true`) ed essere
   scelto solo quando nessun candidato normale ha quota; per i livelli di uno stesso modello si fa un candidato per
-  livello (quello di serie normale, gli altri di riserva; chi decide sceglie con `esegue:`). Questa skill non conosce
-  nessun modello: li legge dalla configurazione.
+  livello (quello di serie normale, gli altri di riserva; chi decide sceglie con `esegue:`). Può essere **su
+  richiesta** (`su_richiesta = true`, scelto solo con `esegue:`) e avere un **`tempo`** di lancio in minuti (da 5 a
+  270, di serie 60). Questa skill non conosce nessun modello: li legge dalla configurazione.
 - **La configurazione** del progetto è `.github/bottega/bottega.toml`: botteghe, candidati per funzione, chi può
   comandare, l'adattatore della board (il comando del progetto, se ne ha uno, attraverso cui i workflow scrivono sul
   Project; il suo contratto è `docs/adattatore.md` nel clone della bottega). La crea l'installazione, che la CLI
@@ -142,6 +143,29 @@ il piano o tocca una delle quattro barriere, o quando è bloccato. In sessione r
 Fuori risponde nello stesso giro il consigliere scelto dalla scelta viva, solo sui dubbi tecnici dentro il piano; una
 domanda che cambia il piano o tocca le quattro barriere ferma il lavoro e passa a chi decide. Per il resto, dove il
 piano lascia spazio, chi esegue decide e lo scrive come Ruling.
+
+### Le tappe intere
+
+Quando c'è un esecutore capace di pianificare e ripianificare da sé (divide il piano in passi, esegue e controlla),
+sui compiti piccoli costa più di un esecutore semplice, ma su una tappa intera risparmia a chi decide la scrittura di
+un brief per ogni compito.
+
+- **Il candidato:** in `bottega.toml` ha `su_richiesta = true` (la scelta viva non lo prende mai da sola, né normale né
+  di riserva, e non lo eredita come precedente; è incompatibile con `riserva = true`) e un `tempo` in minuti adatto a
+  una tappa intera (da 5 a 270, di serie 60; per esempio `tempo = 240`).
+- **Il lavoro:** è un lavoro **senza sotto-issue** (il giro lo tratta come compito singolo), con l'etichetta
+  `esegue: <nome>` del candidato e il piano già nel ramo. Il corpo del lavoro segue questo modello:
+
+  ````markdown
+  Esegui per intero il piano `<percorso del piano nel repo>`, compiti <sezioni da eseguire>, nell'ordine. Prima leggi
+  `AGENTS.md` e `docs/costituzione.md`.
+
+  ## Fatto quando
+
+  ```bash
+  <il comando che verifica tutta la tappa>
+  ```
+  ````
 
 ### Fine della tappa
 

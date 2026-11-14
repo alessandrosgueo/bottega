@@ -471,3 +471,21 @@ se convenga usarlo come esecutore principale.
 regolare brief, quaderno e livello senza rallentare le tappe.
 **Esito:** da vedere
 **Fonte:** deciso dall'utente
+
+### CICLO-32. Quando usare l'Orchestrator
+
+**Scenario:** la porta Antigravity mette a disposizione l'Orchestrator (`gemini-pro-orchestrator-g1-pro`), in cui Argon
+pianifica e ripianifica e Hydrogen esegue in un solo agente, consumando la quota di Argon. Nella prova del 2026-11-14
+sullo stesso bug ha impiegato 56 s e 48k token contro 33 s e 27k di Hydrogen da solo.
+**Domanda:** dove conviene usare l'Orchestrator?
+**Opzioni:**
+- A) sui compiti difficili, al posto del livello alto dell'esecutore
+- B) sulle tappe intere dal piano di chi decide (lavoro senza sotto-issue, candidato `su_richiesta = true` con `tempo`
+  lungo ed `esegue:`)
+- C) non usarlo: dividere sempre la tappa in sotto-issue con un brief per compito
+**Scelta:** B
+**Perché:** sui compiti singoli costa più tempo e più quota dell'esecutore da solo, mentre su una tappa intera risparmia
+a chi decide la scrittura di un brief per ogni compito; `su_richiesta = true` impedisce alla scelta viva di prenderlo
+da sola.
+**Esito:** da vedere
+**Fonte:** deciso dall'utente

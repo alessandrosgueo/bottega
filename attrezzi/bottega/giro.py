@@ -1324,6 +1324,7 @@ def _giro(
                 modello=candidato.modello,
                 conversazione=conversazione_id,
                 prefisso=prefisso,
+                tempo=candidato.tempo * 60,
             )
             lanci_esecutore.append(lancio)
 

@@ -100,3 +100,8 @@ impara due chiavi: `su_richiesta` (solo con `esegue:`) e `tempo` (i minuti di un
 
 | Compito | Esecutore e livello | Token (Google) | Durata | Giri di correzione | Rilievi gravi (origine) |
 |---|---|---|---|---|---|
+| B13.1 e B13.2, tappa intera | Orchestrator (Argon), in sessione | 623 898 (quota: Argon 5 punti della settimana; Gemini circa 4 della finestra di 5 ore) | 14 min 25 s | 0 | 0 |
+| revisione | chi decide (diff di prodotto di circa 60 righe) | — | — | — | 0; Argon non speso per un diff così piccolo (scostamento dal piano, per la quota) |
+
+Il brief della tappa intera era il corpo di un lavoro: dieci righe. In B12 tre compiti avevano chiesto tre brief.
+

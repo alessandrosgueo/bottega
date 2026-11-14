@@ -4291,3 +4291,46 @@ def test_giro_legge_la_bottega_intera_per_il_consigliere(tmp_path: Path):
     assert esito.esito == "in_attesa"
     assert esito.motivo == "senza consigliere con quota"
 
+
+def test_tempo_del_candidato_al_lancio(tmp_path: Path):
+    from bottega.giro import giro
+
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    base_cfg = _crea_configurazione()
+    candidati = dict(base_cfg.candidati)
+    candidati["esecutore"] = replace(candidati["esecutore"], tempo=240)
+    cfg = replace(base_cfg, candidati=candidati)
+
+    corpo = "Brief tempo\n\n## Fatto quando\n```bash\ntest -f ok.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Tempo", corpo=corpo)
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Tempo", stato="pronto")])
+
+    def committa(cartella, prompt, **kwargs):
+        (Path(cartella) / "ok.txt").write_text("ok", encoding="utf-8")
+        subprocess.run(["git", "add", "ok.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: ok"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = PortaFinta(callback=committa)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=adesso,
+        caso=random.Random(42),
+    )
+
+    assert esito.esito == "consegnato"
+    assert len(porta.lanci) == 2
+    assert porta.lanci[0]["tempo"] == 240 * 60
+    assert porta.lanci[1]["tempo"] == 3600
+
+
