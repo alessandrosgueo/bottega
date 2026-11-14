@@ -1,6 +1,6 @@
 ---
 name: bottega
-description: Metodo di lavoro «bottega» per spendere la quota scarsa solo dove serve. Chi decide scrive piano e brief, chi esegue lavora (in sessione o fuori, come PR su GitHub), un consigliere critica e consiglia. Usala all'inizio di ogni sessione su un progetto che ha `.github/bottega/bottega.toml` o `docs/costituzione.md`, per pianificare ed eseguire un lavoro in quei progetti, e quando l'utente dice «bottega».
+description: Metodo di lavoro «bottega», per ottenere il massimo risultato spendendo il minimo di quota. Chi decide scrive piano e brief, chi esegue lavora (in sessione o fuori, come PR su GitHub), un consigliere critica e consiglia. Usala all'inizio di ogni sessione su un progetto che ha `.github/bottega/bottega.toml` o `docs/costituzione.md`, per pianificare ed eseguire un lavoro in quei progetti, e quando l'utente dice «bottega».
 ---
 
 # Bottega
@@ -8,9 +8,26 @@ description: Metodo di lavoro «bottega» per spendere la quota scarsa solo dove
 L'immagine è la bottega di una volta: il maestro disegna, decide e firma; i lavoranti eseguono; un collega di
 un'altra bottega dà il suo parere. Qui le botteghe sono gli **abbonamenti** dell'utente, ognuno con la sua quota.
 
-**Lo scopo è spendere la quota scarsa solo dove serve.** Chi decide prende le decisioni prima, per iscritto, nel piano
-e nel brief. A chi esegue resta il *come*, non il *cosa*. Così il lavoro va ai modelli più economici o alle quote più
-abbondanti, anche di altri fornitori, senza perdere qualità.
+## La visione: il massimo, spendendo il minimo
+
+**Ottenere il massimo risultato spendendo il minimo.** È il cuore del metodo e la ragione per cui esiste. Ogni scelta
+della bottega si misura su questo: chi decide, chi esegue, con quale modello, a che livello, su quale quota.
+
+- **Il modello giusto, non il più forte.** Ogni compito va al candidato più economico che lo porta a termine bene, al
+  livello più basso che basta. Si sale di livello o di modello solo con un motivo scritto nel piano, compito per
+  compito.
+- **Il lavoro più caro è quello di chi decide.** Per questo decide tutto prima, per iscritto: piani che non lasciano
+  dubbi, brief corti, la costituzione invece delle ripetizioni, una tappa intera a chi sa pianificare da sé quando
+  costa meno dei brief.
+- **Si misura, non si indovina.** Ogni compito lascia token, tempo, quota spesa ed esito; la scelta viva e chi decide
+  scelgono sui numeri, non sull'abitudine.
+- **Ogni passo costa.** Ogni passo di un modello rilegge il contesto e spende quota: chi esegue lavora in pochi passi.
+- **Risparmiare non è tagliare.** Prove, revisioni e le quattro barriere non si saltano mai: un errore che passa costa
+  più di quanto si è risparmiato.
+
+**Il modo:** chi decide prende le decisioni prima, per iscritto, nel piano e nel brief. A chi esegue resta il *come*,
+non il *cosa*. Così il lavoro va ai modelli più economici o alle quote più abbondanti, anche di altri fornitori, senza
+perdere qualità.
 
 **Poche regole.** Le barriere ci sono solo dove un errore farebbe un danno vero:
 - segreti;
@@ -40,8 +57,9 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
 - **Candidato:** un modello di una bottega, da una porta, per una funzione. Il suo nome è un titolo più il nome del
   modello, scelto dall'utente («Maestro …», «Lavorante …»). Può stare di **riserva** (`riserva = true`) ed essere
   scelto solo quando nessun candidato normale ha quota; per i livelli di uno stesso modello si fa un candidato per
-  livello (quello di serie normale, gli altri di riserva; chi decide sceglie con `esegue:`). Questa skill non conosce
-  nessun modello: li legge dalla configurazione.
+  livello (quello di serie normale, gli altri di riserva; chi decide sceglie con `esegue:`). Può essere **su
+  richiesta** (`su_richiesta = true`, scelto solo con `esegue:`) e avere un **`tempo`** di lancio in minuti (da 5 a
+  270, di serie 60). Questa skill non conosce nessun modello: li legge dalla configurazione.
 - **La configurazione** del progetto è `.github/bottega/bottega.toml`: botteghe, candidati per funzione, chi può
   comandare, l'adattatore della board (il comando del progetto, se ne ha uno, attraverso cui i workflow scrivono sul
   Project; il suo contratto è `docs/adattatore.md` nel clone della bottega). La crea l'installazione, che la CLI
@@ -142,6 +160,29 @@ il piano o tocca una delle quattro barriere, o quando è bloccato. In sessione r
 Fuori risponde nello stesso giro il consigliere scelto dalla scelta viva, solo sui dubbi tecnici dentro il piano; una
 domanda che cambia il piano o tocca le quattro barriere ferma il lavoro e passa a chi decide. Per il resto, dove il
 piano lascia spazio, chi esegue decide e lo scrive come Ruling.
+
+### Le tappe intere
+
+Quando c'è un esecutore capace di pianificare e ripianificare da sé (divide il piano in passi, esegue e controlla),
+sui compiti piccoli costa più di un esecutore semplice, ma su una tappa intera risparmia a chi decide la scrittura di
+un brief per ogni compito.
+
+- **Il candidato:** in `bottega.toml` ha `su_richiesta = true` (la scelta viva non lo prende mai da sola, né normale né
+  di riserva, e non lo eredita come precedente; è incompatibile con `riserva = true`) e un `tempo` in minuti adatto a
+  una tappa intera (da 5 a 270, di serie 60; per esempio `tempo = 240`).
+- **Il lavoro:** è un lavoro **senza sotto-issue** (il giro lo tratta come compito singolo), con l'etichetta
+  `esegue: <nome>` del candidato e il piano già nel ramo. Il corpo del lavoro segue questo modello:
+
+  ````markdown
+  Esegui per intero il piano `<percorso del piano nel repo>`, compiti <sezioni da eseguire>, nell'ordine. Prima leggi
+  `AGENTS.md` e `docs/costituzione.md`.
+
+  ## Fatto quando
+
+  ```bash
+  <il comando che verifica tutta la tappa>
+  ```
+  ````
 
 ### Fine della tappa
 

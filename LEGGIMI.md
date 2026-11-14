@@ -1,5 +1,7 @@
 # bottega
 
+**La visione: ottenere il massimo risultato spendendo il minimo.** Tutto il resto viene da qui.
+
 Un metodo per lavorare con più modelli e più abbonamenti spendendo la quota scarsa solo dove serve. Il modello che
 decide scrive il piano e i brief; un modello più economico, o di un altro fornitore, esegue; il diff si rivede prima
 di unire. La regia è GitHub: issue, Project, Actions.
@@ -48,7 +50,7 @@ fuori servono anche systemd, `sudo` (una volta) e `nftables`.
 
 ## Stato
 
-Versione 0.2.4. Costruita in tredici tappe (B0-B12), più di mille prove. Il collaudo è stato fatto dal vivo,
+Versione 0.2.5. Costruita in quattordici tappe (B0-B13), più di mille prove. Il collaudo è stato fatto dal vivo,
 adottandola in un progetto vero: sei lavori dell'esecutore fuori, più di venti compiti, sono arrivati alla PR,
 e ogni intervento a mano è diventato una correzione con la sua prova. La 0.2.1 chiude i fermi silenziosi visti dal
 vivo: ritentativi sugli errori passeggeri di GitHub, un giro di riserva ogni ora, un oracolo rosso che non chiude il
@@ -57,7 +59,8 @@ in silenzio: il giro scrive sul lavoro quelle che la board non prende e `bottega
 dell'adattatore della board è scritto in `docs/adattatore.md`. La 0.2.3 chiede all'esecutore pochi passi (il tempo di un
 giro va nei passi del modello, non nelle prove) e dice quale compito manca del «Fatto quando». La 0.2.4 conosce le quote
 separate di un abbonamento (i secchi: un 429 ferma solo il suo), i candidati di riserva e il quaderno in comune fra
-più livelli dello stesso modello.
+più livelli dello stesso modello. La 0.2.5 dà una tappa intera, col piano come
+brief, a un esecutore che pianifica da sé, scelto solo a richiesta e con un tempo di lancio suo.
 
 **Limiti noti:**
 - Il token del runner (`BOTTEGA_TOKEN`) è l'accesso `gh` di chi installa e vale su tutti i suoi repo. Un token a grana

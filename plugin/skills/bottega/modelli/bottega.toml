@@ -40,6 +40,8 @@ modello = "<modello economico>"
 funzioni = ["eseguire"]
 quota = "veloce"                        # obbligatorio se la bottega usa `quote`, vietato con `quota` semplice
 runner = "<etichetta del runner>"       # facoltativo: senza, il candidato lavora solo in sessione
+su_richiesta = false                    # facoltativo (di serie false): se true, scelto solo con `esegue:`
+tempo = 120                             # facoltativo (5-270, di serie 60): durata massima di un lancio in minuti
 
 [candidati.riserva]
 nome = "Lavorante <modello di riserva>"

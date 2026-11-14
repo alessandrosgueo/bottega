@@ -40,7 +40,9 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
   `<clone>/docs/ricognizioni/2026-11-14-quote-riserva-livelli.md`, §14-§15.
 - Un «Orchestrator» mette due modelli in un solo agente: uno pianifica, ripianifica e controlla, l'altro esegue. Ha un
   livello fisso (niente `--effort`), consuma la quota del modello che pianifica e va senza mani come gli altri, con la
-  stessa busta JSON.
+  stessa busta JSON. Nella prova del 2026-11-14 sullo stesso bug ha impiegato 56 s e 48k token contro 33 s e 27k del
+  solo modello che esegue: sui compiti piccoli non conviene, conviene sulle tappe intere con `su_richiesta = true` e un
+  `tempo` lungo (`<clone>/docs/specs/2026-11-14-b13-tappe-intere-design.md`).
 
 ## Trascrizioni e contatori
 

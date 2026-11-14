@@ -8,7 +8,8 @@ non si ripete: la si cita.
 
 Sei l'esecutore del **compito <N>** della tappa <tappa> (per un lavoro sciolto: **del lavoro #<N>**): <cosa produce,
 in una frase>. <Chi lo userà dopo,
-in una frase.> Lavora in TDD: prima le prove, poi la prova rossa vista, poi il codice, poi la prova verde.
+in una frase.> Lavora in TDD: prima le prove, poi la prova rossa vista, poi il codice, poi la prova verde. Il
+metodo vuole il massimo risultato col minimo di quota: lavora in pochi passi, ognuno costa.
 
 ## Da leggere prima
 

@@ -106,6 +106,8 @@ def test_esempio_si_legge_per_intero():
                 ("eseguire",),
                 "<etichetta del runner>",
                 quota="veloce",
+                su_richiesta=False,
+                tempo=120,
             ),
             "riserva": Candidato(
                 "riserva",
@@ -150,6 +152,8 @@ def test_esempio_ha_ogni_chiave_ammessa():
         "quota",
         "riserva",
         "quaderno",
+        "su_richiesta",
+        "tempo",
     }
 
 
@@ -776,6 +780,63 @@ porte = ["claude-code"]
 
     cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
     assert variabile_della_quota(cfg_semplice.candidati["maestro"]) == "BOTTEGA_QUOTA_PRINCIPALE"
+
+
+def test_su_richiesta_letto(tmp_path):
+    cfg_base = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert cfg_base.candidati["maestro"].su_richiesta is False
+
+    testo = _cambia(BASE, 'porta = "claude-code"', 'porta = "claude-code"\nsu_richiesta = true')
+    assert _errori(tmp_path, testo) == []
+    cand = leggi_configurazione(_scrivi(tmp_path, testo)).candidati["maestro"]
+    assert cand.su_richiesta is True
+
+
+def test_su_richiesta_e_riserva_insieme_errore(tmp_path):
+    testo = _cambia(
+        BASE,
+        'porta = "claude-code"',
+        'porta = "claude-code"\nriserva = true\nsu_richiesta = true',
+    )
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.su_richiesta: ")
+
+
+@pytest.mark.parametrize("valore", ["1", "0", '"true"'])
+def test_su_richiesta_non_booleano_errore(tmp_path, valore):
+    testo = _cambia(BASE, 'porta = "claude-code"', f'porta = "claude-code"\nsu_richiesta = {valore}')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.su_richiesta: ")
+
+
+def test_tempo_letto(tmp_path):
+    cfg_base = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert cfg_base.candidati["maestro"].tempo == 60
+
+    for valore in (5, 240, 270):
+        testo = _cambia(BASE, 'porta = "claude-code"', f'porta = "claude-code"\ntempo = {valore}')
+        assert _errori(tmp_path, testo) == []
+        cand = leggi_configurazione(_scrivi(tmp_path, testo)).candidati["maestro"]
+        assert cand.tempo == valore
+
+
+@pytest.mark.parametrize("valore", [4, 271, 0, -5])
+def test_tempo_fuori_intervallo_errore(tmp_path, valore):
+    testo = _cambia(BASE, 'porta = "claude-code"', f'porta = "claude-code"\ntempo = {valore}')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.tempo: ")
+
+
+@pytest.mark.parametrize("valore", ["true", '"60"', "60.5"])
+def test_tempo_non_intero_errore(tmp_path, valore):
+    testo = _cambia(BASE, 'porta = "claude-code"', f'porta = "claude-code"\ntempo = {valore}')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.tempo: ")
+
 
 
 def test_variabili_da_leggere(tmp_path):

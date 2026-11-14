@@ -1126,3 +1126,147 @@ def test_chiave_della_bottega_ferma_i_secchi() -> None:
     assert scelta.candidato is None
     assert scelta.aspetta is True
 
+
+def test_su_richiesta_mai_scelto_dalla_scelta_viva() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {
+        "google": Bottega("google", "", ("porta",), quote=(("a", "scarsa"), ("b", "abbondante"))),
+    }
+    candidati = {
+        "normale": Candidato("normale", "Normale", "google", "porta", "m1", ("eseguire",), "r", quota="a"),
+        "riserva": Candidato(
+            "riserva", "Riserva", "google", "porta", "m2", ("eseguire",), "r", quota="a", riserva=True
+        ),
+        "richiesta": Candidato(
+            "richiesta",
+            "Orchestratore",
+            "google",
+            "porta",
+            "m3",
+            ("eseguire",),
+            "r",
+            quota="b",
+            su_richiesta=True,
+        ),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=True)
+    risultati = {("richiesta", "*"): Risultati(uniti=20, corretti=0, rifiutati=0)}
+
+    for seme in range(100):
+        scelta = scegli(compito, cfg, risultati, {}, adesso, random.Random(seme))
+        assert scelta.candidato == "normale"
+        assert scelta.aspetta is False
+
+    # Anche quando normale e riserva sono esauriti e richiesta è l'unico con quota, non viene scelto
+    quote_a_esaurita = {nome_variabile("google", "a"): valore_esaurita(adesso + timedelta(hours=1))}
+    for seme in range(100):
+        scelta = scegli(compito, cfg, risultati, quote_a_esaurita, adesso, random.Random(seme))
+        assert scelta.candidato is None
+        assert scelta.aspetta is True
+
+
+def test_su_richiesta_scelto_con_esegue() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {
+        "google": Bottega("google", "", ("porta",), quote=(("a", "scarsa"), ("b", "abbondante"))),
+    }
+    candidati = {
+        "normale": Candidato("normale", "Normale", "google", "porta", "m1", ("eseguire",), "r", quota="a"),
+        "richiesta": Candidato(
+            "richiesta",
+            "Orchestratore",
+            "google",
+            "porta",
+            "m3",
+            ("eseguire",),
+            "r",
+            quota="b",
+            su_richiesta=True,
+        ),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    scelta_attr = scegli(
+        Compito(funzione="eseguire", fuori=True, esegue="richiesta"), cfg, {}, {}, adesso, random.Random(1)
+    )
+    assert scelta_attr.candidato == "richiesta"
+    assert scelta_attr.aspetta is False
+
+    scelta_et = scegli(
+        Compito(funzione="eseguire", fuori=True, etichette=frozenset({"esegue: Orchestratore"})),
+        cfg,
+        {},
+        {},
+        adesso,
+        random.Random(1),
+    )
+    assert scelta_et.candidato == "richiesta"
+    assert scelta_et.aspetta is False
+
+    quote_b_esaurita = {nome_variabile("google", "b"): valore_esaurita(adesso + timedelta(hours=1))}
+    scelta_attesa = scegli(
+        Compito(funzione="eseguire", fuori=True, esegue="richiesta"),
+        cfg,
+        {},
+        quote_b_esaurita,
+        adesso,
+        random.Random(1),
+    )
+    assert scelta_attesa.candidato is None
+    assert scelta_attesa.aspetta is True
+
+
+def test_solo_su_richiesta_nessun_candidato() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {"google": Bottega("google", "normale", ("porta",))}
+    candidati = {
+        "richiesta": Candidato(
+            "richiesta", "Orchestratore", "google", "porta", "m3", ("eseguire",), "r", su_richiesta=True
+        ),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    scelta = scegli(Compito(funzione="eseguire", fuori=True), cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is False
+    assert "nessun candidato per la funzione «eseguire»" in scelta.perche
+
+
+def test_precedente_su_richiesta_non_ereditato() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {
+        "google": Bottega("google", "", ("porta",), quote=(("a", "normale"), ("b", "normale"))),
+    }
+    candidati = {
+        "normale": Candidato("normale", "Normale", "google", "porta", "m1", ("eseguire",), "r", quota="a"),
+        "richiesta": Candidato(
+            "richiesta",
+            "Orchestratore",
+            "google",
+            "porta",
+            "m3",
+            ("eseguire",),
+            "r",
+            quota="b",
+            su_richiesta=True,
+        ),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=True, precedente="richiesta", giri_in_attesa=0)
+
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato == "normale"
+    assert scelta.aspetta is False
+
+    # Anche con il secchio del precedente su_richiesta esaurito, non aspetta e sceglie subito il normale
+    quote_b_esaurita = {nome_variabile("google", "b"): valore_esaurita(adesso + timedelta(hours=1))}
+    scelta_subito = scegli(compito, cfg, {}, quote_b_esaurita, adesso, random.Random(1))
+    assert scelta_subito.candidato == "normale"
+    assert scelta_subito.aspetta is False
+
+

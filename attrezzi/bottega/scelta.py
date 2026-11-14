@@ -117,14 +117,14 @@ def _scegli_senza_avvisi(
         if esito_precedente is not None:
             return esito_precedente
 
-    # 3. Candidati eleggibili per funzione e runner (B2-R3.1)
-    elegibili = [c for c in tutti if _elegibile(c, compito)]
+    # 3. Candidati eleggibili per funzione e runner (B2-R3.1, B13-R1: mai su_richiesta)
+    elegibili = [c for c in tutti if not c.su_richiesta and _elegibile(c, compito)]
     if not elegibili:
         perche = f"nessun candidato per la funzione «{compito.funzione}»" + (" fuori" if compito.fuori else "")
         return Scelta(candidato=None, aspetta=False, perche=perche)
 
     cand_prec = configurazione.candidati.get(compito.precedente) if compito.precedente is not None else None
-    if cand_prec is not None and not cand_prec.riserva and compito.giri_in_attesa >= 1:
+    if cand_prec is not None and not cand_prec.riserva and not cand_prec.su_richiesta and compito.giri_in_attesa >= 1:
         # Dopo un giro di attesa si sceglie fra gli altri
         elegibili = [c for c in elegibili if c.id != compito.precedente]
 
@@ -413,7 +413,12 @@ def _scegli_per_precedente(
 ) -> Scelta | None:
     assert compito.precedente is not None
     cand_prec = configurazione.candidati.get(compito.precedente)
-    if cand_prec is not None and not cand_prec.riserva and _elegibile(cand_prec, compito):
+    if (
+        cand_prec is not None
+        and not cand_prec.riserva
+        and not cand_prec.su_richiesta
+        and _elegibile(cand_prec, compito)
+    ):
         ha_quota, _ = _ha_quota(cand_prec, quote, adesso)
         if ha_quota:
             return Scelta(
