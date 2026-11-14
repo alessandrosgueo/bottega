@@ -29,3 +29,18 @@ di chi lo installa. Tenerle in cartelle diverse le serve tutte e due.
 modello resta fuori (RV16): la frase si aggiunge alle parole cercate nei campi d'errore.
 **Esito:** «credits balance» fra le parole della quota di Antigravity; la prova usa l'uscita vera.
 **Fonte:** dal vivo 2026-11-08
+
+### PORTE-3. Quote separate dentro lo stesso abbonamento
+
+**Scenario:** una porta (Antigravity) divide i modelli in tre gruppi con quote indipendenti. Con una sola quota
+per bottega, un 429 su un gruppo ferma anche i modelli degli altri due.
+**Domanda:** come si modellano le quote separate nella configurazione?
+**Opzioni:**
+- A) tre botteghe separate, una per gruppo di modelli
+- B) una bottega sola con i secchi (`quote`) e ogni candidato sul suo secchio (`quota`)
+- C) una bottega sola, spegnendo a mano i candidati del gruppo esaurito
+**Scelta:** B
+**Perché:** una bottega resta un abbonamento e tiene un lavoro alla volta per abbonamento, ma un 429 ferma solo i
+candidati del secchio esaurito.
+**Esito:** da vedere
+**Fonte:** deciso dall'utente

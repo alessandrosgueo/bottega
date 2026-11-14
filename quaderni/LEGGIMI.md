@@ -6,6 +6,8 @@ un esecutore contiene sempre il quaderno del suo modello, così le lezioni arriv
 ## Il formato
 
 - Un file per modello: `quaderni/<modello>.md`, col nome del modello in minuscolo e coi trattini.
+- Se lo stesso modello ha più candidati per livello (es. `<modello>-high` e `<modello>-xhigh`),
+  la chiave `quaderno = "<nome>"` sul candidato fa condividere a tutti lo stesso file `quaderni/<nome>.md`.
 - In testa una riga sul modello (fornitore, da quando si usa); poi le lezioni, una per riga:
   `- <regola breve> (<riferimento: una PR o una tappa>)`.
 - Una lezione è una regola che cambia come si scrive il brief o come si rivede, non un giudizio sul modello.

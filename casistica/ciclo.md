@@ -440,3 +440,34 @@ accorcia l'attesa ma consuma la stessa quota, e va solo dove i compiti toccano f
 si leggono le trascrizioni: il giro non dice dove va il tempo.
 **Esito:** prompt del giro e quaderno in 0.2.3; il progetto ha aggiunto il suo quaderno e un comando per il formato.
 **Fonte:** dal vivo 2026-11-12
+
+### CICLO-30. Scegliere il livello dell'esecutore compito per compito
+
+**Scenario:** lo stesso modello può lavorare a più livelli di ragionamento (per esempio `low`, `medium`, `high`,
+`xhigh`), ma non tutti i compiti chiedono lo stesso livello.
+**Domanda:** come si sceglie il livello dell'esecutore per singolo compito?
+**Opzioni:**
+- A) un concetto nuovo di «livello» nella bottega, tradotto da ogni porta e tracciato in un campo nuovo del Project
+- B) un candidato per livello (quello di serie normale, gli altri `riserva = true`), scelto da chi decide con
+  l'etichetta `esegue:`
+**Scelta:** B
+**Perché:** non introduce concetti nuovi nella bottega né campi nel Project, e tiene misure e conti già separati per
+ogni livello tramite il candidato.
+**Esito:** da vedere
+**Fonte:** deciso dall'utente
+
+### CICLO-31. Adottare un modello esecutore nuovo
+
+**Scenario:** esce un modello nuovo della stessa famiglia (per esempio Hydrogen rispetto a Flash) e si vuole capire
+se convenga usarlo come esecutore principale.
+**Domanda:** come lo si introduce nella configurazione del progetto?
+**Opzioni:**
+- A) si mette il modello nuovo accanto al vecchio, entrambi normali, per confrontarli
+- B) si mette il modello nuovo al posto del vecchio come normale (tenendo il resto solo di riserva) e si impara
+  lavorando
+- C) si fa prima una prova isolata fuori dal lavoro vero prima di cambiare la configurazione
+**Scelta:** B
+**Perché:** si impara lavorando: le misure sui compiti veri dicono subito come va il modello nuovo e permettono di
+regolare brief, quaderno e livello senza rallentare le tappe.
+**Esito:** da vedere
+**Fonte:** deciso dall'utente

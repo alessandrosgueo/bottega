@@ -23,8 +23,8 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
 ## Le parole
 
 - **Bottega:** un abbonamento con la sua quota (un fornitore e un accesso). Ha i suoi modelli e una quota scarsa,
-  normale o abbondante. Un abbonamento con più quote separate (Antigravity: una per gruppo di modelli) diventa una
-  bottega per quota, con la stessa porta.
+  normale o abbondante; se l'abbonamento ha più quote separate, diventano i suoi **secchi** (`quote`) e ogni candidato
+  dice il suo (`quota`).
 - **Porta:** la CLI con cui si entra in una bottega. Una CLI può aprire più botteghe e una bottega può avere più porte.
   Ogni porta ha la sua pagina: [Claude Code](porte/claude-code.md), [Antigravity](porte/antigravity.md),
   [Pi](porte/pi.md), [GitHub Copilot CLI](porte/copilot-cli.md).
@@ -38,8 +38,10 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
   | consigliare | critiche a design e piani, arbitrati, controlli su tutto il repo, consulti di chi esegue |
 
 - **Candidato:** un modello di una bottega, da una porta, per una funzione. Il suo nome è un titolo più il nome del
-  modello, scelto dall'utente («Maestro …», «Lavorante …»). Questa skill non conosce nessun modello: li legge dalla
-  configurazione.
+  modello, scelto dall'utente («Maestro …», «Lavorante …»). Può stare di **riserva** (`riserva = true`) ed essere
+  scelto solo quando nessun candidato normale ha quota; per i livelli di uno stesso modello si fa un candidato per
+  livello (quello di serie normale, gli altri di riserva; chi decide sceglie con `esegue:`). Questa skill non conosce
+  nessun modello: li legge dalla configurazione.
 - **La configurazione** del progetto è `.github/bottega/bottega.toml`: botteghe, candidati per funzione, chi può
   comandare, l'adattatore della board (il comando del progetto, se ne ha uno, attraverso cui i workflow scrivono sul
   Project; il suo contratto è `docs/adattatore.md` nel clone della bottega). La crea l'installazione, che la CLI
@@ -67,9 +69,11 @@ minimo costo. La scelta viva lo serve, non lo sostituisce.
 - **Il punto di partenza**, prima dei numeri: va **fuori**, al primo candidato con quota abbondante, tutto ciò che può
   aspettare una PR. Resta **in sessione** ciò che serve subito. I sotto-agenti in sessione consumano l'abbonamento di
   chi decide: è il motivo del «fuori» di serie.
-- **La quota del momento:** quando una bottega finisce la quota, il suo stato («esaurita fino a…») va in una variabile
-  di GitHub Actions e i giri la saltano finché lo stato non scade. A metà tappa, chi resta senza quota tiene il
-  compito per un giro; se manca ancora, passa al candidato seguente, che riparte dal ramo e dalle note.
+- **La quota del momento:** quando una bottega (o un suo secchio) finisce la quota, il suo stato («esaurita fino a…»)
+  va in una variabile di GitHub Actions e i giri saltano solo i candidati di quel secchio finché lo stato non scade.
+  Un candidato di riserva entra in gioco solo se tutti i normali della stessa funzione sono senza quota, e appena un
+  normale torna disponibile la scelta torna a lui. A metà tappa, chi resta senza quota tiene il compito per un giro; se
+  manca ancora, passa al candidato seguente, che riparte dal ramo e dalle note.
 - **A mano:** l'etichetta `esegue: <nome>` su un lavoro vince sulla scelta. Il risultato conta comunque.
 - **Chi sceglie:** per i compiti fuori il workflow, con un calcolo senza modello; per quelli in sessione chi decide,
   con gli stessi numeri (`bottega conti`). Ogni scelta lascia sul lavoro una riga col perché. Lo stesso criterio

@@ -14,14 +14,14 @@ project = 1                                     # numero del Project GitHub; obb
 liberi = ["<etichetta>"]                        # facoltativo: etichette dei compiti sciolti per la notte
 # costituzione = "docs/costituzione.md"         # facoltativo: dove sta la costituzione del progetto
 
-# Una bottega è un abbonamento con la sua quota. L'id (a-z, 0-9 e -) lo sceglie chi configura.
-# Un abbonamento con più quote separate (Antigravity: una per gruppo di modelli) si divide in una bottega per quota.
+# Una bottega è un abbonamento con la sua quota (o più secchi separati in `quote`). L'id (a-z, 0-9 e -) lo sceglie chi
+# configura. Se l'abbonamento ha più quote separate, usa `quote` al posto di `quota`.
 [botteghe.principale]
-quota = "scarsa"                  # scarsa, normale o abbondante
+quota = "scarsa"                  # scarsa, normale o abbondante (in alternativa a `quote`)
 porte = ["claude-code"]           # fra claude-code, antigravity, pi, copilot-cli: come si entra nella bottega
 
 [botteghe.secondaria]
-quota = "abbondante"
+quote = { veloce = "abbondante", forte = "scarsa" }  # alternativa a `quota`: peso per secchio (id a-z, 0-9, -)
 porte = ["pi"]
 
 # Un candidato è un modello di una bottega, da una porta, per le funzioni che fa. Almeno uno decide.
@@ -38,4 +38,15 @@ bottega = "secondaria"
 porta = "pi"
 modello = "<modello economico>"
 funzioni = ["eseguire"]
+quota = "veloce"                        # obbligatorio se la bottega usa `quote`, vietato con `quota` semplice
 runner = "<etichetta del runner>"       # facoltativo: senza, il candidato lavora solo in sessione
+
+[candidati.riserva]
+nome = "Lavorante <modello di riserva>"
+bottega = "secondaria"
+porta = "pi"
+modello = "<modello forte>"
+funzioni = ["eseguire"]
+quota = "forte"                         # il secchio della bottega secondaria
+riserva = true                          # facoltativo (di serie false): scelto solo se i normali non hanno quota
+quaderno = "<nome>"                     # facoltativo: nome del quaderno in comune (senza, usa lo slug del modello)

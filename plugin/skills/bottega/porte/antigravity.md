@@ -34,7 +34,11 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
   `agy -p --model <nome> "<prompt>"` la CLI prende `--model` per il prompt e si ferma con un errore.
 - Elenco: `agy models`. Un modello non riconosciuto dà errore, con l'elenco di quelli disponibili nel campo `error`.
 - Alla versione 1.5.8 (2026-11-14) il livello sta nel nome (`gemini-3.8-flash-high`, `gemini-4-hydrogen-xhigh`).
-  `gemini-pro-orchestrator-g1-pro` è «Orchestrator (Argon)»: Argon pianifica e rivede, Hydrogen esegue, in un solo
+  Un nome col livello rifiuta `--effort` con un livello diverso (`--model ... conflicts with --effort=...`) ed esce
+  con errore prima di chiamare il modello. Il nome senza livello `gemini-4-hydrogen` (anche se non compare in
+  `agy models`) è accettato sia da solo sia con `--effort <livello>` (es. `--effort xhigh`, che aumenta i
+  `thinking_tokens`).
+- `gemini-pro-orchestrator-g1-pro` è «Orchestrator (Argon)»: Argon pianifica e rivede, Hydrogen esegue, in un solo
   agente e con un livello fisso. Va senza mani come gli altri, con la stessa busta JSON.
 
 ## Trascrizioni e contatori
@@ -54,8 +58,9 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
   ore. Va anche senza mani (`agy -p /quota`, `agy -p /credits`) e non spende quota.
 - I gruppi sono separati. Alla versione 1.5.8 sono tre: «Gemini Models», «Gemini 4 Argon» (solo settimanale) e
   «Claude and GPT models». Un gruppo esaurito non ferma gli altri (2026-11-12: Gemini a zero, Claude andava). Quindi
-  in configurazione fai una bottega per gruppo, tutte con la porta `antigravity`: con una bottega sola, un 429 di un
-  modello ferma anche i modelli degli altri gruppi.
+  in configurazione usi **una sola bottega** coi tre secchi (es. `quote = { gemini = "abbondante", argon = "scarsa",
+  claude = "scarsa" }`) e su ogni candidato indichi il suo secchio (`quota = "gemini"`): un 429 ferma solo i candidati
+  di quel secchio.
 - Crediti: l'impostazione «Use AI Credits» li usa quando le quote del piano sono esaurite.
 
 ## Versione e accesso

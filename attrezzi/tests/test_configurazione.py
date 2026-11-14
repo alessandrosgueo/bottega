@@ -84,7 +84,7 @@ def test_esempio_si_legge_per_intero():
         ),
         botteghe={
             "principale": Bottega("principale", "scarsa", ("claude-code",)),
-            "secondaria": Bottega("secondaria", "abbondante", ("pi",)),
+            "secondaria": Bottega("secondaria", "", ("pi",), (("forte", "scarsa"), ("veloce", "abbondante"))),
         },
         candidati={
             "maestro": Candidato(
@@ -104,6 +104,19 @@ def test_esempio_si_legge_per_intero():
                 "<modello economico>",
                 ("eseguire",),
                 "<etichetta del runner>",
+                quota="veloce",
+            ),
+            "riserva": Candidato(
+                "riserva",
+                "Lavorante <modello di riserva>",
+                "secondaria",
+                "pi",
+                "<modello forte>",
+                ("eseguire",),
+                None,
+                quota="forte",
+                riserva=True,
+                quaderno="<nome>",
             ),
         },
     )
@@ -125,7 +138,7 @@ def test_esempio_ha_ogni_chiave_ammessa():
         "project",
         "liberi",
     }
-    assert {chiave for voce in dati["botteghe"].values() for chiave in voce} == {"quota", "porte"}
+    assert {chiave for voce in dati["botteghe"].values() for chiave in voce} == {"quota", "quote", "porte"}
     assert {chiave for voce in dati["candidati"].values() for chiave in voce} == {
         "nome",
         "bottega",
@@ -133,6 +146,9 @@ def test_esempio_ha_ogni_chiave_ammessa():
         "modello",
         "funzioni",
         "runner",
+        "quota",
+        "riserva",
+        "quaderno",
     }
 
 
@@ -552,7 +568,7 @@ def test_elenchi_del_formato():
 
 def test_comando_esempio_esce_0_con_il_conteggio(capsys):
     assert main(["configurazione", "--file", str(MODELLO)]) == 0
-    assert capsys.readouterr().out == "bottega.toml: botteghe 2, candidati 2, nessun errore\n"
+    assert capsys.readouterr().out == "bottega.toml: botteghe 2, candidati 3, nessun errore\n"
 
 
 def test_comando_con_errori_esce_1_e_li_stampa(tmp_path, capsys):
