@@ -33,13 +33,14 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
 - Si scelgono con `--model <nome>`. Il prompt va subito dopo `-p`: `agy -p "<prompt>" --model <nome>`. Con
   `agy -p --model <nome> "<prompt>"` la CLI prende `--model` per il prompt e si ferma con un errore.
 - Elenco: `agy models`. Un modello non riconosciuto dà errore, con l'elenco di quelli disponibili nel campo `error`.
-- Alla versione 1.5.8 (2026-11-14) il livello sta nel nome (`gemini-3.8-flash-high`, `gemini-4-hydrogen-xhigh`).
-  Un nome col livello rifiuta `--effort` con un livello diverso (`--model ... conflicts with --effort=...`) ed esce
-  con errore prima di chiamare il modello. Il nome senza livello `gemini-4-hydrogen` (anche se non compare in
-  `agy models`) è accettato sia da solo sia con `--effort <livello>` (es. `--effort xhigh`, che aumenta i
-  `thinking_tokens`).
-- `gemini-pro-orchestrator-g1-pro` è «Orchestrator (Argon)»: Argon pianifica e rivede, Hydrogen esegue, in un solo
-  agente e con un livello fisso. Va senza mani come gli altri, con la stessa busta JSON.
+- Alla versione 1.5.8 (2026-11-14) il livello di ragionamento sta nel nome del modello (`<modello>-high`,
+  `<modello>-xhigh`). Un nome col livello rifiuta `--effort` con un livello diverso (`conflicts with --effort=…`) ed
+  esce con errore prima di chiamare il modello; il nome senza livello, dove esiste, accetta `--effort`. In
+  configurazione si fa un candidato per livello. Nomi ed esiti delle prove:
+  `<clone>/docs/ricognizioni/2026-11-14-quote-riserva-livelli.md`, §14-§15.
+- Un «Orchestrator» mette due modelli in un solo agente: uno pianifica, ripianifica e controlla, l'altro esegue. Ha un
+  livello fisso (niente `--effort`), consuma la quota del modello che pianifica e va senza mani come gli altri, con la
+  stessa busta JSON.
 
 ## Trascrizioni e contatori
 
@@ -56,11 +57,10 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
   motivo nel campo `error`.
 - Quote: `/usage` (alias `/quota`) mostra le quote per gruppo di modelli, con limite settimanale e limite di cinque
   ore. Va anche senza mani (`agy -p /quota`, `agy -p /credits`) e non spende quota.
-- I gruppi sono separati. Alla versione 1.5.8 sono tre: «Gemini Models», «Gemini 4 Argon» (solo settimanale) e
-  «Claude and GPT models». Un gruppo esaurito non ferma gli altri (2026-11-12: Gemini a zero, Claude andava). Quindi
-  in configurazione usi **una sola bottega** coi tre secchi (es. `quote = { gemini = "abbondante", argon = "scarsa",
-  claude = "scarsa" }`) e su ogni candidato indichi il suo secchio (`quota = "gemini"`): un 429 ferma solo i candidati
-  di quel secchio.
+- I gruppi sono separati: alla versione 1.5.8 `/quota` ne stampa tre, ognuno coi suoi limiti, e un gruppo esaurito
+  non ferma gli altri (visto il 2026-11-12). In configurazione è **una sola bottega** con un secchio per gruppo
+  (`quote = { <gruppo> = "<peso>", … }`), e ogni candidato indica il secchio del suo gruppo (`quota = "<gruppo>"`): un
+  429 ferma solo i candidati di quel secchio.
 - Crediti: l'impostazione «Use AI Credits» li usa quando le quote del piano sono esaurite.
 
 ## Versione e accesso

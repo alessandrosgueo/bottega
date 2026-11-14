@@ -833,11 +833,8 @@ def _cfg_con_secchi(
 def test_secchio_esaurito_ferma_solo_i_suoi() -> None:
     cfg = _cfg_con_secchi()
     adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
-    # Il secchio "a" è esaurito, e la vecchia chiave della bottega intera non blocca un candidato a secchi
-    quote = {
-        nome_variabile("google", "a"): valore_esaurita(adesso + timedelta(hours=1)),
-        "google": valore_esaurita(adesso + timedelta(hours=1)),
-    }
+    # Il secchio "a" è esaurito: si ferma solo il suo candidato (la bottega intera: B12-R5bis, prove sotto)
+    quote = {nome_variabile("google", "a"): valore_esaurita(adesso + timedelta(hours=1))}
     compito = Compito(funzione="eseguire", fuori=True)
     for seme in range(20):
         scelta = scegli(compito, cfg, {}, quote, adesso, random.Random(seme))
@@ -1110,4 +1107,22 @@ def test_proprieta_cancello_riserva_e_secchi(seme: int, estrazione: st.DataObjec
             if normali_con_quota:
                 assert scelto.riserva is False
                 assert not scelta.perche.startswith("di riserva: ")
+
+
+def test_bottega_intera_esaurita_ferma_i_secchi() -> None:
+    cfg = _cfg_con_secchi()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    quote = {nome_variabile("google"): valore_esaurita(adesso + timedelta(hours=1))}
+    scelta = scegli(Compito(funzione="eseguire", fuori=False), cfg, {}, quote, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is True
+
+
+def test_chiave_della_bottega_ferma_i_secchi() -> None:
+    cfg = _cfg_con_secchi()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    quote = {"google": valore_esaurita(adesso + timedelta(hours=1))}
+    scelta = scegli(Compito(funzione="eseguire", fuori=False), cfg, {}, quote, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is True
 

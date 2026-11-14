@@ -360,24 +360,30 @@ def _scegli_per_etichetta_esegue(
     )
 
 
+def _chiavi_quote(configurazione: Configurazione) -> list[str]:
+    chiavi: list[str] = list(variabili_della_quota(configurazione))
+    for b in sorted(configurazione.botteghe.values(), key=lambda x: x.id):
+        var_bottega = nome_variabile(b.id)
+        if var_bottega not in chiavi:
+            chiavi.append(var_bottega)
+        if b.id not in chiavi:
+            chiavi.append(b.id)
+    return chiavi
+
+
 def _avvisi_quote(
     configurazione: Configurazione,
     quote: Mapping[str, str | None],
     adesso: datetime,
 ) -> list[str]:
-    ripiego_semplice = {
-        nome_variabile(b.id): b.id
-        for b in configurazione.botteghe.values()
-        if not b.quote
-    }
     avvisi: list[str] = []
-    for var in variabili_della_quota(configurazione):
-        valore = quote.get(var)
-        if valore is None and var in ripiego_semplice:
-            valore = quote.get(ripiego_semplice[var])
+    for chiave in _chiavi_quote(configurazione):
+        valore = quote.get(chiave)
+        if valore is None:
+            continue
         _, avviso = disponibile(valore, adesso)
         if avviso is not None:
-            messaggio = f"{var}: {avviso}"
+            messaggio = f"{chiave}: {avviso}"
             if messaggio not in avvisi:
                 avvisi.append(messaggio)
     return avvisi
@@ -498,10 +504,21 @@ def _elegibile(c: Candidato, compito: Compito) -> bool:
 
 
 def _ha_quota(c: Candidato, quote: Mapping[str, str | None], adesso: datetime) -> tuple[bool, str | None]:
-    valore = quote.get(variabile_della_quota(c))
-    if valore is None and c.quota is None:
-        valore = quote.get(c.bottega)
-    return disponibile(valore, adesso)
+    chiavi = [variabile_della_quota(c)]
+    if c.quota is not None:
+        chiavi.append(nome_variabile(c.bottega))
+    chiavi.append(c.bottega)
+    primo_avviso: str | None = None
+    for chiave in chiavi:
+        valore = quote.get(chiave)
+        if valore is None:
+            continue
+        ok, avviso = disponibile(valore, adesso)
+        if not ok:
+            return False, None
+        if primo_avviso is None and avviso is not None:
+            primo_avviso = avviso
+    return True, primo_avviso
 
 
 def _virgola(valore: float, decimali: int = 1) -> str:
