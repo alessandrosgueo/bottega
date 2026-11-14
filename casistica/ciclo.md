@@ -643,3 +643,21 @@ non cambia niente.
 passi di esplorazione), non i comandi: i comandi oltre un minuto erano il 6%. La board pesava una ventina di chiamate
 a giro. Da lì: il fascicolo e i file del brief dentro il prompt, le fasi nel log.
 **Fonte:** dal vivo 2026-11-14
+
+### CICLO-42. L'aggiornamento fatto a mano
+
+**Scenario:** esce una versione nuova della bottega. Il progetto ha due workflow che la chiamano, e in ognuno il
+riferimento alla versione compare due volte: in `uses:` e nell'ingresso `bottega_ref` (il codice che il giro scarica).
+Chi decide cambia a mano la riga che vede, con una sostituzione, e unisce.
+**Domanda:** come si porta un progetto a una versione nuova?
+**Opzioni:**
+- A) a mano: sono due righe
+- B) con `bottega aggiorna --tag <tag>`, prima con `--prova`, e poi si guarda nel log del primo giro quale versione
+  ha girato
+**Scelta:** B
+**Perché:** il comando sa tutti i punti da cambiare; una sostituzione a mano cambia quelli che chi la scrive ha in
+mente. E un giro che gira col codice vecchio non dà errori: dà solo i risultati di prima.
+**Esito:** con A il primo lavoro dopo l'aggiornamento è girato col codice vecchio (niente tempi nel log, niente
+fascicolo nel prompt) e chi decide se n'è accorto solo cercando nel log le righe nuove. Con B, due righe corrette in
+un minuto.
+**Fonte:** dal vivo 2026-11-14

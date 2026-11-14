@@ -237,3 +237,17 @@ cinque ore della quota dell'esecutore; K2, K3 e K4 in parallelo su tre worktree)
 - più giri insieme sulla stessa bottega per lavori indipendenti (oggi un lavoro alla volta per abbonamento);
 - la conversazione dell'esecutore ripresa fra i compiti di una tappa, invece di ripartire a freddo;
 - il brief scritto per chi decide in modo che la sezione «File» sia sempre piena.
+
+## Il collaudo dal vivo (2026-11-14, un progetto vero)
+
+- **Il primo lavoro fuori dopo l'aggiornamento** (una pagina di documenti rifusa, esecutore a `medium`): consegnato in
+  un giro buono su due, 256k token, 255 s. `bottega lancia` ha aperto il segno da sé; alla chiusura dell'issue il
+  distributore ha scritto `unito com'era` («esiti scritti (1 uniti com'erano, 0 già scritti)») e `bottega conti` ha
+  chiuso il segno: **752k token di chi decide contro 256k dell'esecutore**. È il primo compito del Project con
+  tutti e due i numeri; il segno ha contato anche lavoro d'altro genere fatto nella stessa finestra.
+- **Un errore di chi decide:** i workflow aggiornati a mano (CICLO-42). Il giro del collaudo è girato col codice di
+  prima: i tempi per fase di un giro vero e il fascicolo nel prompt restano da vedere al prossimo lavoro.
+- **Il «Fatto quando» che fuori non gira, un'altra volta** (CICLO-35): il comando del brief voleva il ramo principale,
+  che nella copia dell'oracolo non c'è. Minore da aggiungere all'elenco: la copia dell'oracolo e quella dell'esecutore
+  portino anche il riferimento al ramo principale (`origin/<ramo>`), perché molti controlli di progetto confrontano
+  con quello.
