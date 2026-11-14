@@ -5,6 +5,7 @@ import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from bottega.ritenta import ritenta
@@ -52,6 +53,10 @@ class Forgia(Protocol):
     def issue(self, n: int) -> Issue: ...
 
     def sotto_issue(self, n: int) -> list[Issue]: ...
+
+    def madre_di(self, n: int) -> int | None: ...
+
+    def chiusura(self, n: int) -> tuple[str, datetime] | None: ...
 
     def commenti(self, n: int) -> list[Commento]: ...
 
@@ -161,6 +166,38 @@ class ForgiaGh:
                 )
             )
         return risultato
+
+    def madre_di(self, n: int) -> int | None:
+        try:
+            out = self._esegui(["api", f"repos/{self.repo}/issues/{n}/parent"])
+        except ErroreForgia as e:
+            # Solo il 404 di GitHub: un «not found» senza codice può essere altro (un comando che manca).
+            if "http 404" in str(e).lower():
+                return None
+            raise
+        d = json.loads(out)
+        if not isinstance(d, dict) or not isinstance(d.get("number"), int):
+            raise ErroreForgia(f"madre di #{n}: risposta inattesa")
+        return d["number"]
+
+    def chiusura(self, n: int) -> tuple[str, datetime] | None:
+        out = self._esegui(["api", f"repos/{self.repo}/issues/{n}"])
+        d = json.loads(out)
+        if not isinstance(d, dict):
+            raise ErroreForgia(f"chiusura di #{n}: risposta inattesa")
+        if str(d.get("state") or "").lower() != "closed":
+            return None
+        motivo = d.get("state_reason") or ""
+        closed_at = d.get("closed_at")
+        if not isinstance(closed_at, str) or not closed_at:
+            raise ErroreForgia(f"chiusura di #{n}: closed_at mancante")
+        try:
+            quando = datetime.fromisoformat(closed_at)
+        except ValueError as e:
+            raise ErroreForgia(f"chiusura di #{n}: closed_at non valido ({closed_at})") from e
+        if quando.tzinfo is None:
+            quando = quando.replace(tzinfo=timezone.utc)
+        return str(motivo), quando
 
     def commenti(self, n: int) -> list[Commento]:
         out = self._esegui([

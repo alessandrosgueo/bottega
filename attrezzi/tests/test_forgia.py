@@ -1,6 +1,8 @@
 """Prove per la forgia: comandi gh, assenza di chiamate di rete, corpi da stdin, avvisi e finta."""
 
 import json
+from datetime import datetime, timezone
+import subprocess
 import pytest
 
 from bottega.forgia import Commento, ErroreForgia, ForgiaGh, Issue
@@ -485,4 +487,111 @@ def test_rv12_etichette_create_una_sola_volta() -> None:
     assert len(label_create) == 2
     assert label_create[0] == ["label", "create", "bottega: fuori", "--force", "--repo", "proprietario/repo"]
     assert label_create[1] == ["label", "create", "bottega: avviso", "--force", "--repo", "proprietario/repo"]
+
+
+def test_b14_madre_di_gh() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        percorso = argomenti[1]
+        if percorso.endswith("/issues/11/parent"):
+            return json.dumps({"number": 10, "title": "Madre"})
+        if percorso.endswith("/issues/10/parent"):
+            raise ErroreForgia("gh ha fallito (1): gh: Not Found (HTTP 404)")
+        if percorso.endswith("/issues/12/parent"):
+            raise ErroreForgia("gh ha fallito (1): HTTP 404")
+        raise ErroreForgia("gh ha fallito (1): HTTP 500 Internal Server Error")
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    assert forgia.madre_di(11) == 10
+    assert chiamate[0] == ["api", "repos/proprietario/repo/issues/11/parent"]
+    assert forgia.madre_di(10) is None
+    assert forgia.madre_di(12) is None
+    with pytest.raises(ErroreForgia, match="500"):
+        forgia.madre_di(99)
+
+
+def test_b14_madre_di_404_non_ritenta(monkeypatch: pytest.MonkeyPatch) -> None:
+    tentativi = 0
+
+    def run_finto(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal tentativi
+        tentativi += 1
+        return subprocess.CompletedProcess(
+            args=["gh"],
+            returncode=1,
+            stdout="",
+            stderr="gh: Not Found (HTTP 404)",
+        )
+
+    monkeypatch.setattr("bottega.forgia.subprocess.run", run_finto)
+    forgia = ForgiaGh("proprietario/repo")
+    assert forgia.madre_di(10) is None
+    assert tentativi == 1
+
+
+def test_b14_chiusura_gh() -> None:
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        assert argomenti[0] == "api"
+        percorso = argomenti[1]
+        if percorso.endswith("/issues/1"):
+            return json.dumps({"number": 1, "state": "open", "state_reason": None, "closed_at": None})
+        if percorso.endswith("/issues/2"):
+            return json.dumps({
+                "number": 2,
+                "state": "closed",
+                "state_reason": "completed",
+                "closed_at": "2026-11-14T06:30:00Z",
+            })
+        if percorso.endswith("/issues/3"):
+            return json.dumps({
+                "number": 3,
+                "state": "closed",
+                "state_reason": None,
+                "closed_at": "2026-11-14T06:45:00Z",
+            })
+        return json.dumps({
+            "number": 4,
+            "state": "closed",
+            "state_reason": "not_planned",
+            "closed_at": "2026-11-14T07:00:00Z",
+        })
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    assert forgia.chiusura(1) is None
+
+    chiusura_2 = forgia.chiusura(2)
+    assert chiusura_2 == ("completed", datetime(2026, 11, 14, 6, 30, tzinfo=timezone.utc))
+    assert chiusura_2[1].tzinfo is not None
+
+    chiusura_3 = forgia.chiusura(3)
+    assert chiusura_3 == ("", datetime(2026, 11, 14, 6, 45, tzinfo=timezone.utc))
+
+    chiusura_4 = forgia.chiusura(4)
+    assert chiusura_4 == ("not_planned", datetime(2026, 11, 14, 7, 0, tzinfo=timezone.utc))
+
+
+def test_b14_forgia_finta_madre_e_chiusura() -> None:
+    ora_fissa = datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc)
+    finta = ForgiaFinta(orologio=lambda: ora_fissa)
+
+    madre = finta.crea_issue("Madre", "Corpo madre")
+    figlia = finta.crea_issue("Figlia", "Corpo figlia", madre=madre)
+
+    assert finta.madre_di(madre) is None
+    assert finta.madre_di(figlia) == madre
+    assert finta.chiusura(figlia) is None
+
+    finta.chiudi_issue(figlia)
+    assert finta.chiusura(figlia) == ("completed", ora_fissa)
+
+    altra = finta.crea_issue("Altra", "Corpo altra")
+    ora_altra = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+    finta.chiudi_come(altra, "not_planned", ora_altra)
+    assert finta.chiusura(altra) == ("not_planned", ora_altra)
+
+    finta.riapri_issue(altra)
+    assert finta.issue(altra).aperta is True
+    assert finta.chiusura(altra) is None
 
