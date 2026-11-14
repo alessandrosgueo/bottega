@@ -10,6 +10,7 @@ Solo libreria standard.
 import argparse
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -21,13 +22,17 @@ from typing import Any
 import bottega.misure as misure
 from bottega.board import Board, BoardComando, BoardProject, Lavoro
 from bottega.configurazione import PERCORSO_PREDEFINITO, ErroreConfigurazione, leggi_configurazione
-from bottega.forgia import ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh, repo_del_comando
 from bottega.misure import CAMPI, OPZIONI_ESITO, numero
+from bottega.segno import chiudi_segni_dei_chiusi
+
+
+_CAMPI_NON_MISURA = frozenset({"Segno", "Misure parziali"})
 
 
 def _ha_misura(lav: Lavoro) -> bool:
-    """Vero se il lavoro possiede almeno un valore per i campi di misura del Project."""
-    return any(lav.campi.get(k, "").strip() != "" for k in CAMPI)
+    """Vero se il lavoro possiede almeno un valore per i campi di misura del Project (esclusi Segno e Misure parziali)."""
+    return any(k not in _CAMPI_NON_MISURA and lav.campi.get(k, "").strip() != "" for k in CAMPI)
 
 
 def _statistiche_gruppo(lavori: Sequence[Lavoro]) -> dict[str, Any]:
@@ -214,8 +219,19 @@ def argomenti_conti(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def comando_conti(args: argparse.Namespace, board: Board | None = None) -> int:
+def comando_conti(
+    args: argparse.Namespace,
+    board: Board | None = None,
+    forgia: Forgia | None = None,
+) -> int:
     """Legge i conti delle misure dalla board: esce 0 se eseguito, 1 con errore."""
+    repo = ""
+    if board is None or forgia is None:
+        try:
+            repo = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as exc:
+            print(f"segno: {exc}", file=sys.stderr)
+            repo = ""
     if board is None:
         percorso_cfg = Path(args.file)
         try:
@@ -225,8 +241,8 @@ def comando_conti(args: argparse.Namespace, board: Board | None = None) -> int:
             print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
             return 1
 
-        repo = getattr(args, "repo", None) or os.environ.get("GITHUB_REPOSITORY", "")
-        forgia = ForgiaGh(repo)
+        if forgia is None:
+            forgia = ForgiaGh(repo)
         try:
             if cfg.progetto.adattatore:
                 board = BoardComando(shlex.split(cfg.progetto.adattatore))
@@ -240,6 +256,18 @@ def comando_conti(args: argparse.Namespace, board: Board | None = None) -> int:
             motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
             print(f"errore: {motivo}", file=sys.stderr)
             return 1
+    elif forgia is None:
+        forgia = ForgiaGh(repo)
+
+    try:
+        righe_segno = chiudi_segni_dei_chiusi(
+            board, forgia, os.environ, Path.cwd(), datetime.now(timezone.utc)
+        )
+    except Exception as exc:  # noqa: BLE001 - conti stampa sempre i conti
+        motivo = exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)
+        righe_segno = [f"segno: {motivo}"]
+    for riga in righe_segno:
+        print(riga, file=sys.stderr)
 
     try:
         lavori = board.elenco()

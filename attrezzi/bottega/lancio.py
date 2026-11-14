@@ -16,14 +16,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from bottega.board import Board, BoardComando, BoardProject
+from bottega.board import Board, BoardComando, BoardProject, ErroreBoard
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
     ErroreConfigurazione,
     leggi_configurazione,
 )
-from bottega.forgia import ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh, repo_del_comando
 from bottega.misure import INTESTAZIONE_MISURE_PERSE
+from bottega.segno import porta_della_sessione, tocca
 
 ESITI_LANCIO: dict[str, int] = {
     "avviato": 0,
@@ -162,6 +163,12 @@ def argomenti_lancia(parser: argparse.ArgumentParser) -> None:
         default=900,
         help="secondi di tetto per la fine del giro (di serie: 900)",
     )
+    parser.add_argument(
+        "--configurazione",
+        type=Path,
+        default=Path(PERCORSO_PREDEFINITO),
+        help=f"percorso di bottega.toml (di serie: {PERCORSO_PREDEFINITO})",
+    )
 
 
 def esecutore_gh(comando: Sequence[str], ambiente: Mapping[str, str] | None = None) -> tuple[int, str]:
@@ -188,12 +195,71 @@ def _esegui_chiamata(esegui_fn: Callable[..., tuple[int, str]], cmd: Sequence[st
     return esegui_fn(list(cmd), None)
 
 
+def _board_da_cfg(
+    cfg: object,
+    repo: str,
+    forgia: Forgia | None,
+) -> tuple[Board, Forgia]:
+    forgia_eff = forgia or ForgiaGh(repo)
+    progetto = cfg.progetto  # type: ignore[attr-defined]
+    if progetto.adattatore:
+        return BoardComando(shlex.split(progetto.adattatore)), forgia_eff
+    if progetto.project is not None:
+        proprietario = forgia_eff.proprietario()
+        return BoardProject(proprietario=proprietario, numero=progetto.project, repo=repo), forgia_eff
+    raise ErroreConfigurazione("configurazione priva di progetto.project e senza adattatore")
+
+
+def _tocca_protetta(board: Board, forgia: Forgia, numero: int, adesso: datetime) -> None:
+    """Chiama tocca catturando ogni eccezione e stampa eventuali righe su stderr."""
+    try:
+        righe = tocca(board, forgia, numero, os.environ, Path.cwd(), adesso)
+    except Exception as exc:  # noqa: BLE001 - il segno non cambia mai l'esito del comando
+        motivo = exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)
+        righe = [f"segno: {motivo}"]
+    for riga in righe:
+        print(riga, file=sys.stderr)
+
+
+def _tocca_dopo_lancio(
+    args: argparse.Namespace,
+    numero: int,
+    adesso: datetime,
+    *,
+    board: Board | None,
+    forgia: Forgia | None,
+) -> None:
+    """Apre il segno dopo un lancio riuscito, costruendo la board solo se c'è una sessione attiva."""
+    if porta_della_sessione(os.environ) is None:
+        return
+    try:
+        if board is None:
+            repo = repo_del_comando(getattr(args, "repo", None), os.environ)
+            percorso_cfg = getattr(args, "configurazione", None) or Path(PERCORSO_PREDEFINITO)
+            cfg = leggi_configurazione(percorso_cfg)
+            board_eff, forgia_eff = _board_da_cfg(cfg, repo, forgia)
+        else:
+            board_eff = board
+            if forgia is None:
+                repo = repo_del_comando(getattr(args, "repo", None), os.environ)
+                forgia_eff = ForgiaGh(repo)
+            else:
+                forgia_eff = forgia
+    except Exception as exc:  # noqa: BLE001 - configurazione o board assenti non fanno fallire lancia
+        motivo = exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)
+        print(f"segno: {motivo}", file=sys.stderr)
+        return
+    _tocca_protetta(board_eff, forgia_eff, numero, adesso)
+
+
 def comando_lancia(
     args: argparse.Namespace,
     esegui: Callable[[Sequence[str], Mapping[str, str] | None], tuple[int, str]]
     | None = None,
     dormi: Callable[[float], None] = time.sleep,
     adesso: Callable[[], datetime] | None = None,
+    board: Board | None = None,
+    forgia: Forgia | None = None,
 ) -> int:
     """Lancia un lavoro verificando che il giro del distributore sia partito."""
     esegui_fn = esegui or esecutore_gh
@@ -344,6 +410,8 @@ def comando_lancia(
             ultima_riga = riga
             if esito != "assente":
                 print(f"giro {id_giro}: {riga}")
+                if esito == "avviato":
+                    _tocca_dopo_lancio(args, numero, adesso_fn(), board=board, forgia=forgia)
                 return ESITI_LANCIO[esito]
 
         if not nuovi:
@@ -455,10 +523,12 @@ def comando_segui(
     dormi: Callable[[float], None] = time.sleep,
     adesso: Callable[[], datetime] | None = None,
     board: Board | None = None,
+    forgia: Forgia | None = None,
 ) -> int:
     """Segue l'avanzamento di un lavoro finché non si conclude o si blocca."""
     esegui_fn = esegui or esecutore_gh
     adesso_fn = adesso or (lambda: datetime.now(UTC))
+    forgia_eff = forgia
 
     if board is None:
         percorso_cfg = getattr(args, "configurazione", None) or Path(
@@ -470,24 +540,27 @@ def comando_segui(
             motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
             print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
             return 1
-
-        repo = getattr(args, "repo", None) or os.environ.get("GITHUB_REPOSITORY", "")
-        forgia = ForgiaGh(repo)
-        if cfg.progetto.adattatore:
-            board = BoardComando(shlex.split(cfg.progetto.adattatore))
-        elif cfg.progetto.project is not None:
-            proprietario = forgia.proprietario()
-            board = BoardProject(
-                proprietario=proprietario, numero=cfg.progetto.project, repo=repo
-            )
-        else:
-            print(
-                "errore: configurazione priva di progetto.project e senza adattatore",
-                file=sys.stderr,
-            )
+        try:
+            repo_eff = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as e:
+            repo_eff = ""
+            print(f"segno: {e}", file=sys.stderr)
+        try:
+            board, forgia_eff = _board_da_cfg(cfg, repo_eff, forgia_eff)
+        except (ErroreConfigurazione, ErroreForgia, ErroreBoard, OSError) as e:
+            motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+            print(f"errore: {motivo}", file=sys.stderr)
             return 1
+    elif forgia_eff is None:
+        try:
+            repo_eff = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as e:
+            repo_eff = ""
+            print(f"segno: {e}", file=sys.stderr)
+        forgia_eff = ForgiaGh(repo_eff)
 
     numero = args.numero
+    _tocca_protetta(board, forgia_eff, numero, adesso_fn())
     intervallo = getattr(args, "intervallo", 300)
     fermo = getattr(args, "fermo", 1200.0)
     tetto = getattr(args, "tetto", 18000.0)

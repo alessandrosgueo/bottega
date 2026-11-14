@@ -65,6 +65,15 @@ Comando `claude`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricogni
   o `inherit`, che eredita il modello della conversazione ed è il default.
 - Da riga di comando: `--agents '<json>'` definisce agenti per la sola sessione. `CLAUDE_CODE_SUBAGENT_MODEL`
   impone un modello a tutti i sotto-agenti.
+- **Eseguire in sessione:** un sotto-agente per compito, lanciato in sottofondo col modello e il livello del candidato
+  (campi `model` ed `effort` dello strumento), un agente alla volta per worktree. Il prompt è di tre righe: «Leggi ed
+  esegui il brief in `<percorso assoluto>`. Lavora solo nel worktree `<percorso assoluto>`. Rispondi in `<lingua>`.»
+  La fine la dice la notifica: niente controlli a ripetizione.
+- **Il consulto in sessione:** chi decide risponde allo stesso agente con `SendMessage`, e l'agente riparte col suo
+  contesto. Così il compito resta al candidato economico.
+- **Gli strumenti ereditati:** un sotto-agente può ereditare gli strumenti MCP della sessione. Quelli che scrivono su
+  sistemi veri contano come dati veri: il brief li vieta per nome.
+- I sotto-agenti consumano l'abbonamento di chi decide: ciò che può aspettare una PR va fuori.
 
 ## Istruzioni e skill del progetto
 

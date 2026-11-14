@@ -23,7 +23,7 @@ from bottega.configurazione import (
     leggi_configurazione,
     variabili_da_leggere,
 )
-from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh, repo_del_comando
 from bottega.porte import Porta, porta as porta_fabbrica
 from bottega.scelta import Compito, scegli
 
@@ -175,20 +175,9 @@ def valida_divisione(dati: Any) -> list[str]:
 
 def crea_forgia(repo: str | None = None) -> Forgia:
     """Costruisce l'adattatore della forgia GitHub (gh) per il repository indicato o rilevato."""
-    repo_effettivo = repo or os.environ.get("GITHUB_REPOSITORY")
-    if not repo_effettivo:
-        try:
-            proc = subprocess.run(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if proc.returncode == 0 and proc.stdout.strip():
-                repo_effettivo = proc.stdout.strip()
-        except Exception:
-            pass
-    if not repo_effettivo:
+    try:
+        repo_effettivo = repo_del_comando(repo, os.environ)
+    except ErroreForgia:
         repo_effettivo = ""
     return ForgiaGh(repo_effettivo)
 

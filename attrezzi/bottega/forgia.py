@@ -3,8 +3,9 @@
 import json
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from bottega.ritenta import ritenta
@@ -46,12 +47,58 @@ class ErroreForgia(Exception):
     """Errore durante una chiamata alla forgia."""
 
 
+def repo_della_cartella(esegui: Callable[[list[str]], str] | None = None) -> str:
+    """Restituisce `owner/repo` del repository nella cartella corrente tramite `gh repo view`."""
+    def _esegui_default(argomenti: list[str]) -> str:
+        try:
+            proc = subprocess.run(
+                ["gh", *argomenti],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ErroreForgia("gh repo view non ha risposto in 5 secondi") from exc
+        except OSError as exc:
+            raise ErroreForgia(f"impossibile eseguire gh: {exc}") from exc
+        if proc.returncode != 0:
+            motivo = proc.stderr.strip() or f"codice {proc.returncode}"
+            raise ErroreForgia(f"impossibile rilevare il repo dalla cartella: {motivo}")
+        return proc.stdout
+
+    out = (esegui or _esegui_default)(["repo", "view", "--json", "nameWithOwner"])
+    try:
+        dati = json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise ErroreForgia(f"risposta non valida da gh repo view: {exc}") from exc
+    nome = dati.get("nameWithOwner") if isinstance(dati, dict) else None
+    if not isinstance(nome, str) or not nome.strip():
+        raise ErroreForgia("nameWithOwner mancante nella risposta di gh repo view")
+    return nome.strip()
+
+
+def repo_del_comando(repo_arg: str | None, env: Mapping[str, str]) -> str:
+    """Restituisce il repository da usare: argomento, GITHUB_REPOSITORY o repo della cartella."""
+    repo = (repo_arg or "").strip()
+    if repo:
+        return repo
+    repo_env = env.get("GITHUB_REPOSITORY", "").strip()
+    if repo_env:
+        return repo_env
+    return repo_della_cartella()
+
+
 class Forgia(Protocol):
     """Interfaccia verso la forgia di GitHub."""
 
     def issue(self, n: int) -> Issue: ...
 
     def sotto_issue(self, n: int) -> list[Issue]: ...
+
+    def madre_di(self, n: int) -> int | None: ...
+
+    def chiusura(self, n: int) -> tuple[str, datetime] | None: ...
 
     def commenti(self, n: int) -> list[Commento]: ...
 
@@ -91,6 +138,8 @@ class ForgiaGh:
         esegui: Callable[[list[str], str | None], str] | None = None,
     ) -> None:
         self.repo = repo
+        # Nei percorsi di `gh api`: senza un repo dato, `gh` riempie i segnaposto dal repo della cartella.
+        self._repo_api = repo or "{owner}/{repo}"
         self._esegui = esegui or self._esegui_di_serie
         self._etichette_create: set[str] = set()
 
@@ -141,7 +190,7 @@ class ForgiaGh:
     def sotto_issue(self, n: int) -> list[Issue]:
         # B7 (J4): l'API REST va con ogni `gh`. `gh issue view --json subIssues` non c'è nella 2.46 di Ubuntu, e nelle
         # versioni nuove risponde un oggetto `{"nodes": [...]}` senza corpo: le sotto-issue andavano perse.
-        out = self._esegui(["api", f"repos/{self.repo}/issues/{n}/sub_issues?per_page=100"])
+        out = self._esegui(["api", f"repos/{self._repo_api}/issues/{n}/sub_issues?per_page=100"])
         voci = json.loads(out)
         if not isinstance(voci, list):
             raise ErroreForgia(f"sotto-issue di #{n}: risposta inattesa")
@@ -161,6 +210,38 @@ class ForgiaGh:
                 )
             )
         return risultato
+
+    def madre_di(self, n: int) -> int | None:
+        try:
+            out = self._esegui(["api", f"repos/{self._repo_api}/issues/{n}/parent"])
+        except ErroreForgia as e:
+            # Solo il 404 di GitHub: un «not found» senza codice può essere altro (un comando che manca).
+            if "http 404" in str(e).lower():
+                return None
+            raise
+        d = json.loads(out)
+        if not isinstance(d, dict) or not isinstance(d.get("number"), int):
+            raise ErroreForgia(f"madre di #{n}: risposta inattesa")
+        return d["number"]
+
+    def chiusura(self, n: int) -> tuple[str, datetime] | None:
+        out = self._esegui(["api", f"repos/{self._repo_api}/issues/{n}"])
+        d = json.loads(out)
+        if not isinstance(d, dict):
+            raise ErroreForgia(f"chiusura di #{n}: risposta inattesa")
+        if str(d.get("state") or "").lower() != "closed":
+            return None
+        motivo = d.get("state_reason") or ""
+        closed_at = d.get("closed_at")
+        if not isinstance(closed_at, str) or not closed_at:
+            raise ErroreForgia(f"chiusura di #{n}: closed_at mancante")
+        try:
+            quando = datetime.fromisoformat(closed_at)
+        except ValueError as e:
+            raise ErroreForgia(f"chiusura di #{n}: closed_at non valido ({closed_at})") from e
+        if quando.tzinfo is None:
+            quando = quando.replace(tzinfo=timezone.utc)
+        return str(motivo), quando
 
     def commenti(self, n: int) -> list[Commento]:
         out = self._esegui([

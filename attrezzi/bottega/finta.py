@@ -1,7 +1,8 @@
 """Implementazioni finte in memoria di Forgia e Board per le prove e il giro finto."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any
 
 from bottega.board import ErroreBoard, Lavoro, _valida_e_formatta_numero
@@ -17,11 +18,15 @@ class ForgiaFinta:
         issues: Sequence[Issue] | None = None,
         ramo_principale: str = "main",
         proprietario: str = "bottega",
+        orologio: Callable[[], datetime] | None = None,
     ) -> None:
         self._ramo_principale = ramo_principale
         self._proprietario = proprietario
+        self._orologio = orologio or (lambda: datetime.now(timezone.utc))
         self._issues: dict[int, Issue] = {}
         self._sotto_issue: dict[int, list[int]] = {}
+        self._madri: dict[int, int] = {}
+        self._chiusure: dict[int, tuple[str, datetime]] = {}
         self._commenti: dict[int, list[Commento]] = {}
         self._pr: dict[int, dict[str, Any]] = {}
         self._variabili: dict[str, str] = {}
@@ -37,6 +42,8 @@ class ForgiaFinta:
                 if not iss.autore:
                     iss = replace(iss, autore=proprietario)
                 self._issues[iss.numero] = iss
+                if not iss.aperta:
+                    self._chiusure[iss.numero] = ("completed", self._orologio())
                 if iss.numero > self._contatore_issue:
                     self._contatore_issue = iss.numero
 
@@ -56,6 +63,16 @@ class ForgiaFinta:
     def sotto_issue(self, n: int) -> list[Issue]:
         figli_numeri = self._sotto_issue.get(n, [])
         return [self._issues[num] for num in figli_numeri if num in self._issues]
+
+    def madre_di(self, n: int) -> int | None:
+        return self._madri.get(n)
+
+    def chiusura(self, n: int) -> tuple[str, datetime] | None:
+        if n not in self._issues:
+            raise ErroreForgia(f"Issue {n} non trovata")
+        if self._issues[n].aperta:
+            return None
+        return self._chiusure.get(n)
 
     def commenti(self, n: int) -> list[Commento]:
         return list(self._commenti.get(n, []))
@@ -135,6 +152,7 @@ class ForgiaFinta:
         self._issues[num] = iss
         if madre is not None:
             self._sotto_issue.setdefault(madre, []).append(num)
+            self._madri[num] = madre
         self.registro.append(("crea_issue", num, titolo, corpo, madre))
         return num
 
@@ -150,7 +168,22 @@ class ForgiaFinta:
             etichette=cur.etichette,
             autore=cur.autore,
         )
+        self._chiusure[n] = ("completed", self._orologio())
         self.registro.append(("chiudi_issue", n))
+
+    def chiudi_come(self, n: int, motivo: str, quando: datetime) -> None:
+        if n not in self._issues:
+            raise ErroreForgia(f"Issue {n} non trovata")
+        self._issues[n] = replace(self._issues[n], stato="CLOSED")
+        self._chiusure[n] = (motivo, quando)
+        self.registro.append(("chiudi_come", n, motivo, quando))
+
+    def riapri_issue(self, n: int) -> None:
+        if n not in self._issues:
+            raise ErroreForgia(f"Issue {n} non trovata")
+        self._issues[n] = replace(self._issues[n], stato="OPEN")
+        self._chiusure.pop(n, None)
+        self.registro.append(("riapri_issue", n))
 
     def avviso(self, chiave: str, titolo: str, motivo: str | None) -> None:
         aperta_num: int | None = None
@@ -240,6 +273,7 @@ class BoardFinta:
             "nota": lavoro.nota,
             "repo": lavoro.repo,
             "campi": campi,
+            "aperta": lavoro.aperta,
         }
 
     def aggiungi(self, lavoro: int | Lavoro, titolo: str = "", stato: str = "pronto") -> None:
@@ -259,6 +293,7 @@ class BoardFinta:
                 "nota": "",
                 "repo": self.repo,
                 "campi": {"Bottega": stato} if stato else {},
+                "aperta": True,
             }
             self.registro.append(("aggiungi", numero))
 
@@ -290,6 +325,7 @@ class BoardFinta:
             nota=d.get("nota", ""),
             repo=d.get("repo"),
             campi=campi,
+            aperta=d.get("aperta", True),
         )
 
     def pronti(self) -> list[Lavoro]:
