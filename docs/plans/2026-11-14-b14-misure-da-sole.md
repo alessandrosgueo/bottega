@@ -99,7 +99,8 @@ compito l'esito `unito com'era`. Per quel caso resta `bottega misura <N> --esito
 - **R5.** `chiudi_segni_dei_chiusi(board, forgia, env, cartella, adesso) -> list[str]`: per ogni lavoro dell'elenco
   con «Segno» non vuoto e `aperta` falso: `forgia.chiusura(n)` dà l'ora; `fine(..., fino=<ora di chiusura>,
   compiti=<le sotto-issue del lavoro; vuoto se non ne ha>)` con la porta e la sessione scritte nel segno. Se la
-  trascrizione non si trova (un'altra macchina) il segno resta aperto e la riga lo dice una volta. La chiamano
+  trascrizione non si trova (un'altra macchina) il segno resta aperto e la riga lo dice una volta. Se fra l'inizio
+  del segno e l'ora di chiusura non c'è nessun messaggio, il segno si chiude senza numero. La chiamano
   `tocca` e `comando_conti` (prima di leggere i conti; `conti` non scrive nient'altro).
 - **R6.** `giro.py`: il commento `compito senza rilettura` diventa `compito senza rilettura: <motivo>`, dove il motivo
   è il perché della scelta quando nessun candidato è scelto (`scelta.perche`), oppure `il lancio del consigliere è

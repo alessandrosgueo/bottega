@@ -97,6 +97,21 @@ minimo costo. La scelta viva lo serve, non lo sostituisce.
   con gli stessi numeri (`bottega conti`). Ogni scelta lascia sul lavoro una riga col perché. Lo stesso criterio
   sceglie quale consigliere risponde a un consulto.
 
+## Quando sì e quando no
+
+Il metodo vuole un piano con le decisioni già prese e compiti dai confini netti. Altrimenti:
+
+- **Manca il piano:** prima brainstorming e piano.
+- **La causa è ignota** (un bug da capire): indaga chi decide; a chi esegue va la correzione, quando la causa è scritta.
+- **Il gusto è il prodotto** (un'interfaccia nuova, un testo): la direzione la dà chi decide nel piano, e l'ultimo
+  giro è suo.
+- **La modifica è piccola:** la scrive chi decide, quando il brief costerebbe più della modifica, e lo dice in una
+  riga. Se cambia un valore del piano, aggiorna anche il Ruling.
+- **Due giri del candidato più forte non risolvono:** il problema è posto male. Si torna al piano, non a un modello
+  più forte.
+- **L'utente risponde «scegli tu» più volte di fila:** restano solo le domande con un errore costoso; le altre le
+  decide chi decide e le scrive come ipotesi rivedibili.
+
 ## Il ciclo
 
 ### All'inizio di una sessione
@@ -148,12 +163,16 @@ PR.
 - i Ruling di chi esegue si accettano o si rifiutano; quelli che servono dopo entrano nel piano;
 - una modifica fuori brief ma sensata si tiene (per esempio un difetto di un compito prima, corretto con una prova);
   un file toccato che il rapporto tace è un motivo per rileggere tutto il diff;
-- **le correzioni** in sessione vanno allo stesso agente; fuori sono un commento che indica il commit del compito,
-  più l'esito `correzioni` nel campo «Esito»: è il campo che fa ripartire il lavoro, non il commento. Una correzione
-  grande diventa un compito nuovo, una sotto-issue del lavoro, col suo brief e il suo «Fatto quando» (senza, il
-  distributore salta il lavoro e dice quale compito); e il ramo della tappa non si spinge mentre un giro gira, perché
-  il giro spingerebbe sopra una base vecchia. Correzioni indipendenti che toccano file diversi possono andare fuori
-  dal lavoro, in parallelo, in sessione o con altri esecutori, e si uniscono al ramo della tappa alla fine.
+- una prova si rilancia solo per un dubbio concreto; il codice di prodotto si legge per intero, i compiti meccanici a
+  campione;
+- **le correzioni** in sessione vanno allo stesso agente. Fuori si chiedono con `bottega correggi <compito>` (`--testo`
+  per una correzione breve, che riprende il «Fatto quando» del compito; `--brief <file>` per una grande; `--origine
+  piano|brief|esecuzione` e `--consiglio` se viene dal consigliere): il comando crea il compito di correzione sotto il
+  lavoro, rimette il lavoro in `correzioni` (è il campo «Esito» che lo fa ripartire, non un commento) e scrive
+  l'esito `corretto` sul compito rivisto. Il ramo della tappa non si spinge mentre un giro gira, perché il giro
+  spingerebbe sopra una base vecchia. Correzioni indipendenti che toccano file diversi possono andare fuori dal lavoro,
+  in parallelo, in sessione o con altri esecutori, e si uniscono al ramo della tappa alla fine: dopo ogni unione di
+  rami paralleli si rilancia la prova completa.
 
 **Il consulto.** Chi esegue si ferma con `DOMANDA PER CHI DECIDE:` e una domanda precisa quando la scelta contraddice
 il piano o tocca una delle quattro barriere, o quando è bloccato. In sessione risponde chi decide allo stesso agente.
@@ -191,24 +210,21 @@ un brief per ogni compito.
    esistenti cambiate, il controllo dei segreti scattato). Riceve il diff dalla base, il piano, il Review Focus e i
    Ruling, e dice cosa ha controllato e cosa no.
 2. **I rilievi** li pesa chi decide, per il loro effetto, e li conta per **origine**: piano, brief o esecuzione. I gravi
-   si correggono con una prova che li fissa; i minori diventano issue del progetto. Un errore che torna va nella
-   costituzione. Per ogni compito chi decide scrive l'esito e i rilievi con `bottega misura <N> --esito
-   unito|corretto|rifiutato --rilievi-piano … --rilievi-brief … --rilievi-esecuzione …`: il distributore impara solo da
-   lì, e un compito senza esito non conta.
-3. **L'unione** nel ramo principale è di chi decide, `--no-ff`, **firmata**: è il sigillo. Chi decide unisce in locale
-   con `git merge --no-ff -S` e spinge; si firmano solo le unioni, così un commit di lavoro non diventa mai una punta
-   da rilasciare. Un'unione dal sito di GitHub è firmata da GitHub e non passa la verifica (un attrezzo di rilascio che
-   scrive da sé sul ramo principale ha la sua chiave, ammessa anch'essa). La chiave e il git che firma li prepara
-   `bottega firma prepara`, una volta sulla macchina di chi decide. Una pipeline di rilascio chiama, **come primo
-   passo, prima di ogni codice del repo**, `bottega firma verifica --stato <file fuori dal repo> --avvisa` (il file
-   tiene lo SHA dell'ultimo rilascio verificato; il primo rilascio con `--primo`), su un clone con tutta la storia, e
-   si ferma se non è buona. Una chiave si revoca togliendo la sua riga, mai con le date.
-   Un esecutore non unisce, non chiude lavoro, non manda in produzione. Ciò che è irreversibile o esce verso l'esterno si
-   chiede all'utente. Una PR rifiutata la chiude chi decide, col motivo; il lavoro torna da rifare o si chiude.
-4. **Se la quota di chi decide finisce** la revisione finale non si taglia: la tappa resta aperta. Un sostituto con
+   si correggono con una prova che li fissa (`bottega correggi`, che scrive da sé esito e origine); i minori diventano
+   issue del progetto. Un errore che torna va nella costituzione.
+3. **La rilettura dopo le correzioni.** Dopo ogni giro di correzioni, chi non le ha scritte rilegge **il solo diff
+   delle correzioni**, a mente fresca: le prove dicono che i rilievi vecchi sono chiusi, non che le correzioni non ne
+   abbiano aperti di nuovi. Basta un candidato economico; su un diff piccolo si può saltare, e lo si scrive.
+4. **L'unione** nel ramo principale è di chi decide, `--no-ff`, **firmata** (`git merge --no-ff -S`, in locale): è il
+   sigillo, e il rilascio parte solo da una punta firmata. Come si preparano le chiavi e come una pipeline verifica
+   la firma è in [impianto.md](impianto.md). Un esecutore non unisce, non chiude lavoro, non manda in produzione. Ciò
+   che è irreversibile o esce verso l'esterno si chiede all'utente. Una PR rifiutata la chiude chi decide, col motivo
+   (l'issue chiusa come «non pianificata»: è da lì che i suoi compiti prendono l'esito `rifiutato`); il lavoro torna da
+   rifare o si chiude.
+5. **Se la quota di chi decide finisce** la revisione finale non si taglia: la tappa resta aperta. Un sostituto con
    quota può rivedere e segnare l'esito (`pronta per l'unione` o `correzioni`); non pianifica e non unisce. Al ritorno
    chi decide parte dalla sua revisione.
-5. **Quaderni e casistica**: chi decide scrive le lezioni nuove (sotto, «Come impara»).
+6. **Quaderni e casistica**: chi decide scrive le lezioni nuove (sotto, «Come impara»).
 
 ## Fuori, su GitHub
 
@@ -230,10 +246,8 @@ un brief per ogni compito.
   sotto-agenti solo col suo modello.
 - **Solo issue di un comandante:** il brief è il corpo dell'issue, e chi l'ha scritta lo può cambiare anche dopo
   l'etichetta. Un lavoro proposto da altri si copia in un'issue nuova.
-- **La CI del progetto e i rami `bottega/*`:** quei rami li scrive un modello, e la CI che li prova esegue codice suo.
-  Nessun segreto ai job che lo eseguono (il controllo che ha bisogno di un segreto prende il suo codice dal ramo
-  principale e il ramo solo come dati) e nessun runner self-hosted per loro: lì il modello sarebbe l'utente del
-  runner.
+- **La CI del progetto e i rami `bottega/*`:** quei rami li scrive un modello, e la CI che li prova esegue codice suo:
+  nessun segreto e nessun runner self-hosted per quei job ([impianto.md](impianto.md)).
 - **Fermi:** tre tentativi a giro; un lavoro che fallisce un giro intero diventa «bloccato» e torna a chi decide; ramo
   principale rosso = niente lavori nuovi; una porta che non risponde lascia un solo avviso e nessun lavoro toccato. Un
   oracolo rosso non chiude il compito: torna all'esecutore, e al terzo rosso a chi decide.
@@ -248,16 +262,30 @@ un brief per ogni compito.
 
 ## Le misure
 
-Per ogni compito, nei campi del Project:
-- chi l'ha eseguito, da che porta, in sessione o fuori; durata, giri, consulti;
-- **la quota spesa da chi decide** per brief e revisione: un segno all'inizio e uno alla fine (`bottega segno inizio
-  <numero dell'issue>`, `bottega segno fine`), e il comando legge i contatori dalla trascrizione della sua porta. Un
-  segno dimenticato lascia il numero vuoto, mai inventato;
-- l'esito della revisione per compito (unito com'era, corretto, rifiutato) e i rilievi gravi per origine;
-- per i consiglieri, i consigli accolti e respinti, e quelli che col tempo si rivelano giusti o sbagliati.
+**Nessun gesto fatto solo per misurare:** un gesto così si dimentica, e il numero resta vuoto. La misura la lascia il
+gesto che fa il lavoro. Per ogni compito, nei campi del Project:
 
-`bottega conti` legge i numeri. Chi decide tiene d'occhio la spia del metodo: brief più revisione di un compito fatto
-fuori costano meno che farlo in sessione? Dice all'utente ciò che giudica utile.
+- chi l'ha eseguito, da che porta, in sessione o fuori; durata, giri, consulti, token: li scrive il giro (i token
+  contano anche i giri falliti);
+- **l'esito** (unito com'era, corretto, rifiutato) e i rilievi per origine: `corretto` lo scrive `bottega correggi`
+  quando chi decide chiede la correzione; alla chiusura del lavoro il distributore dà `unito com'era` ai compiti
+  rimasti senza esito, o `rifiutato` se il lavoro è chiuso come «non pianificato». La scelta viva impara da qui;
+- **la quota spesa da chi decide** per brief, revisione, correzioni e unione: i comandi che lancia già su un lavoro
+  (`lancia`, `segui`, `correggi`) aprono un segno sulla sua sessione; toccare un altro lavoro chiude il primo, e la
+  chiusura del lavoro chiude il segno alla sua ora. I contatori vengono dalla trascrizione della porta e si dividono
+  fra i compiti del lavoro. Il tempo del piano, prima del primo comando, resta fuori. Un numero che non si può
+  leggere resta vuoto, mai inventato;
+- per i consiglieri, i consigli accolti (`correggi --consiglio`); una rilettura mancata dice il suo motivo nel
+  commento.
+
+**In sessione** (sotto-agenti, niente workflow) i segni si mettono a mano: `bottega segno inizio <numero>` e `bottega
+segno fine`. **Il limite:** una correzione che chi decide fa con le sue mani, senza `correggi`, lascia al compito
+`unito com'era`; per quel caso c'è `bottega misura <N> --esito corretto`.
+
+`bottega conti` legge i numeri (e chiude i segni rimasti aperti sui lavori chiusi). Chi decide tiene d'occhio la spia
+del metodo: brief più revisione di un compito fatto fuori costano meno che farlo in sessione? E guarda le riletture
+mancate e i «0 risultati»: un numero vuoto dopo molti compiti è un guasto, non un dato. Dice all'utente ciò che
+giudica utile.
 
 ## Come impara
 

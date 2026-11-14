@@ -559,3 +559,69 @@ documento rompe la CI quanto il codice.
 **Esito:** la pagina della porta è stata riscritta senza i nomi dei modelli, che ora stanno nella ricognizione. CI
 verde.
 **Fonte:** dal vivo 2026-11-14
+
+### CICLO-37. Il gesto fatto solo per misurare
+
+**Scenario:** dopo 45 compiti fuori, i conti dicono: costo di chi decide misurato su 0 compiti, esito scritto su 5. I
+due numeri dipendono da due comandi che chi decide deve ricordarsi di lanciare (un segno all'inizio e alla fine, la
+misura dell'esito dopo la revisione), e che non cambiano il lavoro.
+**Domanda:** come si riempiono quei numeri?
+**Opzioni:**
+- A) una regola in più nella skill: chi decide lancia sempre i due comandi
+- B) la misura la lascia il gesto che fa il lavoro: il comando che chiede la correzione scrive l'esito, i comandi
+  che lanciano e seguono un lavoro aprono il segno, la chiusura del lavoro lo chiude
+- C) si rinuncia a misurare il costo di chi decide
+**Scelta:** B
+**Perché:** un gesto che serve solo a misurare si dimentica, chiunque sia a decidere; una regola in più non cambia il
+motivo per cui è stato dimenticato. Senza quei numeri il metodo non sa se risparmia e la scelta viva non impara.
+**Esito:** da vedere
+**Fonte:** dal vivo 2026-11-14
+
+### CICLO-38. La rilettura che non gira
+
+**Scenario:** la skill dice che un consigliere rilegge ogni compito fuori. Per due giorni 42 compiti su 44 portano il
+commento «compito senza rilettura», senza un motivo; chi decide se ne accorge solo contando i commenti.
+**Domanda:** che cosa deve cambiare?
+**Opzioni:**
+- A) niente: il commento c'è, basta leggerlo
+- B) il commento dice il motivo (nessun consigliere con quota, nessuno sul runner, lancio finito male) e chi decide
+  guarda le riletture mancate insieme ai conti
+- C) senza rilettura il compito non si consegna
+**Scelta:** B
+**Perché:** un avviso senza motivo, ripetuto a ogni compito, diventa rumore; il motivo dice che cosa sistemare (la
+configurazione, la quota). Fermare la consegna punirebbe il lavoro per un guasto che non è suo: la revisione di chi
+decide resta.
+**Esito:** da vedere
+**Fonte:** dal vivo 2026-11-14
+
+### CICLO-39. Chiedere una correzione fuori
+
+**Scenario:** la revisione finale trova un difetto in un compito di una tappa fatta fuori. Il ramo è consegnato, la PR
+è aperta.
+**Domanda:** come si chiede la correzione?
+**Opzioni:**
+- A) un commento sulla PR che descrive il difetto
+- B) `bottega correggi <compito>`, col testo o col brief: crea il compito di correzione, rimette il lavoro in
+  `correzioni` e scrive l'esito `corretto`
+- C) chi decide corregge da sé sul ramo e unisce
+**Scelta:** B
+**Perché:** è il campo «Esito» a far ripartire il lavoro, non un commento; e il comando lascia da sé l'esito e
+l'origine del rilievo. Chi decide corregge da sé solo quando il brief costerebbe più della modifica, e allora scrive
+l'esito a mano.
+**Esito:** da vedere
+**Fonte:** di chi decide
+
+### CICLO-40. Dopo le correzioni
+
+**Scenario:** la revisione finale ha trovato tre rilievi gravi; un esecutore li ha corretti, ognuno con la sua prova,
+e la prova completa è verde. Il diff delle correzioni è di duecento righe.
+**Domanda:** si unisce?
+**Opzioni:**
+- A) sì: ogni rilievo ha la sua prova
+- B) prima una rilettura del solo diff delle correzioni, da chi non le ha scritte; basta un candidato economico
+- C) si rifà tutta la revisione finale del ramo
+**Scelta:** B
+**Perché:** le prove dicono che i rilievi vecchi sono chiusi, non che le correzioni non ne abbiano aperti di nuovi. Il
+diff delle correzioni è piccolo: rileggerlo costa poco, rifare tutta la revisione costa molto.
+**Esito:** in quattro tappe di fila la rilettura ha trovato almeno un difetto grave introdotto dalle correzioni.
+**Fonte:** dal vivo 2026-11-09
