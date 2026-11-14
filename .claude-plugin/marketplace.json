@@ -9,7 +9,7 @@
       "name": "bottega",
       "source": "./plugin",
       "description": "Metodo «bottega»: chi decide scrive piano e brief, chi esegue lavora, un consigliere critica.",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "author": {
         "name": "gli autori della bottega"
       }

@@ -31,9 +31,10 @@ Chiedi, una alla volta, e solo queste:
 4. se vuole l'**esecutore fuori** (un runner su questa macchina che lavora da GitHub, anche di notte) e a che ora la
    notte.
 
-Il resto lo proponi tu e l'utente conferma: le botteghe (una per abbonamento, o una per quota se l'abbonamento ne
-ha più d'una), i candidati (porte e modelli che trovi: `<porta> --version` e la sezione «I modelli» delle pagine
-delle porte), le funzioni (`decidere`, `eseguire`, `rivedere`, `consigliare`) e i nomi, «titolo + modello».
+Il resto lo proponi tu e l'utente conferma: le botteghe (una per abbonamento; se ha più quote separate, i suoi secchi),
+i candidati (porte e modelli che trovi: `<porta> --version` e la sezione «I modelli» delle pagine delle porte; un
+candidato per livello se il modello ne ha, gli altri di riserva), le funzioni (`decidere`, `eseguire`, `rivedere`,
+`consigliare`) e i nomi, «titolo + modello».
 
 ## 3. La configurazione
 

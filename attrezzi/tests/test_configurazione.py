@@ -17,6 +17,10 @@ from bottega.configurazione import (
     Progetto,
     controlla_configurazione,
     leggi_configurazione,
+    peso_del_candidato,
+    variabile_della_quota,
+    variabili_da_leggere,
+    variabili_della_quota,
 )
 from bottega.pubblico import cerca
 
@@ -81,7 +85,7 @@ def test_esempio_si_legge_per_intero():
         ),
         botteghe={
             "principale": Bottega("principale", "scarsa", ("claude-code",)),
-            "secondaria": Bottega("secondaria", "abbondante", ("pi",)),
+            "secondaria": Bottega("secondaria", "", ("pi",), (("forte", "scarsa"), ("veloce", "abbondante"))),
         },
         candidati={
             "maestro": Candidato(
@@ -101,6 +105,19 @@ def test_esempio_si_legge_per_intero():
                 "<modello economico>",
                 ("eseguire",),
                 "<etichetta del runner>",
+                quota="veloce",
+            ),
+            "riserva": Candidato(
+                "riserva",
+                "Lavorante <modello di riserva>",
+                "secondaria",
+                "pi",
+                "<modello forte>",
+                ("eseguire",),
+                None,
+                quota="forte",
+                riserva=True,
+                quaderno="<nome>",
             ),
         },
     )
@@ -122,7 +139,7 @@ def test_esempio_ha_ogni_chiave_ammessa():
         "project",
         "liberi",
     }
-    assert {chiave for voce in dati["botteghe"].values() for chiave in voce} == {"quota", "porte"}
+    assert {chiave for voce in dati["botteghe"].values() for chiave in voce} == {"quota", "quote", "porte"}
     assert {chiave for voce in dati["candidati"].values() for chiave in voce} == {
         "nome",
         "bottega",
@@ -130,6 +147,9 @@ def test_esempio_ha_ogni_chiave_ammessa():
         "modello",
         "funzioni",
         "runner",
+        "quota",
+        "riserva",
+        "quaderno",
     }
 
 
@@ -289,7 +309,7 @@ ERRORI = [
     pytest.param(
         'quota = "scarsa"',
         "",
-        ["bottega.toml: botteghe.principale.quota: chiave obbligatoria mancante"],
+        ["bottega.toml: botteghe.principale: serve «quota» oppure «quote»"],
         id="quota-mancante",
     ),
     pytest.param(
@@ -549,7 +569,7 @@ def test_elenchi_del_formato():
 
 def test_comando_esempio_esce_0_con_il_conteggio(capsys):
     assert main(["configurazione", "--file", str(MODELLO)]) == 0
-    assert capsys.readouterr().out == "bottega.toml: botteghe 2, candidati 2, nessun errore\n"
+    assert capsys.readouterr().out == "bottega.toml: botteghe 2, candidati 3, nessun errore\n"
 
 
 def test_comando_con_errori_esce_1_e_li_stampa(tmp_path, capsys):
@@ -599,4 +619,175 @@ def test_project_obbligatorio_con_runner_valido(tmp_path):
     configurazione = leggi_configurazione(_scrivi(tmp_path, testo))
     assert configurazione.progetto.project == 5
     assert configurazione.candidati["maestro"].runner == "self-hosted"
+
+
+SECCHI_BASE = """versione = 1
+
+[progetto]
+fuso = "Europe/Rome"
+
+[botteghe.google]
+quote = { gemini = "abbondante", argon = "scarsa", claude = "scarsa" }
+porte = ["antigravity"]
+
+[candidati.maestro]
+nome = "Maestro <modello>"
+bottega = "google"
+porta = "antigravity"
+modello = "<modello>"
+quota = "argon"
+funzioni = ["decidere"]
+"""
+
+
+def test_bottega_coi_secchi_valida(tmp_path):
+    assert _errori(tmp_path, SECCHI_BASE) == []
+    cfg = leggi_configurazione(_scrivi(tmp_path, SECCHI_BASE))
+    bottega = cfg.botteghe["google"]
+    assert bottega.quota == ""
+    assert bottega.quote == (("argon", "scarsa"), ("claude", "scarsa"), ("gemini", "abbondante"))
+    assert cfg.candidati["maestro"].quota == "argon"
+
+
+def test_quota_e_quote_insieme_errore(tmp_path):
+    testo = _cambia(
+        BASE,
+        'quota = "scarsa"',
+        'quota = "scarsa"\nquote = { gemini = "abbondante" }',
+    )
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: botteghe.principale: ")
+
+
+def test_ne_quota_ne_quote_errore(tmp_path):
+    testo = _cambia(BASE, 'quota = "scarsa"\n', "")
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: botteghe.principale: ")
+
+
+def test_secchio_con_peso_sbagliato_errore(tmp_path):
+    testo = _cambia(SECCHI_BASE, 'gemini = "abbondante"', 'gemini = "infinita"')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: botteghe.google.quote.gemini: ")
+
+
+def test_secchio_con_nome_sbagliato_errore(tmp_path):
+    testo = _cambia(SECCHI_BASE, 'gemini = "abbondante"', 'Gemini = "abbondante"')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: botteghe.google.quote.Gemini: ")
+
+
+def test_quote_vuota_errore(tmp_path):
+    testo = _cambia(
+        SECCHI_BASE,
+        'quote = { gemini = "abbondante", argon = "scarsa", claude = "scarsa" }',
+        "quote = {}",
+    )
+    errori = _errori(tmp_path, testo)
+    assert any(e.startswith("bottega.toml: botteghe.google.quote: ") for e in errori)
+
+
+def test_candidato_senza_secchio_errore(tmp_path):
+    testo = _cambia(SECCHI_BASE, 'quota = "argon"\n', "")
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.quota: ")
+
+
+def test_candidato_con_secchio_sconosciuto_errore(tmp_path):
+    testo = _cambia(SECCHI_BASE, 'quota = "argon"', 'quota = "ignoto"')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.quota: ")
+
+
+def test_secchio_in_bottega_semplice_errore(tmp_path):
+    testo = _cambia(BASE, 'porta = "claude-code"', 'porta = "claude-code"\nquota = "gemini"')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.quota: ")
+
+
+@pytest.mark.parametrize("valore", ["1", "0", '"true"'])
+def test_riserva_non_booleana_errore(tmp_path, valore):
+    testo = _cambia(BASE, 'porta = "claude-code"', f'porta = "claude-code"\nriserva = {valore}')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.riserva: ")
+
+
+@pytest.mark.parametrize("valore", ['""', '"   "'])
+def test_quaderno_vuoto_errore(tmp_path, valore):
+    testo = _cambia(BASE, 'porta = "claude-code"', f'porta = "claude-code"\nquaderno = {valore}')
+    errori = _errori(tmp_path, testo)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: candidati.maestro.quaderno: ")
+
+
+def test_riserva_e_quaderno_letti(tmp_path):
+    testo = _cambia(
+        BASE,
+        'porta = "claude-code"',
+        'porta = "claude-code"\nriserva = true\nquaderno = "modello-comune"',
+    )
+    assert _errori(tmp_path, testo) == []
+    cand = leggi_configurazione(_scrivi(tmp_path, testo)).candidati["maestro"]
+    assert cand.riserva is True
+    assert cand.quaderno == "modello-comune"
+    assert cand.quota is None
+
+
+def test_peso_del_candidato(tmp_path):
+    cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert peso_del_candidato(cfg_semplice, cfg_semplice.candidati["maestro"]) == "scarsa"
+
+    testo_secchi = SECCHI_BASE + """
+[candidati.lavorante]
+nome = "Lavorante <modello>"
+bottega = "google"
+porta = "antigravity"
+modello = "<modello>"
+quota = "gemini"
+funzioni = ["eseguire"]
+"""
+    cfg_secchi = leggi_configurazione(_scrivi(tmp_path, testo_secchi))
+    assert peso_del_candidato(cfg_secchi, cfg_secchi.candidati["maestro"]) == "scarsa"
+    assert peso_del_candidato(cfg_secchi, cfg_secchi.candidati["lavorante"]) == "abbondante"
+
+
+def test_variabili_della_quota(tmp_path):
+    testo = SECCHI_BASE + """
+[botteghe.anthropic]
+quota = "normale"
+porte = ["claude-code"]
+"""
+    cfg = leggi_configurazione(_scrivi(tmp_path, testo))
+    assert variabili_della_quota(cfg) == [
+        "BOTTEGA_QUOTA_ANTHROPIC",
+        "BOTTEGA_QUOTA_GOOGLE__ARGON",
+        "BOTTEGA_QUOTA_GOOGLE__CLAUDE",
+        "BOTTEGA_QUOTA_GOOGLE__GEMINI",
+    ]
+    assert variabile_della_quota(cfg.candidati["maestro"]) == "BOTTEGA_QUOTA_GOOGLE__ARGON"
+
+    cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert variabile_della_quota(cfg_semplice.candidati["maestro"]) == "BOTTEGA_QUOTA_PRINCIPALE"
+
+
+def test_variabili_da_leggere(tmp_path):
+    cfg_secchi = leggi_configurazione(_scrivi(tmp_path, SECCHI_BASE))
+    assert variabili_da_leggere(cfg_secchi) == [
+        "BOTTEGA_QUOTA_GOOGLE",
+        "BOTTEGA_QUOTA_GOOGLE__ARGON",
+        "BOTTEGA_QUOTA_GOOGLE__CLAUDE",
+        "BOTTEGA_QUOTA_GOOGLE__GEMINI",
+    ]
+
+    cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert variabili_da_leggere(cfg_semplice) == ["BOTTEGA_QUOTA_PRINCIPALE"]
+
 

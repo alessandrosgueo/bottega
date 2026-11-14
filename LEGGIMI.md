@@ -48,14 +48,16 @@ fuori servono anche systemd, `sudo` (una volta) e `nftables`.
 
 ## Stato
 
-Versione 0.2.3. Costruita in dodici tappe (B0-B11), più di mille prove. Il collaudo è stato fatto dal vivo,
+Versione 0.2.4. Costruita in tredici tappe (B0-B12), più di mille prove. Il collaudo è stato fatto dal vivo,
 adottandola in un progetto vero: sei lavori dell'esecutore fuori, più di venti compiti, sono arrivati alla PR,
 e ogni intervento a mano è diventato una correzione con la sua prova. La 0.2.1 chiude i fermi silenziosi visti dal
 vivo: ritentativi sugli errori passeggeri di GitHub, un giro di riserva ogni ora, un oracolo rosso che non chiude il
 compito, la domanda riconosciuta in ogni riga, `bottega lancia` e `bottega segui`. La 0.2.2 non perde più le misure
 in silenzio: il giro scrive sul lavoro quelle che la board non prende e `bottega segui` le dice; il contratto
 dell'adattatore della board è scritto in `docs/adattatore.md`. La 0.2.3 chiede all'esecutore pochi passi (il tempo di un
-giro va nei passi del modello, non nelle prove) e dice quale compito manca del «Fatto quando».
+giro va nei passi del modello, non nelle prove) e dice quale compito manca del «Fatto quando». La 0.2.4 conosce le quote
+separate di un abbonamento (i secchi: un 429 ferma solo il suo), i candidati di riserva e il quaderno in comune fra
+più livelli dello stesso modello.
 
 **Limiti noti:**
 - Il token del runner (`BOTTEGA_TOKEN`) è l'accesso `gh` di chi installa e vale su tutti i suoi repo. Un token a grana

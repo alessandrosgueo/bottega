@@ -1,8 +1,9 @@
-"""Lo stato della quota di una bottega: variabile di Actions e controllo della disponibilità.
+"""Lo stato della quota di una bottega o di un secchio: variabile di Actions e controllo della disponibilità.
 
-Una bottega con quota esaurita ha la variabile `BOTTEGA_QUOTA_<ID>` impostata a `esaurita fino a <ISO 8601 con fuso>`.
-Un valore assente o vuoto indica quota disponibile. Un valore malformato o senza fuso viene considerato disponibile
-con un avviso, per non bloccare mai una bottega per errore. Solo libreria standard.
+Una bottega (o secchio) con quota esaurita ha la variabile `BOTTEGA_QUOTA_<ID>` (o `BOTTEGA_QUOTA_<ID>__<SECCHIO>`)
+impostata a `esaurita fino a <ISO 8601 con fuso>`. Un valore assente o vuoto indica quota disponibile. Un valore
+malformato o senza fuso viene considerato disponibile con un avviso, per non bloccare mai una bottega per errore. Solo
+libreria standard.
 """
 
 from datetime import datetime
@@ -11,9 +12,12 @@ PREFISSO_QUOTA = "BOTTEGA_QUOTA_"
 TESTO_ESAURITA = "esaurita fino a "
 
 
-def nome_variabile(id_bottega: str) -> str:
-    """Il nome della variabile di Actions per la quota della bottega (maiuscolo, trattini in trattini bassi)."""
-    return f"{PREFISSO_QUOTA}{id_bottega.upper().replace('-', '_')}"
+def nome_variabile(id_bottega: str, secchio: str | None = None) -> str:
+    """Il nome della variabile di Actions per la quota della bottega (o di un suo secchio)."""
+    base = f"{PREFISSO_QUOTA}{id_bottega.upper().replace('-', '_')}"
+    if secchio:
+        return f"{base}__{secchio.upper().replace('-', '_')}"
+    return base
 
 
 def valore_esaurita(fino_a: datetime) -> str:
