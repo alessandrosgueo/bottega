@@ -192,3 +192,48 @@ uv run pytest -q
   a vicenda; il gesto fatto solo per misurare; la rilettura che non gira e nessuno lo sa).
 - **Quaderni:** nel quaderno dell'esecutore che pianifica, i token contano anche il giro fallito.
 - **Il banco di prova** sulla skill nuova prima dell'unione (sulla 0.2.5: accordo 35 su 35).
+
+## Com'è andata (2026-11-14)
+
+**Le misure dei compiti** (esecutore fuori dalla sessione, un lancio per compito; i punti sono della finestra di
+cinque ore della quota dell'esecutore; K2, K3 e K4 in parallelo su tre worktree):
+
+| Compito | Livello | Secondi | Token | Esito alla revisione |
+|---|---|---|---|---|
+| B14.0 ricognizione | `high` | 228 | 354k | tenuta com'era: 12 domande su 12 |
+| K1 forgia | `medium` | 211 | 74k | corretto da chi decide (il 404 riconosciuto dal solo codice) |
+| K2 `correggi` | `medium` | 139 | 117k | corretto dopo la revisione finale (repo vuoto: origine piano) |
+| K3 spazzino | `medium` | 132 | 102k | unito com'era |
+| K4 rilettura | `medium` | 267 | 98k | unito com'era |
+| K5 segno | `high` | 323 | 237k | corretto da chi decide (tre letture dell'elenco per comando, finestre vuote: origine brief) e dopo la revisione finale (doppio conteggio: origine di chi decide) |
+| K7 tempi | `high` | 475 | 267k | unito com'era |
+| K8 fascicolo | `high` | 443 | 213k | corretto da chi decide (il controllo sul file aperto) |
+| C1 correzioni | `medium` | 273 | 318k | unito com'era; quattro minori dalla rilettura |
+
+- **La revisione finale** (un revisore forte di un'altra quota): 1456 s, 579k token, 17 punti della sua quota
+  settimanale. Tre gravi (due d'origine piano, uno di chi decide), cinque minori; R10 ha retto agli attacchi.
+- **La rilettura delle correzioni** (un candidato economico di una terza quota): 37 s, 60k token, nessun grave.
+- **Il banco di prova:** 35 su 35 sulla 0.2.5; 44 su 45 sulla skill nuova, e la divergenza (CICLO-35) era un vuoto
+  della skill, chiuso.
+- **Il costo di chi decide**, misurato per la prima volta con la porta (`Porta.token` sulla trascrizione della
+  sessione, cache letta a un decimo): **4,0 milioni di token pesati** in 105 messaggi dal via alla revisione finale,
+  contro circa 2,4 milioni di tutti gli esecutori e revisori messi insieme. Chi decide ha speso più di chi ha
+  eseguito. La causa è la stessa dei giri lenti: ogni passo rilegge il contesto, e il contesto di chi decide è il più
+  grande di tutti (i diff interi, i log, le analisi). È la prima cosa da attaccare nella tappa dopo.
+
+**I minori rimandati** (da aprire come lavori):
+- le fasi del giro lasciano fuori l'apertura della PR, le etichette e il controllo dei segreti (fra `oracolo` e
+  `rilettura`);
+- `_fine_con_stato` e `misure.somma` rileggono il lavoro dalla board anche quando chi chiama ha appena letto
+  l'elenco;
+- la riga «trascrizione non trovata» di un segno aperto su un'altra macchina si ripete a ogni comando;
+- lo spazzino scrive gli esiti dopo che il distributore ha già contato i risultati: entrano dal giro dopo;
+- `lancia`, `segui` e `conti` chiedono il repo a `gh` (fino a 5 s) anche quando l'adattatore non lo usa;
+- la lettura di un lavoro attraverso un adattatore rilegge tutto l'elenco: un'operazione `lavoro <numero>` nel
+  contratto, facoltativa, la porterebbe a una chiamata corta (in un progetto vero: 9-10 s per lettura, una ventina
+  di chiamate a giro).
+
+**Le idee per la velocità non fatte qui** (servono i numeri delle fasi dai primi giri veri):
+- più giri insieme sulla stessa bottega per lavori indipendenti (oggi un lavoro alla volta per abbonamento);
+- la conversazione dell'esecutore ripresa fra i compiti di una tappa, invece di ripartire a freddo;
+- il brief scritto per chi decide in modo che la sezione «File» sia sempre piena.
