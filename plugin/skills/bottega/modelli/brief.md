@@ -18,6 +18,12 @@ metodo vuole il massimo risultato col minimo di quota: lavora in pochi passi, og
    <I compiti fatti: «Il compito 1 è fatto (commit `abc1234`) e ti dà `modulo.funzione`.»>
 3. Il codice da imitare: `<funzione>` in `<file>` (<perché>).
 
+## File
+
+<Facoltativa: i file che chi esegue dovrà leggere per intero (quelli da cambiare e quelli da imitare); ognuno entra nel prompt e risparmia almeno un passo. Toglila se non serve.>
+
+- `<percorso relativo alla radice del repo>`
+
 ## Cosa conta di più
 
 <Le trappole che chi decide vede e chi esegue non vedrebbe, al massimo cinque, dalla più costosa. Ognuna in

@@ -26,7 +26,7 @@ import tempfile
 import time
 
 from bottega.board import Board, BoardComando, BoardProject
-from bottega.brief import fatto_quando, ramo
+from bottega.brief import fatto_quando, file_del_brief, ramo
 from bottega import ci
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
@@ -207,12 +207,12 @@ def domanda_del_consulto(testo: str) -> str | None:
     return (SEGNO_DOMANDA + resto).strip()
 
 
-def recinta_testo_modello(testo: str, limite: int = 60000) -> str:
-    """Recinta il testo del modello in un blocco di codice sicuro troncato a limite caratteri.
+def recinta_testo_modello(testo: str, limite: int | None = 60000) -> str:
+    """Recinta il testo del modello in un blocco di codice sicuro troncato a limite caratteri (se impostato).
 
     Usa un numero di apici (almeno 3) strettamente maggiore di qualsiasi sequenza di apici consecutivi nel testo.
     """
-    testo_troncato = (testo or "")[:limite]
+    testo_troncato = (testo or "") if limite is None else (testo or "")[:limite]
     sequenze = re.findall(r"`+", testo_troncato)
     max_apici = max((len(s) for s in sequenze), default=0)
     recinto = "`" * max(3, max_apici + 1)
@@ -717,6 +717,179 @@ def _prepara_fascicolo(
         f"Nota: {scrivi_nota(d_nota)}\n"
     )
     (fascicolo_dir / "stato.md").write_text(testo_stato, encoding="utf-8")
+
+
+ORDINE_FASCICOLO: tuple[str, ...] = (
+    "brief.md",
+    "stato.md",
+    "costituzione.md",
+    "quaderno.md",
+    "lavoro.md",
+    "commenti.md",
+)
+TETTO_PROMPT_BYTE = 96 * 1024
+TETTO_FILE_BRIEF_BYTE = 40 * 1024
+
+
+def _leggi_file_del_brief(
+    lavoro_dir: Path,
+    percorso: str,
+    *,
+    tetto_byte: int = TETTO_FILE_BRIEF_BYTE,
+) -> tuple[str | None, str | None]:
+    """Legge un file della sezione «File» solo se regolare, UTF-8, entro `tetto_byte` e dentro `lavoro_dir`.
+
+    Restituisce `(contenuto, None)` se valido, oppure `(None, motivo)` se il percorso va saltato.
+    """
+    if not percorso or "\x00" in percorso:
+        return None, "percorso non valido"
+    p_rel = Path(percorso)
+    if p_rel.is_absolute():
+        return None, "percorso assoluto non ammesso"
+
+    radice_risolta = lavoro_dir.resolve()
+    try:
+        risolto = (lavoro_dir / p_rel).resolve()
+        rel = risolto.relative_to(radice_risolta)
+    except (OSError, ValueError):
+        return None, "percorso fuori dalla copia"
+
+    if risolto == radice_risolta:
+        return None, "non è un file regolare"
+    if ".git" in rel.parts or ".bottega" in rel.parts:
+        return None, "percorso riservato"
+
+    try:
+        fd = os.open(risolto, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None, "file non trovato"
+    except IsADirectoryError:
+        return None, "non è un file regolare"
+    except OSError as exc:
+        return None, f"non leggibile ({exc.strerror or exc})"
+
+    # Il controllo vale sul file aperto, non sul percorso: fra `resolve` e `open` un processo rimasto dell'esecutore
+    # potrebbe scambiare un pezzo del percorso con un collegamento (`O_NOFOLLOW` guarda solo l'ultimo).
+    try:
+        rel_aperto = Path(os.readlink(f"/proc/self/fd/{fd}")).relative_to(radice_risolta)
+        fuori = ".git" in rel_aperto.parts or ".bottega" in rel_aperto.parts
+    except (OSError, ValueError):
+        fuori = True
+    if fuori:
+        os.close(fd)
+        return None, "percorso fuori dalla copia"
+
+    try:
+        with os.fdopen(fd, "rb") as sorgente:
+            st = os.fstat(sorgente.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                return None, "non è un file regolare"
+            if st.st_size > tetto_byte:
+                return None, f"supera {tetto_byte // 1024} KiB"
+            raw = sorgente.read(tetto_byte + 1)
+    except OSError as exc:
+        return None, f"non leggibile ({exc.strerror or exc})"
+
+    if len(raw) > tetto_byte:
+        return None, f"supera {tetto_byte // 1024} KiB"
+
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, "non è UTF-8"
+
+
+def _renderizza_prompt_con_fascicolo(
+    intestazione: str,
+    fascicolo_in: Sequence[tuple[str, str]],
+    fascicolo_fuori: Sequence[str],
+    repo_in: Sequence[tuple[str, str]],
+    repo_saltati: Sequence[tuple[str, str]],
+    repo_fuori: Sequence[str],
+    fascicolo_dir: Path,
+) -> str:
+    blocchi: list[str] = [intestazione.rstrip()]
+    for nome, testo in fascicolo_in:
+        blocchi.append(f"### {nome}\n\n{recinta_testo_modello(testo, limite=None)}")
+    for percorso, testo in repo_in:
+        blocchi.append(f"### {percorso}\n\n{recinta_testo_modello(testo, limite=None)}")
+    if repo_saltati:
+        blocchi.append("\n".join(f"saltato {percorso}: {motivo}" for percorso, motivo in repo_saltati))
+    if fascicolo_fuori:
+        righe = "\n".join(f"- {nome}" for nome in fascicolo_fuori)
+        blocchi.append(f"Da leggere nel fascicolo ({fascicolo_dir}):\n{righe}")
+    if repo_fuori:
+        righe = "\n".join(f"- {percorso}" for percorso in repo_fuori)
+        blocchi.append(f"Da leggere nel repo:\n{righe}")
+    return "\n\n".join(blocchi) + "\n"
+
+
+def componi_prompt_con_fascicolo(
+    intestazione: str,
+    fascicolo_runner: Path,
+    fascicolo_dir: Path,
+    lavoro_dir: Path,
+    brief_testo: str,
+    *,
+    tetto_byte: int = TETTO_PROMPT_BYTE,
+    tetto_file_byte: int = TETTO_FILE_BRIEF_BYTE,
+) -> str:
+    """Compone il prompt dell'esecutore con i pezzi del fascicolo e i file del brief entro `tetto_byte` UTF-8.
+
+    Ogni pezzo entra per intero dentro un recinto sicuro; ciò che non entra resta fuori per intero ed è elencato
+    sotto «Da leggere nel fascicolo» o «Da leggere nel repo». I percorsi del brief non sicuri o non validi
+    vengono saltati senza mai includerne il contenuto.
+    """
+    fascicolo_pezzi: list[tuple[str, str]] = []
+    for nome in ORDINE_FASCICOLO:
+        p = fascicolo_runner / nome
+        if p.is_file():
+            fascicolo_pezzi.append((nome, p.read_text(encoding="utf-8", errors="replace")))
+
+    repo_candidati: list[tuple[str, str]] = []
+    repo_saltati: list[tuple[str, str]] = []
+    for percorso in file_del_brief(brief_testo):
+        contenuto, motivo = _leggi_file_del_brief(lavoro_dir, percorso, tetto_byte=tetto_file_byte)
+        if contenuto is not None:
+            repo_candidati.append((percorso, contenuto))
+        else:
+            repo_saltati.append((percorso, motivo or "non valido"))
+
+    fascicolo_in: list[tuple[str, str]] = []
+    fascicolo_fuori: list[str] = [nome for nome, _ in fascicolo_pezzi]
+    repo_in: list[tuple[str, str]] = []
+    repo_fuori: list[str] = [percorso for percorso, _ in repo_candidati]
+
+    prompt_corrente = _renderizza_prompt_con_fascicolo(
+        intestazione, fascicolo_in, fascicolo_fuori, repo_in, repo_saltati, repo_fuori, fascicolo_dir
+    )
+
+    for nome, testo in fascicolo_pezzi:
+        prox_in = [*fascicolo_in, (nome, testo)]
+        prox_fuori = [n for n in fascicolo_fuori if n != nome]
+        candidato = _renderizza_prompt_con_fascicolo(
+            intestazione, prox_in, prox_fuori, repo_in, repo_saltati, repo_fuori, fascicolo_dir
+        )
+        if len(candidato.encode("utf-8")) <= tetto_byte:
+            fascicolo_in = prox_in
+            fascicolo_fuori = prox_fuori
+            prompt_corrente = candidato
+
+    for percorso, testo in repo_candidati:
+        prox_in = [*repo_in, (percorso, testo)]
+        prox_fuori = [p for p in repo_fuori if p != percorso]
+        candidato = _renderizza_prompt_con_fascicolo(
+            intestazione, fascicolo_in, fascicolo_fuori, prox_in, repo_saltati, prox_fuori, fascicolo_dir
+        )
+        if len(candidato.encode("utf-8")) <= tetto_byte:
+            repo_in = prox_in
+            repo_fuori = prox_fuori
+            prompt_corrente = candidato
+
+    if len(prompt_corrente.encode("utf-8")) > tetto_byte:
+        prompt_corrente = prompt_corrente.encode("utf-8")[:tetto_byte].decode("utf-8", errors="ignore")
+
+    return prompt_corrente
 
 
 def _verifica_e_consegna_bundle(
@@ -1419,15 +1592,9 @@ def _giro(
         )
 
         conversazione_id = d_nota.get("conversazione")
-        prompt_testo = (
+        intestazione_iniziale = (
             f"Sei l'esecutore per il compito {compito.numero}: {compito.titolo}.\n\n"
-            f"Il fascicolo in {fascicolo_dir} contiene:\n"
-            "- brief.md: il brief del compito\n"
-            "- lavoro.md: il corpo della madre se tappa\n"
-            "- commenti.md: tutti i commenti del compito e della madre\n"
-            "- costituzione.md: la costituzione del progetto\n"
-            "- quaderno.md: il quaderno del modello\n"
-            "- stato.md: ramo, base, PR e nota\n\n"
+            f"Fascicolo in {fascicolo_dir}.\n\n"
             f"Fatto quando:\n{cmd_fatto_quando}\n\n"
             "Istruzioni:\n"
             f"1. Lavora in questa cartella e committa nel ramo corrente ({nome_ramo}) un commit per compito.\n"
@@ -1446,6 +1613,13 @@ def _giro(
             "modifica poche righe alla volta invece di riscrivere un file che esiste. Lancia le prove in primo piano "
             "e aspetta che finiscano, senza controllarle a ripetizione; il comando di «Fatto quando» lancialo una "
             "volta sola, alla fine, prima del commit: dopo di te lo rilancia l'oracolo.\n"
+        )
+        prompt_testo = componi_prompt_con_fascicolo(
+            intestazione=intestazione_iniziale,
+            fascicolo_runner=fascicolo_runner,
+            fascicolo_dir=fascicolo_dir,
+            lavoro_dir=lavoro_dir,
+            brief_testo=compito.corpo,
         )
         consulti_effettuati = 0
         lanci_esecutore: list[Lancio] = []
@@ -1563,10 +1737,17 @@ def _giro(
                 prima_riga_cons = righe_cons[0].upper() if righe_cons else ""
                 if prima_riga_cons.startswith("RISPOSTA"):
                     # RV7: Dopo RISPOSTA il prompt di ripresa ripete compito e fascicolo
-                    prompt_testo = (
+                    intestazione_ripresa = (
                         f"Compito {compito.numero}: {compito.titolo}.\n"
                         f"Fascicolo in {fascicolo_dir}.\n\n"
                         f"Risposta del consigliere:\n{lancio_cons.testo}"
+                    )
+                    prompt_testo = componi_prompt_con_fascicolo(
+                        intestazione=intestazione_ripresa,
+                        fascicolo_runner=fascicolo_runner,
+                        fascicolo_dir=fascicolo_dir,
+                        lavoro_dir=lavoro_dir,
+                        brief_testo=compito.corpo,
                     )
                     conversazione_id = lancio.conversazione
                     continue

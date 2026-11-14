@@ -4,8 +4,58 @@ import re
 import unicodedata
 
 _TITOLO_FATTO_QUANDO = re.compile(r"^##\s+Fatto quando(?:\s*:)?\s*$", re.IGNORECASE | re.MULTILINE)
+_TITOLO_FILE = re.compile(r"^##\s+File(?:\s*:)?\s*$", re.IGNORECASE)
 _INIZIO_RECINTO = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 _PROSSIMO_TITOLO = re.compile(r"^#{1,2}\s+\S")
+_VOCE_FILE = re.compile(r"^[ \t]*[-*+][ \t]+`([^`\n]+)`")
+
+
+def _chiude_recinto(riga: str, recinto_aperto: str) -> bool:
+    return bool(
+        re.match(r"^[ \t]*" + re.escape(recinto_aperto) + re.escape(recinto_aperto[0]) + r"*[ \t]*$", riga)
+    )
+
+
+def file_del_brief(corpo: str) -> list[str]:
+    """I percorsi della sezione «## File» (elenco puntato fra apici inversi), in ordine e senza duplicati.
+
+    Ignora i titoli e gli elenchi dentro i blocchi di codice recintati.
+    """
+    if not corpo:
+        return []
+
+    recinto_aperto: str | None = None
+    in_sezione = False
+    percorsi: list[str] = []
+    visti: set[str] = set()
+
+    for riga in corpo.splitlines():
+        if recinto_aperto is not None:
+            if _chiude_recinto(riga, recinto_aperto):
+                recinto_aperto = None
+            continue
+
+        m_recinto = _INIZIO_RECINTO.match(riga)
+        if m_recinto:
+            recinto_aperto = m_recinto.group(1)
+            continue
+
+        if not in_sezione:
+            if _TITOLO_FILE.match(riga):
+                in_sezione = True
+            continue
+
+        if _PROSSIMO_TITOLO.match(riga):
+            break
+
+        m_voce = _VOCE_FILE.match(riga)
+        if m_voce:
+            percorso = m_voce.group(1).strip()
+            if percorso and percorso not in visti:
+                visti.add(percorso)
+                percorsi.append(percorso)
+
+    return percorsi
 
 
 def fatto_quando(corpo: str) -> str | None:
