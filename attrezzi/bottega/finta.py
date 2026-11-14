@@ -273,6 +273,7 @@ class BoardFinta:
             "nota": lavoro.nota,
             "repo": lavoro.repo,
             "campi": campi,
+            "aperta": lavoro.aperta,
         }
 
     def aggiungi(self, lavoro: int | Lavoro, titolo: str = "", stato: str = "pronto") -> None:
@@ -292,6 +293,7 @@ class BoardFinta:
                 "nota": "",
                 "repo": self.repo,
                 "campi": {"Bottega": stato} if stato else {},
+                "aperta": True,
             }
             self.registro.append(("aggiungi", numero))
 
@@ -323,6 +325,7 @@ class BoardFinta:
             nota=d.get("nota", ""),
             repo=d.get("repo"),
             campi=campi,
+            aperta=d.get("aperta", True),
         )
 
     def pronti(self) -> list[Lavoro]:

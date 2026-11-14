@@ -22,14 +22,17 @@ from typing import Any
 import bottega.misure as misure
 from bottega.board import Board, BoardComando, BoardProject, Lavoro
 from bottega.configurazione import PERCORSO_PREDEFINITO, ErroreConfigurazione, leggi_configurazione
-from bottega.forgia import Forgia, ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh, repo_del_comando
 from bottega.misure import CAMPI, OPZIONI_ESITO, numero
 from bottega.segno import chiudi_segni_dei_chiusi
 
 
+_CAMPI_NON_MISURA = frozenset({"Segno", "Misure parziali"})
+
+
 def _ha_misura(lav: Lavoro) -> bool:
-    """Vero se il lavoro possiede almeno un valore per i campi di misura del Project."""
-    return any(lav.campi.get(k, "").strip() != "" for k in CAMPI)
+    """Vero se il lavoro possiede almeno un valore per i campi di misura del Project (esclusi Segno e Misure parziali)."""
+    return any(k not in _CAMPI_NON_MISURA and lav.campi.get(k, "").strip() != "" for k in CAMPI)
 
 
 def _statistiche_gruppo(lavori: Sequence[Lavoro]) -> dict[str, Any]:
@@ -222,7 +225,13 @@ def comando_conti(
     forgia: Forgia | None = None,
 ) -> int:
     """Legge i conti delle misure dalla board: esce 0 se eseguito, 1 con errore."""
-    repo = getattr(args, "repo", None) or os.environ.get("GITHUB_REPOSITORY", "")
+    repo = ""
+    if board is None or forgia is None:
+        try:
+            repo = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as exc:
+            print(f"segno: {exc}", file=sys.stderr)
+            repo = ""
     if board is None:
         percorso_cfg = Path(args.file)
         try:

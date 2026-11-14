@@ -15,7 +15,7 @@ from bottega.configurazione import (
     ErroreConfigurazione,
     leggi_configurazione,
 )
-from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh, repo_del_comando
 import bottega.misure as misure
 from bottega.segno import tocca
 
@@ -247,17 +247,27 @@ def comando_correggi(
             print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
             return 1
 
-        repo = getattr(args, "repo", None) or os.environ.get("GITHUB_REPOSITORY", "")
+        try:
+            repo = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as exc:
+            print(f"errore: {exc}", file=sys.stderr)
+            return 1
+
         if forgia is None:
             forgia = ForgiaGh(repo)
         if board is None:
-            if cfg.progetto.adattatore:
-                board = BoardComando(shlex.split(cfg.progetto.adattatore))
-            elif cfg.progetto.project is not None:
-                proprietario = forgia.proprietario()
-                board = BoardProject(proprietario=proprietario, numero=cfg.progetto.project, repo=repo)
-            else:
-                print("errore: configurazione priva di progetto.project e senza adattatore", file=sys.stderr)
+            try:
+                if cfg.progetto.adattatore:
+                    board = BoardComando(shlex.split(cfg.progetto.adattatore))
+                elif cfg.progetto.project is not None:
+                    proprietario = forgia.proprietario()
+                    board = BoardProject(proprietario=proprietario, numero=cfg.progetto.project, repo=repo)
+                else:
+                    print("errore: configurazione priva di progetto.project e senza adattatore", file=sys.stderr)
+                    return 1
+            except (ErroreForgia, ErroreBoard, OSError) as exc:
+                motivo = exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)
+                print(f"errore: {motivo}", file=sys.stderr)
                 return 1
 
     try:

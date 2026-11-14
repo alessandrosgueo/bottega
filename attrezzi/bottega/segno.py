@@ -366,6 +366,7 @@ def tocca(
 
     righe = chiudi_segni_dei_chiusi(board, forgia, env, cartella, adesso, tutti=tutti)
 
+    chiusura_fallita_su: int | None = None
     for lav in tutti:
         if not lav.aperta or lav.numero == numero:
             continue
@@ -389,12 +390,20 @@ def tocca(
             )
             if stato == "errore":
                 righe.append(f"segno: #{lav.numero}: {msg}")
+                if chiusura_fallita_su is None:
+                    chiusura_fallita_su = lav.numero
         except Exception as exc:  # noqa: BLE001 - non solleva mai
             righe.append(f"segno: #{lav.numero}: {_messaggio_errore(exc)}")
+            if chiusura_fallita_su is None:
+                chiusura_fallita_su = lav.numero
 
     lav_num = next((x for x in tutti if x.numero == numero), None)
     # Un segno già aperto resta com'è (anche di un'altra sessione); su un lavoro chiuso non se ne apre uno nuovo.
     if lav_num is not None and (lav_num.campi.get("Segno") or not lav_num.aperta):
+        return righe
+
+    if chiusura_fallita_su is not None:
+        righe.append(f"segno: #{numero}: non aperto, il segno su #{chiusura_fallita_su} è ancora aperto")
         return righe
 
     try:

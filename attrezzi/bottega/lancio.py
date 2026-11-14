@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from bottega.board import Board, BoardComando, BoardProject
+from bottega.board import Board, BoardComando, BoardProject, ErroreBoard
 from bottega.configurazione import (
     PERCORSO_PREDEFINITO,
     ErroreConfigurazione,
     leggi_configurazione,
 )
-from bottega.forgia import Forgia, ForgiaGh
+from bottega.forgia import ErroreForgia, Forgia, ForgiaGh, repo_del_comando
 from bottega.misure import INTESTAZIONE_MISURE_PERSE
 from bottega.segno import porta_della_sessione, tocca
 
@@ -233,14 +233,18 @@ def _tocca_dopo_lancio(
     if porta_della_sessione(os.environ) is None:
         return
     try:
-        repo = getattr(args, "repo", None) or os.environ.get("GITHUB_REPOSITORY", "")
         if board is None:
+            repo = repo_del_comando(getattr(args, "repo", None), os.environ)
             percorso_cfg = getattr(args, "configurazione", None) or Path(PERCORSO_PREDEFINITO)
             cfg = leggi_configurazione(percorso_cfg)
             board_eff, forgia_eff = _board_da_cfg(cfg, repo, forgia)
         else:
             board_eff = board
-            forgia_eff = forgia or ForgiaGh(repo)
+            if forgia is None:
+                repo = repo_del_comando(getattr(args, "repo", None), os.environ)
+                forgia_eff = ForgiaGh(repo)
+            else:
+                forgia_eff = forgia
     except Exception as exc:  # noqa: BLE001 - configurazione o board assenti non fanno fallire lancia
         motivo = exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)
         print(f"segno: {motivo}", file=sys.stderr)
@@ -524,7 +528,6 @@ def comando_segui(
     """Segue l'avanzamento di un lavoro finché non si conclude o si blocca."""
     esegui_fn = esegui or esecutore_gh
     adesso_fn = adesso or (lambda: datetime.now(UTC))
-    repo_eff = getattr(args, "repo", None) or os.environ.get("GITHUB_REPOSITORY", "")
     forgia_eff = forgia
 
     if board is None:
@@ -538,11 +541,22 @@ def comando_segui(
             print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
             return 1
         try:
+            repo_eff = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as e:
+            repo_eff = ""
+            print(f"segno: {e}", file=sys.stderr)
+        try:
             board, forgia_eff = _board_da_cfg(cfg, repo_eff, forgia_eff)
-        except ErroreConfigurazione as e:
-            print(f"errore: {e}", file=sys.stderr)
+        except (ErroreConfigurazione, ErroreForgia, ErroreBoard, OSError) as e:
+            motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+            print(f"errore: {motivo}", file=sys.stderr)
             return 1
     elif forgia_eff is None:
+        try:
+            repo_eff = repo_del_comando(getattr(args, "repo", None), os.environ)
+        except ErroreForgia as e:
+            repo_eff = ""
+            print(f"segno: {e}", file=sys.stderr)
         forgia_eff = ForgiaGh(repo_eff)
 
     numero = args.numero

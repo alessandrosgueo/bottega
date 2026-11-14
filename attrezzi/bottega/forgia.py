@@ -3,7 +3,7 @@
 import json
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -45,6 +45,48 @@ class Commento:
 
 class ErroreForgia(Exception):
     """Errore durante una chiamata alla forgia."""
+
+
+def repo_della_cartella(esegui: Callable[[list[str]], str] | None = None) -> str:
+    """Restituisce `owner/repo` del repository nella cartella corrente tramite `gh repo view`."""
+    def _esegui_default(argomenti: list[str]) -> str:
+        try:
+            proc = subprocess.run(
+                ["gh", *argomenti],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ErroreForgia("gh repo view non ha risposto in 5 secondi") from exc
+        except OSError as exc:
+            raise ErroreForgia(f"impossibile eseguire gh: {exc}") from exc
+        if proc.returncode != 0:
+            motivo = proc.stderr.strip() or f"codice {proc.returncode}"
+            raise ErroreForgia(f"impossibile rilevare il repo dalla cartella: {motivo}")
+        return proc.stdout
+
+    out = (esegui or _esegui_default)(["repo", "view", "--json", "nameWithOwner"])
+    try:
+        dati = json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise ErroreForgia(f"risposta non valida da gh repo view: {exc}") from exc
+    nome = dati.get("nameWithOwner") if isinstance(dati, dict) else None
+    if not isinstance(nome, str) or not nome.strip():
+        raise ErroreForgia("nameWithOwner mancante nella risposta di gh repo view")
+    return nome.strip()
+
+
+def repo_del_comando(repo_arg: str | None, env: Mapping[str, str]) -> str:
+    """Restituisce il repository da usare: argomento, GITHUB_REPOSITORY o repo della cartella."""
+    repo = (repo_arg or "").strip()
+    if repo:
+        return repo
+    repo_env = env.get("GITHUB_REPOSITORY", "").strip()
+    if repo_env:
+        return repo_env
+    return repo_della_cartella()
 
 
 class Forgia(Protocol):

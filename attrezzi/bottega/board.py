@@ -305,7 +305,7 @@ class BoardProject:
     ) -> None:
         self.proprietario = proprietario
         self.numero = numero
-        self.repo = repo
+        self.repo = repo or None
         self._esegui = esegui or self._esegui_di_serie
         self._tipo_proprietario: str | None = None
 
