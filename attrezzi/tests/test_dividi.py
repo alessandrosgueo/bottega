@@ -580,3 +580,89 @@ runner = "linux"
     assert "Traceback" not in catturato.err
 
 
+def test_dividi_legge_le_quote_dei_secchi(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timedelta, timezone
+    import random
+
+    from bottega.dividi import ErroreDividi, dividi
+    from bottega.quota import valore_esaurita
+
+    f_piano = tmp_path / "piano.md"
+    f_piano.write_text("# Piano\n", encoding="utf-8")
+
+    cfg_un_cons = tmp_path / "bottega_uno.toml"
+    cfg_un_cons.write_text(
+        """versione = 1
+
+[progetto]
+fuso = "UTC"
+
+[botteghe.google]
+quote = { argon = "abbondante", gemini = "scarsa" }
+porte = ["pi"]
+
+[candidati.maestro]
+nome = "Maestro"
+bottega = "google"
+porta = "pi"
+modello = "modello-decisore"
+quota = "argon"
+funzioni = ["decidere"]
+
+[candidati.cons-argon]
+nome = "Consigliere Argon"
+bottega = "google"
+porta = "pi"
+modello = "modello-argon"
+quota = "argon"
+funzioni = ["consigliare"]
+""",
+        encoding="utf-8",
+    )
+
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    forgia = ForgiaFinta()
+    forgia.imposta_variabile("BOTTEGA_QUOTA_GOOGLE__ARGON", valore_esaurita(adesso + timedelta(hours=1)))
+
+    # 1. Con il solo consigliere del secchio argon esaurito nella forgia, dividi non può sceglierlo
+    with pytest.raises(ErroreDividi, match="nessun consigliere disponibile"):
+        dividi(
+            piano=f_piano,
+            forgia=forgia,
+            percorso_configurazione=cfg_un_cons,
+            porta=PortaFinta(esito="fatto", testo=json.dumps(_json_valido())),
+            adesso=adesso,
+            caso=random.Random(1),
+        )
+
+    # 2. Con ripiego su os.environ e un secondo consigliere su gemini, sceglie gemini
+    cfg_due_cons = tmp_path / "bottega_due.toml"
+    cfg_due_cons.write_text(
+        cfg_un_cons.read_text(encoding="utf-8")
+        + """
+[candidati.cons-gemini]
+nome = "Consigliere Gemini"
+bottega = "google"
+porta = "pi"
+modello = "modello-gemini"
+quota = "gemini"
+funzioni = ["consigliare"]
+""",
+        encoding="utf-8",
+    )
+    forgia_vuota = ForgiaFinta()
+    monkeypatch.setenv("BOTTEGA_QUOTA_GOOGLE__ARGON", valore_esaurita(adesso + timedelta(hours=1)))
+    porta = PortaFinta(esito="fatto", testo=json.dumps(_json_valido()))
+    creati = dividi(
+        piano=f_piano,
+        forgia=forgia_vuota,
+        percorso_configurazione=cfg_due_cons,
+        porta=porta,
+        adesso=adesso,
+        caso=random.Random(1),
+    )
+    assert creati == [1, 2, 3]
+    assert porta.chiamate[0]["modello"] == "modello-gemini"
+
+
+

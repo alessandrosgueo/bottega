@@ -3968,3 +3968,288 @@ def test_b7_ripresa_solo_col_ramo_remoto(tmp_path: Path):
     esito2 = _secondo_giro(clone_nuovo, cfg, forgia, board, spazio, adesso, caso, _non_committa)
     assert esito2.esito == "pronto"
     assert esito2.motivo == "nessun commit"
+
+
+# --- B12.2: secchi di quota nel giro e quaderno condiviso ---
+
+
+def _cfg_giro_con_secchi() -> Configurazione:
+    progetto = Progetto(
+        comandanti=("maestro",),
+        adattatore=None,
+        fuso="UTC",
+        notte=None,
+        manutenzione=(),
+        project=1,
+    )
+    botteghe = {
+        "google": Bottega(
+            id="google",
+            quota="",
+            porte=("finta",),
+            quote=(("argon", "scarsa"), ("gemini", "abbondante")),
+        ),
+    }
+    candidati = {
+        "esecutore": Candidato(
+            id="esecutore",
+            nome="Lavorante Gemini",
+            bottega="google",
+            porta="finta",
+            modello="modello-gemini",
+            funzioni=("eseguire",),
+            runner="linux-x64",
+            quota="gemini",
+        ),
+        "consigliere": Candidato(
+            id="consigliere",
+            nome="Maestro Argon",
+            bottega="google",
+            porta="finta",
+            modello="modello-argon",
+            funzioni=("consigliare",),
+            runner="linux-x64",
+            quota="argon",
+        ),
+    }
+    return Configurazione(1, progetto, botteghe, candidati)
+
+
+def test_quota_esaurita_segna_il_secchio_dell_esecutore(tmp_path: Path):
+    from bottega.giro import giro
+
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _cfg_giro_con_secchi()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f finale.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Secchio", corpo=corpo)
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Secchio", stato="pronto")])
+
+    def committa_parziale(cartella, prompt, **kwargs):
+        (Path(cartella) / "parziale.txt").write_text("parziale", encoding="utf-8")
+        subprocess.run(["git", "add", "parziale.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "parziale"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="quota", testo="429 gemini", conversazione="conv_secchio")
+
+    porta = PortaFinta(callback=committa_parziale)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    esito = giro(
+        lavoro=1,
+        bottega="google",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=adesso,
+        caso=random.Random(42),
+    )
+
+    assert esito.esito == "quota"
+    var_secchio = forgia.variabile("BOTTEGA_QUOTA_GOOGLE__GEMINI")
+    assert var_secchio is not None
+    assert var_secchio.startswith("esaurita fino a ")
+    assert forgia.variabile("BOTTEGA_QUOTA_GOOGLE") is None
+    assert forgia.variabile("BOTTEGA_QUOTA_GOOGLE__ARGON") is None
+
+
+def test_consulto_in_quota_segna_il_secchio_del_consigliere(tmp_path: Path):
+    from bottega.giro import giro
+
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _cfg_giro_con_secchi()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f risposto.txt\n```\n"
+    iss = Issue(numero=1, titolo="Compito Consulto Secchio", corpo=corpo)
+    forgia = ForgiaFinta(issues=[iss])
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Consulto Secchio", stato="pronto")])
+
+    def callback(cartella, prompt, **kwargs):
+        if kwargs.get("sola_lettura"):
+            return Lancio(esito="quota", testo="429 argon")
+        return Lancio(
+            esito="fatto",
+            testo="Ho un dubbio.\nDOMANDA PER CHI DECIDE: quale approccio?",
+            conversazione="conv_cons_secchio",
+        )
+
+    porta = PortaFinta(callback=callback)
+    porta.gestisce_sola_lettura = True
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    esito = giro(
+        lavoro=1,
+        bottega="google",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=adesso,
+        caso=random.Random(42),
+    )
+
+    assert esito.esito == "in_attesa"
+    assert esito.motivo == "quota"
+    var_cons = forgia.variabile("BOTTEGA_QUOTA_GOOGLE__ARGON")
+    assert var_cons is not None
+    assert var_cons.startswith("esaurita fino a ")
+    assert forgia.variabile("BOTTEGA_QUOTA_GOOGLE") is None
+    assert forgia.variabile("BOTTEGA_QUOTA_GOOGLE__GEMINI") is None
+
+
+def test_giro_legge_quote_dei_secchi_per_il_consigliere(tmp_path: Path):
+    from bottega.giro import giro
+    from bottega.quota import valore_esaurita
+
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _cfg_giro_con_secchi()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f fatto.txt\n```\n"
+    iss1 = Issue(numero=1, titolo="Compito Consulto Saltato", corpo=corpo)
+    iss2 = Issue(numero=2, titolo="Compito Rilettura Saltata", corpo=corpo)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+
+    # 1. Consulto: secchio argon del consigliere già esaurito -> non lancia il consigliere
+    forgia1 = ForgiaFinta(issues=[iss1])
+    forgia1.imposta_variabile("BOTTEGA_QUOTA_GOOGLE__ARGON", valore_esaurita(adesso + timedelta(hours=1)))
+    board1 = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Consulto Saltato", stato="pronto")])
+
+    def callback_consulto(cartella, prompt, **kwargs):
+        if kwargs.get("sola_lettura"):
+            raise AssertionError("il consigliere col secchio esaurito non deve essere lanciato")
+        return Lancio(esito="fatto", testo="DOMANDA PER CHI DECIDE: serve aiuto?")
+
+    porta1 = PortaFinta(callback=callback_consulto)
+    porta1.gestisce_sola_lettura = True
+    esito1 = giro(
+        lavoro=1,
+        bottega="google",
+        configurazione=cfg,
+        forgia=forgia1,
+        board=board1,
+        porte={"finta": porta1},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio1",
+        prefisso=(),
+        adesso=adesso,
+        caso=random.Random(42),
+    )
+    assert esito1.esito == "in_attesa"
+    assert esito1.motivo == "senza consigliere con quota"
+
+    # 2. Rilettura a fine giro: secchio argon del consigliere già esaurito -> consegna senza rilettura
+    forgia2 = ForgiaFinta(issues=[iss2])
+    forgia2.imposta_variabile("BOTTEGA_QUOTA_GOOGLE__ARGON", valore_esaurita(adesso + timedelta(hours=1)))
+    board2 = BoardFinta(lavori=[Lavoro(numero=2, titolo="Compito Rilettura Saltata", stato="pronto")])
+
+    def callback_consegna(cartella, prompt, **kwargs):
+        if kwargs.get("sola_lettura"):
+            raise AssertionError("il consigliere col secchio esaurito non deve essere lanciato in rilettura")
+        (Path(cartella) / "fatto.txt").write_text("ok", encoding="utf-8")
+        subprocess.run(["git", "add", "fatto.txt"], cwd=str(cartella), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: fatto"], cwd=str(cartella), check=True, capture_output=True)
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta2 = PortaFinta(callback=callback_consegna)
+    porta2.gestisce_sola_lettura = True
+    esito2 = giro(
+        lavoro=2,
+        bottega="google",
+        configurazione=cfg,
+        forgia=forgia2,
+        board=board2,
+        porte={"finta": porta2},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio2",
+        prefisso=(),
+        adesso=adesso,
+        caso=random.Random(42),
+    )
+    assert esito2.esito == "consegnato"
+    assert esito2.pr is not None
+    assert any("compito senza rilettura" in c.corpo for c in forgia2.commenti(esito2.pr))
+
+
+def test_quaderno_condiviso_fra_livelli(tmp_path: Path, monkeypatch):
+    from bottega.giro import giro
+
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    bottega_clone = tmp_path / "repo_bottega"
+    quaderni_bottega = bottega_clone / "quaderni"
+    quaderni_bottega.mkdir(parents=True)
+    (quaderni_bottega / "x.md").write_text("# Quaderno comune x (bottega)\n", encoding="utf-8")
+    (quaderni_bottega / "modello-high.md").write_text("# Quaderno sbagliato high\n", encoding="utf-8")
+    monkeypatch.setenv("BOTTEGA_CLONE", str(bottega_clone))
+
+    quaderni_proj = clone / ".github" / "bottega" / "quaderni"
+    quaderni_proj.mkdir(parents=True)
+    (quaderni_proj / "x.md").write_text("# Quaderno comune x (progetto)\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".github"], cwd=str(clone), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "aggiungi quaderno x"], cwd=str(clone), check=True, capture_output=True)
+    subprocess.run(["git", "push", "origin", "main"], cwd=str(clone), check=True, capture_output=True)
+
+    progetto = Progetto(("maestro",), None, "UTC", None, (), project=1)
+    botteghe = {"principale": Bottega("principale", "abbondante", ("finta",))}
+    candidati = {
+        "esec-high": Candidato(
+            "esec-high",
+            "Lavorante High",
+            "principale",
+            "finta",
+            "modello-high",
+            ("eseguire",),
+            "linux-x64",
+            quaderno="x",
+        ),
+        "esec-xhigh": Candidato(
+            "esec-xhigh",
+            "Lavorante XHigh",
+            "principale",
+            "finta",
+            "modello-xhigh",
+            ("eseguire",),
+            "linux-x64",
+            riserva=True,
+            quaderno="x",
+        ),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+
+    for indice, nome_esecutore in enumerate(("Lavorante High", "Lavorante XHigh"), start=1):
+        corpo = "Brief\n\n## Fatto quando\n```bash\ntest -f ok.txt\n```\n"
+        iss = Issue(numero=indice, titolo=f"Compito {indice}", corpo=corpo)
+        forgia = ForgiaFinta(issues=[iss])
+        board = BoardFinta(
+            lavori=[Lavoro(numero=indice, titolo=f"Compito {indice}", stato="pronto", esecutore=nome_esecutore)]
+        )
+        quaderno_letto: list[str] = []
+
+        def callback(cartella, prompt, **kwargs):
+            q_file = Path(cartella) / ".bottega" / "fascicolo" / "quaderno.md"
+            quaderno_letto.append(q_file.read_text(encoding="utf-8") if q_file.is_file() else "")
+            (Path(cartella) / "ok.txt").write_text("ok", encoding="utf-8")
+            subprocess.run(["git", "add", "ok.txt"], cwd=str(cartella), check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "feat: ok"], cwd=str(cartella), check=True, capture_output=True)
+            return Lancio(esito="fatto", testo="fatto")
+
+        esito = giro(
+            lavoro=indice,
+            bottega="principale",
+            configurazione=cfg,
+            forgia=forgia,
+            board=board,
+            porte={"finta": PortaFinta(callback=callback)},
+            clone_progetto=clone,
+            spazio=tmp_path / f"spazio_{indice}",
+            prefisso=(),
+            adesso=adesso,
+            caso=random.Random(42),
+        )
+        assert esito.esito == "consegnato"
+        assert "Quaderno comune x (bottega)" in quaderno_letto[0]
+        assert "Quaderno comune x (progetto)" in quaderno_letto[0]
+        assert "sbagliato" not in quaderno_letto[0]
+

@@ -34,11 +34,13 @@ from bottega.configurazione import (
     Configurazione,
     ErroreConfigurazione,
     leggi_configurazione,
+    variabile_della_quota,
+    variabili_della_quota,
 )
 from bottega.forgia import Commento, Forgia, ForgiaGh, Issue, _spoglia_segno
 import bottega.misure as misure
 from bottega.porte import Controllo, Lancio, Porta, ambiente_ripulito, esegui_con_tetto, porta as fabbrica_porte
-from bottega.quota import nome_variabile, valore_esaurita
+from bottega.quota import valore_esaurita
 from bottega.scelta import Compito, scegli
 from bottega.segni import nota, ruolo, scrivi_nota
 
@@ -686,7 +688,7 @@ def _prepara_fascicolo(
         )
 
     # RV3: Quaderni
-    modello_slug = re.sub(r"[^a-z0-9]+", "-", candidato.modello.lower()).strip("-")
+    modello_slug = re.sub(r"[^a-z0-9]+", "-", (candidato.quaderno or candidato.modello).lower()).strip("-")
     testi_quaderno: list[str] = []
 
     bottega_clone_env = os.environ.get("BOTTEGA_CLONE")
@@ -976,7 +978,6 @@ def _giro(
     """Il corpo del giro; `giro` lo avvolge."""
     if bottega not in configurazione.botteghe:
         raise ValueError(f"Bottega sconosciuta: {bottega!r}")
-    bottega_cfg = configurazione.botteghe[bottega]
 
     candidato = _trova_candidato(lavoro, bottega, configurazione, board)
     porta_esecutore = _ottieni_porta(candidato.porta, porte)
@@ -1342,7 +1343,7 @@ def _giro(
                 forgia.commenta(compito.numero, f"Consulto dell'esecutore:\n\n{recinta_testo_modello(domanda)}", ruolo="esecutore")
 
                 compito_cons = Compito(funzione="consigliare", fuori=True)
-                quote_map = {b_id: forgia.variabile(nome_variabile(b_id)) for b_id in configurazione.botteghe}
+                quote_map = {v: forgia.variabile(v) for v in variabili_della_quota(configurazione)}
                 scelta_cons = scegli(
                     compito=compito_cons,
                     configurazione=_solo_runner(configurazione, candidato.runner),
@@ -1396,7 +1397,7 @@ def _giro(
                     rinnovo_cons = lancio_cons.rinnovo or (adesso + timedelta(hours=1))
                     if rinnovo_cons.tzinfo is None:
                         rinnovo_cons = rinnovo_cons.replace(tzinfo=adesso.tzinfo or timezone.utc)
-                    forgia.imposta_variabile(nome_variabile(cand_cons.bottega), valore_esaurita(rinnovo_cons))
+                    forgia.imposta_variabile(variabile_della_quota(cand_cons), valore_esaurita(rinnovo_cons))
                     d_nota["motivo"] = "quota"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
@@ -1438,7 +1439,7 @@ def _giro(
             rinnovo = lancio.rinnovo or (adesso + timedelta(hours=1))
             if rinnovo.tzinfo is None:
                 rinnovo = rinnovo.replace(tzinfo=adesso.tzinfo or timezone.utc)
-            var_quota = nome_variabile(bottega_cfg.id)
+            var_quota = variabile_della_quota(candidato)
             forgia.imposta_variabile(var_quota, valore_esaurita(rinnovo))
 
             cur_head = _esegui(
@@ -1740,7 +1741,7 @@ def _giro(
 
         # B3-R17: Rilettura del consigliere
         compito_cons = Compito(funzione="consigliare", fuori=True)
-        quote_map = {b_id: forgia.variabile(nome_variabile(b_id)) for b_id in configurazione.botteghe}
+        quote_map = {v: forgia.variabile(v) for v in variabili_della_quota(configurazione)}
         scelta_cons = scegli(
             compito=compito_cons,
             configurazione=_solo_runner(configurazione, candidato.runner),

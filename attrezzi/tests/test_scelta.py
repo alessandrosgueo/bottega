@@ -802,3 +802,312 @@ def test_cli_scegli_stampa_avvisi_quota_su_stderr_uno_per_bottega(
     assert "quota corrotta" in catturato.err
     assert "; avviso: " in catturato.out
     assert "quota corrotta" in catturato.out
+
+
+# --- B12.2: secchi di quota e candidati di riserva ---
+
+
+def _cfg_con_secchi(
+    secchi: tuple[tuple[str, str], ...] = (("a", "normale"), ("b", "normale")),
+    riserva_b: bool = False,
+) -> Configurazione:
+    progetto = Progetto(("admin",), None, "UTC", None, ())
+    botteghe = {"google": Bottega("google", "", ("porta",), quote=secchi)}
+    candidati = {
+        "c-a": Candidato("c-a", "Cand A", "google", "porta", "mod-a", ("eseguire",), "linux-x64", quota="a"),
+        "c-b": Candidato(
+            "c-b",
+            "Cand B",
+            "google",
+            "porta",
+            "mod-b",
+            ("eseguire",),
+            "linux-x64",
+            quota="b",
+            riserva=riserva_b,
+        ),
+    }
+    return Configurazione(1, progetto, botteghe, candidati)
+
+
+def test_secchio_esaurito_ferma_solo_i_suoi() -> None:
+    cfg = _cfg_con_secchi()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    # Il secchio "a" è esaurito, e la vecchia chiave della bottega intera non blocca un candidato a secchi
+    quote = {
+        nome_variabile("google", "a"): valore_esaurita(adesso + timedelta(hours=1)),
+        "google": valore_esaurita(adesso + timedelta(hours=1)),
+    }
+    compito = Compito(funzione="eseguire", fuori=True)
+    for seme in range(20):
+        scelta = scegli(compito, cfg, {}, quote, adesso, random.Random(seme))
+        assert scelta.candidato == "c-b"
+        assert scelta.aspetta is False
+
+
+def test_peso_del_secchio_nel_costo() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {
+        "google": Bottega("google", "", ("porta",), quote=(("a", "abbondante"), ("b", "scarsa"))),
+    }
+    candidati = {
+        "c-abbondante": Candidato("c-abbondante", "A", "google", "porta", "m", ("eseguire",), None, quota="a"),
+        "c-scarsa": Candidato("c-scarsa", "S", "google", "porta", "m", ("eseguire",), None, quota="b"),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=False)
+
+    vittorie_abbondante = 0
+    semi_totali = 500
+    for s in range(semi_totali):
+        scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(s))
+        if scelta.candidato == "c-abbondante":
+            vittorie_abbondante += 1
+
+    percentuale = vittorie_abbondante / semi_totali
+    assert percentuale > 0.70, f"Percentuale abbondante {percentuale} <= 70%"
+
+
+def test_vecchia_variabile_blocca_ancora() -> None:
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    quote = {nome_variabile("secondaria"): valore_esaurita(adesso + timedelta(hours=1))}
+    compito = Compito(funzione="eseguire", fuori=True)
+
+    scelta = scegli(compito, cfg, {}, quote, adesso, random.Random(1))
+    assert scelta.candidato is None
+    assert scelta.aspetta is True
+    assert "aspetta" in scelta.perche
+
+
+def test_riserva_mai_scelta_coi_normali() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {
+        "google": Bottega("google", "", ("porta",), quote=(("a", "scarsa"), ("b", "abbondante"))),
+    }
+    candidati = {
+        "normale": Candidato("normale", "Normale", "google", "porta", "m1", ("eseguire",), "r", quota="a"),
+        "riserva": Candidato(
+            "riserva",
+            "Riserva",
+            "google",
+            "porta",
+            "m2",
+            ("eseguire",),
+            "r",
+            quota="b",
+            riserva=True,
+        ),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=True)
+    # Anche con storia ottima e quota abbondante, la riserva non viene mai scelta coi normali
+    risultati = {("riserva", "*"): Risultati(uniti=20, corretti=0, rifiutati=0)}
+
+    for seme in range(100):
+        scelta = scegli(compito, cfg, risultati, {}, adesso, random.Random(seme))
+        assert scelta.candidato == "normale"
+        assert scelta.aspetta is False
+        assert not scelta.perche.startswith("di riserva: ")
+
+
+def test_riserva_scelta_senza_normali() -> None:
+    cfg = _cfg_con_secchi(riserva_b=True)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    quote = {nome_variabile("google", "a"): valore_esaurita(adesso + timedelta(hours=1))}
+    compito = Compito(funzione="eseguire", fuori=True)
+
+    scelta = scegli(compito, cfg, {}, quote, adesso, random.Random(1))
+    assert scelta.candidato == "c-b"
+    assert scelta.aspetta is False
+    assert scelta.perche.startswith("di riserva: ")
+
+
+def test_tutti_di_riserva() -> None:
+    progetto = Progetto(("a",), None, "UTC", None, ())
+    botteghe = {"b": Bottega("b", "normale", ("porta",))}
+    candidati = {
+        "r1": Candidato("r1", "R1", "b", "porta", "m1", ("eseguire",), "r", riserva=True),
+        "r2": Candidato("r2", "R2", "b", "porta", "m2", ("eseguire",), "r", riserva=True),
+    }
+    cfg = Configurazione(1, progetto, botteghe, candidati)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    compito = Compito(funzione="eseguire", fuori=True)
+
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato in ("r1", "r2")
+    assert scelta.aspetta is False
+    assert scelta.perche.startswith("di riserva: ")
+
+
+def test_esegue_sceglie_la_riserva() -> None:
+    cfg = _cfg_con_secchi(riserva_b=True)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+
+    scelta_attr = scegli(
+        Compito(funzione="eseguire", fuori=True, esegue="c-b"),
+        cfg,
+        {},
+        {},
+        adesso,
+        random.Random(1),
+    )
+    assert scelta_attr.candidato == "c-b"
+    assert scelta_attr.aspetta is False
+
+    scelta_et = scegli(
+        Compito(funzione="eseguire", fuori=True, etichette=frozenset({"esegue: Cand B"})),
+        cfg,
+        {},
+        {},
+        adesso,
+        random.Random(1),
+    )
+    assert scelta_et.candidato == "c-b"
+    assert scelta_et.aspetta is False
+
+
+def test_precedente_di_riserva_torna_ai_normali() -> None:
+    cfg = _cfg_con_secchi(riserva_b=True)
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    # Il precedente è di riserva ("c-b"), ma "c-a" (normale) ha di nuovo quota
+    compito = Compito(funzione="eseguire", fuori=True, precedente="c-b", giri_in_attesa=0)
+
+    scelta = scegli(compito, cfg, {}, {}, adesso, random.Random(1))
+    assert scelta.candidato == "c-a"
+    assert scelta.aspetta is False
+    assert not scelta.perche.startswith("di riserva: ")
+
+    # Se invece il normale non ha ancora quota nemmeno dopo un'attesa, la riserva resta eleggibile
+    quote_a_esaurita = {nome_variabile("google", "a"): valore_esaurita(adesso + timedelta(hours=1))}
+    compito_atteso = Compito(funzione="eseguire", fuori=True, precedente="c-b", giri_in_attesa=1)
+    scelta_atteso = scegli(compito_atteso, cfg, {}, quote_a_esaurita, adesso, random.Random(1))
+    assert scelta_atteso.candidato == "c-b"
+    assert scelta_atteso.aspetta is False
+    assert scelta_atteso.perche.startswith("di riserva: ")
+
+
+def test_avvisi_quote_sui_secchi_nominano_la_variabile(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bottega.__main__ import main
+
+    cfg_file = tmp_path / "bottega.toml"
+    cfg_file.write_text(
+        """versione = 1
+
+[progetto]
+fuso = "UTC"
+
+[botteghe.google]
+quote = { argon = "scarsa", gemini = "abbondante" }
+porte = ["antigravity"]
+
+[candidati.maestro]
+nome = "Maestro"
+bottega = "google"
+porta = "antigravity"
+modello = "m-argon"
+quota = "argon"
+funzioni = ["decidere"]
+
+[candidati.lavorante]
+nome = "Lavorante"
+bottega = "google"
+porta = "antigravity"
+modello = "m-gemini"
+quota = "gemini"
+funzioni = ["eseguire"]
+""",
+        encoding="utf-8",
+    )
+    f_quote = tmp_path / "quote.json"
+    f_quote.write_text(json.dumps({"BOTTEGA_QUOTA_GOOGLE__ARGON": "valore rotto"}), encoding="utf-8")
+
+    codice = main(
+        [
+            "scegli",
+            "--funzione",
+            "eseguire",
+            "--quote",
+            str(f_quote),
+            "--file",
+            str(cfg_file),
+            "--seme",
+            "1",
+        ]
+    )
+    assert codice == 0
+    catturato = capsys.readouterr()
+    assert "avviso: BOTTEGA_QUOTA_GOOGLE__ARGON:" in catturato.err
+    assert "valore rotto" in catturato.err
+    assert "; avviso: BOTTEGA_QUOTA_GOOGLE__ARGON:" in catturato.out
+    assert "valore rotto" in catturato.out
+
+
+@settings(max_examples=200)
+@given(seme=st.integers(min_value=0, max_value=10000), estrazione=st.data())
+def test_proprieta_cancello_riserva_e_secchi(seme: int, estrazione: st.DataObject) -> None:
+    adesso = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+    secchi = (("a", "abbondante"), ("b", "scarsa"))
+    botteghe = {"google": Bottega("google", "", ("porta",), quote=secchi)}
+    quote_map: dict[str, str | None] = {}
+    for s, _ in secchi:
+        var = nome_variabile("google", s)
+        if estrazione.draw(st.booleans()):
+            quote_map[var] = valore_esaurita(adesso + timedelta(hours=1))
+        else:
+            quote_map[var] = None
+
+    candidati: dict[str, Candidato] = {}
+    n_cand = estrazione.draw(st.integers(min_value=1, max_value=5))
+    for i in range(n_cand):
+        cid = f"c-{i}"
+        secchio = estrazione.draw(st.sampled_from(["a", "b"]))
+        riserva = estrazione.draw(st.booleans())
+        fn = estrazione.draw(st.sampled_from(["eseguire", "consigliare"]))
+        candidati[cid] = Candidato(
+            cid,
+            f"Cand {i}",
+            "google",
+            "porta",
+            "mod",
+            (fn, "decidere") if i == 0 else (fn,),
+            "runner-1",
+            quota=secchio,
+            riserva=riserva,
+        )
+
+    cfg = Configurazione(1, Progetto(("admin",), None, "UTC", None, ()), botteghe, candidati)
+    esegue = estrazione.draw(st.one_of(st.none(), st.sampled_from(list(candidati))))
+    precedente = estrazione.draw(st.one_of(st.none(), st.sampled_from(list(candidati))))
+    giri = estrazione.draw(st.integers(min_value=0, max_value=2))
+    compito = Compito(
+        funzione="eseguire",
+        fuori=True,
+        esegue=esegue,
+        precedente=precedente,
+        giri_in_attesa=giri,
+    )
+
+    scelta = scegli(compito, cfg, {}, quote_map, adesso, random.Random(seme))
+    if scelta.candidato is not None:
+        scelto = cfg.candidati[scelta.candidato]
+        ha_q, _ = disponibile(quote_map.get(nome_variabile(scelto.bottega, scelto.quota)), adesso)
+        assert ha_q is True
+        if esegue is None:
+            normali_con_quota = [
+                c
+                for c in cfg.candidati.values()
+                if "eseguire" in c.funzioni
+                and not c.riserva
+                and disponibile(quote_map.get(nome_variabile(c.bottega, c.quota)), adesso)[0]
+                and not (precedente == c.id and giri >= 1)
+            ]
+            # Se un normale non escluso ha quota, non si sceglie una riserva
+            if normali_con_quota:
+                assert scelto.riserva is False
+                assert not scelta.perche.startswith("di riserva: ")
+

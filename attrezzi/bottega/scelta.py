@@ -21,6 +21,9 @@ from bottega.configurazione import (
     Configurazione,
     ErroreConfigurazione,
     leggi_configurazione,
+    peso_del_candidato,
+    variabile_della_quota,
+    variabili_della_quota,
 )
 from bottega.quota import disponibile, nome_variabile
 
@@ -108,7 +111,7 @@ def _scegli_senza_avvisi(
     if nome_esegue is not None:
         return _scegli_per_etichetta_esegue(nome_esegue, compito, tutti, quote, adesso)
 
-    # 2. Precedente della tappa (B2-R3.3)
+    # 2. Precedente della tappa (B2-R3.3, B12-R6: solo se non è di riserva)
     if compito.precedente is not None:
         esito_precedente = _scegli_per_precedente(compito, configurazione, quote, adesso)
         if esito_precedente is not None:
@@ -120,7 +123,8 @@ def _scegli_senza_avvisi(
         perche = f"nessun candidato per la funzione «{compito.funzione}»" + (" fuori" if compito.fuori else "")
         return Scelta(candidato=None, aspetta=False, perche=perche)
 
-    if compito.precedente is not None and compito.giri_in_attesa >= 1:
+    cand_prec = configurazione.candidati.get(compito.precedente) if compito.precedente is not None else None
+    if cand_prec is not None and not cand_prec.riserva and compito.giri_in_attesa >= 1:
         # Dopo un giro di attesa si sceglie fra gli altri
         elegibili = [c for c in elegibili if c.id != compito.precedente]
 
@@ -133,9 +137,14 @@ def _scegli_senza_avvisi(
             perche=f"aspetta: nessun candidato con quota disponibile per la funzione «{compito.funzione}»",
         )
 
+    # B12-R6: i normali hanno sempre la precedenza sulle riserve
+    normali = [c for c in con_quota if not c.riserva]
+    da_riserva = not normali
+    candidati_scelta = normali if normali else con_quota
+
     # 4. Costo atteso con campionamento di Thompson (B2-R3.4 e B2-R3.5)
-    return _scegli_per_costo_atteso(
-        con_quota=con_quota,
+    scelta = _scegli_per_costo_atteso(
+        con_quota=candidati_scelta,
         compito=compito,
         configurazione=configurazione,
         risultati=risultati,
@@ -143,6 +152,13 @@ def _scegli_senza_avvisi(
         costo_decisore=costo_decisore,
         costi_propri=costi_propri,
     )
+    if da_riserva:
+        return Scelta(
+            candidato=scelta.candidato,
+            aspetta=scelta.aspetta,
+            perche=f"di riserva: {scelta.perche}",
+        )
+    return scelta
 
 
 def argomenti_scegli(parser: argparse.ArgumentParser) -> None:
@@ -253,14 +269,9 @@ def comando_scegli(args: argparse.Namespace) -> int:
         fuso = ZoneInfo("UTC")
     adesso = datetime.now(fuso)
 
-    # Stampa gli avvisi della quota su stderr, uno per bottega
-    for b_id in cfg.botteghe:
-        valore = quote_map.get(b_id)
-        if valore is None:
-            valore = quote_map.get(nome_variabile(b_id))
-        _, avviso = disponibile(valore, adesso)
-        if avviso is not None:
-            print(f"avviso: {b_id}: {avviso}", file=sys.stderr)
+    # Stampa gli avvisi della quota su stderr, uno per variabile
+    for avviso in _avvisi_quote(cfg, quote_map, adesso):
+        print(f"avviso: {avviso}", file=sys.stderr)
 
     caso = random.Random(args.seme)
     compito = Compito(
@@ -354,14 +365,21 @@ def _avvisi_quote(
     quote: Mapping[str, str | None],
     adesso: datetime,
 ) -> list[str]:
+    ripiego_semplice = {
+        nome_variabile(b.id): b.id
+        for b in configurazione.botteghe.values()
+        if not b.quote
+    }
     avvisi: list[str] = []
-    for b_id in configurazione.botteghe:
-        valore = quote.get(b_id)
-        if valore is None:
-            valore = quote.get(nome_variabile(b_id))
+    for var in variabili_della_quota(configurazione):
+        valore = quote.get(var)
+        if valore is None and var in ripiego_semplice:
+            valore = quote.get(ripiego_semplice[var])
         _, avviso = disponibile(valore, adesso)
-        if avviso is not None and avviso not in avvisi:
-            avvisi.append(avviso)
+        if avviso is not None:
+            messaggio = f"{var}: {avviso}"
+            if messaggio not in avvisi:
+                avvisi.append(messaggio)
     return avvisi
 
 
@@ -389,7 +407,7 @@ def _scegli_per_precedente(
 ) -> Scelta | None:
     assert compito.precedente is not None
     cand_prec = configurazione.candidati.get(compito.precedente)
-    if cand_prec is not None and _elegibile(cand_prec, compito):
+    if cand_prec is not None and not cand_prec.riserva and _elegibile(cand_prec, compito):
         ha_quota, _ = _ha_quota(cand_prec, quote, adesso)
         if ha_quota:
             return Scelta(
@@ -421,8 +439,7 @@ def _scegli_per_costo_atteso(
         a = 1.0 + u
         b = 1.0 + cr + rf
         p = max(caso.betavariate(a, b), 1e-9)
-        bottega = configurazione.botteghe[c.bottega]
-        peso_quota = PESI_QUOTA.get(bottega.quota, 1.0)
+        peso_quota = PESI_QUOTA.get(peso_del_candidato(configurazione, c), 1.0)
         c_proprio = costi_propri.get(c.id, 1.0) if costi_propri else 1.0
         numeratore = costo_decisore + peso_quota * c_proprio
         costo = numeratore / p
@@ -481,9 +498,9 @@ def _elegibile(c: Candidato, compito: Compito) -> bool:
 
 
 def _ha_quota(c: Candidato, quote: Mapping[str, str | None], adesso: datetime) -> tuple[bool, str | None]:
-    valore = quote.get(c.bottega)
-    if valore is None:
-        valore = quote.get(nome_variabile(c.bottega))
+    valore = quote.get(variabile_della_quota(c))
+    if valore is None and c.quota is None:
+        valore = quote.get(c.bottega)
     return disponibile(valore, adesso)
 
 
