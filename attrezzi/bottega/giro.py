@@ -35,7 +35,7 @@ from bottega.configurazione import (
     ErroreConfigurazione,
     leggi_configurazione,
     variabile_della_quota,
-    variabili_della_quota,
+    variabili_da_leggere,
 )
 from bottega.forgia import Commento, Forgia, ForgiaGh, Issue, _spoglia_segno
 import bottega.misure as misure
@@ -1343,7 +1343,7 @@ def _giro(
                 forgia.commenta(compito.numero, f"Consulto dell'esecutore:\n\n{recinta_testo_modello(domanda)}", ruolo="esecutore")
 
                 compito_cons = Compito(funzione="consigliare", fuori=True)
-                quote_map = {v: forgia.variabile(v) for v in variabili_della_quota(configurazione)}
+                quote_map = {v: forgia.variabile(v) for v in variabili_da_leggere(configurazione)}
                 scelta_cons = scegli(
                     compito=compito_cons,
                     configurazione=_solo_runner(configurazione, candidato.runner),
@@ -1741,7 +1741,7 @@ def _giro(
 
         # B3-R17: Rilettura del consigliere
         compito_cons = Compito(funzione="consigliare", fuori=True)
-        quote_map = {v: forgia.variabile(v) for v in variabili_della_quota(configurazione)}
+        quote_map = {v: forgia.variabile(v) for v in variabili_da_leggere(configurazione)}
         scelta_cons = scegli(
             compito=compito_cons,
             configurazione=_solo_runner(configurazione, candidato.runner),

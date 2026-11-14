@@ -109,6 +109,14 @@ def variabili_della_quota(cfg: Configurazione) -> list[str]:
     return sorted(nomi)
 
 
+def variabili_da_leggere(cfg: Configurazione) -> list[str]:
+    """I nomi delle variabili di Actions da leggere per `scegli`: quote configurate più bottega intera."""
+    nomi = set(variabili_della_quota(cfg))
+    for b in cfg.botteghe:
+        nomi.add(nome_variabile(b))
+    return sorted(nomi)
+
+
 class ErroreConfigurazione(ValueError):
     """La configurazione ha errori: il messaggio li elenca, uno per riga, come `bottega.toml: <chiave>: <motivo>`."""
 

@@ -19,6 +19,7 @@ from bottega.configurazione import (
     leggi_configurazione,
     peso_del_candidato,
     variabile_della_quota,
+    variabili_da_leggere,
     variabili_della_quota,
 )
 from bottega.pubblico import cerca
@@ -775,5 +776,18 @@ porte = ["claude-code"]
 
     cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
     assert variabile_della_quota(cfg_semplice.candidati["maestro"]) == "BOTTEGA_QUOTA_PRINCIPALE"
+
+
+def test_variabili_da_leggere(tmp_path):
+    cfg_secchi = leggi_configurazione(_scrivi(tmp_path, SECCHI_BASE))
+    assert variabili_da_leggere(cfg_secchi) == [
+        "BOTTEGA_QUOTA_GOOGLE",
+        "BOTTEGA_QUOTA_GOOGLE__ARGON",
+        "BOTTEGA_QUOTA_GOOGLE__CLAUDE",
+        "BOTTEGA_QUOTA_GOOGLE__GEMINI",
+    ]
+
+    cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert variabili_da_leggere(cfg_semplice) == ["BOTTEGA_QUOTA_PRINCIPALE"]
 
 

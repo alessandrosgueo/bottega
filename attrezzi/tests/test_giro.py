@@ -4253,3 +4253,41 @@ def test_quaderno_condiviso_fra_livelli(tmp_path: Path, monkeypatch):
         assert "Quaderno comune x (progetto)" in quaderno_letto[0]
         assert "sbagliato" not in quaderno_letto[0]
 
+
+def test_giro_legge_la_bottega_intera_per_il_consigliere(tmp_path: Path):
+    from bottega.giro import giro
+    from bottega.quota import valore_esaurita
+
+    _origin, clone = _crea_ambiente_git(tmp_path)
+    cfg = _cfg_giro_con_secchi()
+    corpo = "Brief compito 1\n\n## Fatto quando\n```bash\ntest -f fatto.txt\n```\n"
+    iss1 = Issue(numero=1, titolo="Compito Consulto Saltato", corpo=corpo)
+    adesso = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+
+    forgia = ForgiaFinta(issues=[iss1])
+    forgia.imposta_variabile("BOTTEGA_QUOTA_GOOGLE", valore_esaurita(adesso + timedelta(hours=1)))
+    board = BoardFinta(lavori=[Lavoro(numero=1, titolo="Compito Consulto Saltato", stato="pronto")])
+
+    def callback_consulto(cartella, prompt, **kwargs):
+        if kwargs.get("sola_lettura"):
+            raise AssertionError("il consigliere con bottega intera esaurita non deve essere lanciato")
+        return Lancio(esito="fatto", testo="DOMANDA PER CHI DECIDE: serve aiuto?")
+
+    porta = PortaFinta(callback=callback_consulto)
+    porta.gestisce_sola_lettura = True
+    esito = giro(
+        lavoro=1,
+        bottega="google",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "spazio",
+        prefisso=(),
+        adesso=adesso,
+        caso=random.Random(42),
+    )
+    assert esito.esito == "in_attesa"
+    assert esito.motivo == "senza consigliere con quota"
+

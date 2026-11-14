@@ -21,7 +21,7 @@ from bottega.configurazione import (
     Configurazione,
     ErroreConfigurazione,
     leggi_configurazione,
-    variabili_della_quota,
+    variabili_da_leggere,
 )
 from bottega.forgia import ErroreForgia, Forgia, ForgiaGh
 from bottega.porte import Porta, porta as porta_fabbrica
@@ -243,7 +243,7 @@ def dividi(
         compito = Compito(funzione="consigliare", fuori=False)
 
         quote_map: dict[str, str | None] = {}
-        for var_quota in variabili_della_quota(cfg):
+        for var_quota in variabili_da_leggere(cfg):
             val = forgia.variabile(var_quota) if forgia is not None else None
             if val is None:
                 val = os.environ.get(var_quota)
