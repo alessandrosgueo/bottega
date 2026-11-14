@@ -625,3 +625,21 @@ e la prova completa è verde. Il diff delle correzioni è di duecento righe.
 diff delle correzioni è piccolo: rileggerlo costa poco, rifare tutta la revisione costa molto.
 **Esito:** in quattro tappe di fila la rilettura ha trovato almeno un difetto grave introdotto dalle correzioni.
 **Fonte:** dal vivo 2026-11-09
+
+### CICLO-41. Dove va il tempo di un giro
+
+**Scenario:** i giri durano 13 minuti di mediana e una tappa di otto compiti tre ore. Le ipotesi sono tre: le prove
+sono lente, la board è lenta (ogni lettura dura secondi), il modello è lento. Il log del giro non dice niente fra
+l'inizio e la fine.
+**Domanda:** da dove si comincia?
+**Opzioni:**
+- A) si accelerano le prove: sono la cosa più pesante che il giro lancia
+- B) si misura: i tempi dei giri incrociati con le trascrizioni del modello, poi il giro stampa le sue fasi
+- C) si passa a un modello più veloce
+**Scelta:** B
+**Perché:** si misura, non si indovina. Le tre ipotesi chiedono tre lavori diversi, e accelerare il pezzo sbagliato
+non cambia niente.
+**Esito:** su 46 giri il 75% del tempo era il modello, e dentro il modello la latenza dei passi (8,9 s l'uno, 85% dei
+passi di esplorazione), non i comandi: i comandi oltre un minuto erano il 6%. La board pesava una ventina di chiamate
+a giro. Da lì: il fascicolo e i file del brief dentro il prompt, le fasi nel log.
+**Fonte:** dal vivo 2026-11-14

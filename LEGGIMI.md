@@ -50,7 +50,7 @@ fuori servono anche systemd, `sudo` (una volta) e `nftables`.
 
 ## Stato
 
-Versione 0.2.5. Costruita in quattordici tappe (B0-B13), più di mille prove. Il collaudo è stato fatto dal vivo,
+Versione 0.2.6. Costruita in quindici tappe (B0-B14), più di mille prove. Il collaudo è stato fatto dal vivo,
 adottandola in un progetto vero: sei lavori dell'esecutore fuori, più di venti compiti, sono arrivati alla PR,
 e ogni intervento a mano è diventato una correzione con la sua prova. La 0.2.1 chiude i fermi silenziosi visti dal
 vivo: ritentativi sugli errori passeggeri di GitHub, un giro di riserva ogni ora, un oracolo rosso che non chiude il
@@ -60,7 +60,10 @@ dell'adattatore della board è scritto in `docs/adattatore.md`. La 0.2.3 chiede 
 giro va nei passi del modello, non nelle prove) e dice quale compito manca del «Fatto quando». La 0.2.4 conosce le quote
 separate di un abbonamento (i secchi: un 429 ferma solo il suo), i candidati di riserva e il quaderno in comune fra
 più livelli dello stesso modello. La 0.2.5 dà una tappa intera, col piano come
-brief, a un esecutore che pianifica da sé, scelto solo a richiesta e con un tempo di lancio suo.
+brief, a un esecutore che pianifica da sé, scelto solo a richiesta e con un tempo di lancio suo. La 0.2.6 toglie i
+gesti fatti solo per misurare: `bottega correggi` chiede la correzione e scrive l'esito, il distributore scrive gli
+esiti che mancano alla chiusura del lavoro, il segno di chi decide si apre e si chiude da solo; il giro dice dove va
+il suo tempo e dà il fascicolo all'esecutore dentro il prompt, perché il tempo di un giro sta nei passi del modello.
 
 **Limiti noti:**
 - Il token del runner (`BOTTEGA_TOKEN`) è l'accesso `gh` di chi installa e vale su tutti i suoi repo. Un token a grana

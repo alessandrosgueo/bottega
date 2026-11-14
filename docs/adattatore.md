@@ -51,7 +51,7 @@ Ogni elemento delle tre liste è un oggetto JSON:
 | `nota` | testo | il campo `Nota del giro` |
 | `repo` | testo o `null` | il repo, se il Project ne tiene più d'uno |
 | `campi` | oggetto | tutti i campi con un valore, nome → testo; un numero intero senza `.0` |
-| `aperta` | booleano | l'issue è aperta (se manca vale vero) |
+| `aperta` | booleano | l'issue è aperta (se manca vale vero: allora gli esiti e i segni non si chiudono da soli) |
 
 Le chiavi in più si ignorano.
 

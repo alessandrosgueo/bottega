@@ -14,3 +14,9 @@ Flash. Un candidato per livello (`low`, `medium`, `high`, `xhigh`), tutti con qu
   brief dice quali prove può toccare.
 - Una ricognizione esatta (17 domande su 17, righe giuste) ma con righe oltre le 120 colonne: il brief dà il comando
   per controllarle (`awk 'length > 120' <file>`) (B12.0).
+- A `medium` porta a termine al primo giro un compito dettato dai Ruling su uno o due moduli, con le sue prove
+  (74-117k token, 2-4 minuti: B14.K1-K4); `high` per un compito che tocca quattro moduli o un file di duemila righe
+  (237-267k token, 5-8 minuti: B14.K5, K7). Tre compiti `medium` su file diversi, in parallelo in tre worktree, si
+  sono uniti senza rompersi (B14).
+- Non pensa al costo di ciò che chiama: in B14.K5 leggeva tre volte l'elenco della board per comando. Se una chiamata
+  è lenta nel mondo vero, il brief lo dice col numero («una lettura dell'elenco dura secondi: una sola») (B14.K5).

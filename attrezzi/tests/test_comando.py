@@ -9,7 +9,7 @@ def test_versione(capsys):
     with pytest.raises(SystemExit) as e:
         main(["--version"])
     assert e.value.code == 0
-    assert capsys.readouterr().out.strip() == "bottega 0.2.5"
+    assert capsys.readouterr().out.strip() == "bottega 0.2.6"
 
 
 def test_senza_comando_esce_2(capsys):

@@ -1,7 +1,7 @@
 {
   "name": "bottega",
   "displayName": "Bottega",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Metodo «bottega»: chi decide scrive piano e brief, chi esegue lavora, un consigliere critica.",
   "category": "Developer Tools",
   "keywords": ["skills", "workflow", "bottega"],

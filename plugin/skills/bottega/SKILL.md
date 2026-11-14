@@ -21,7 +21,9 @@ della bottega si misura su questo: chi decide, chi esegue, con quale modello, a 
   costa meno dei brief.
 - **Si misura, non si indovina.** Ogni compito lascia token, tempo, quota spesa ed esito; la scelta viva e chi decide
   scelgono sui numeri, non sull'abitudine.
-- **Ogni passo costa.** Ogni passo di un modello rilegge il contesto e spende quota: chi esegue lavora in pochi passi.
+- **Ogni passo costa.** Ogni passo di un modello rilegge il contesto e spende quota e secondi: chi esegue lavora in
+  pochi passi, e chi decide gli mette davanti ciò che dovrebbe andare a cercare. Il tempo di un giro sta nei passi,
+  non nei comandi: prima di accelerare qualcosa si guarda dove va il tempo (il giro lo stampa).
 - **Risparmiare non è tagliare.** Prove, revisioni e le quattro barriere non si saltano mai: un errore che passa costa
   più di quanto si è risparmiato.
 
@@ -140,7 +142,9 @@ Chi decide guarda il Project: i lavori toccati nelle ultime 24 ore (i resoconti 
 6. **Le issue.** Una tappa è un'issue madre; i compiti sono le sue sotto-issue, in ordine. Il brief di ogni compito è
    il corpo della sua issue (modello in `modelli/brief.md`), con la sezione **«Fatto quando»**: il comando che dice se
    è fatto. Un consigliere con quota può dividere il piano in issue; chi decide le scorre prima che partano. Le issue
-   scritte di getto, senza brief, nessun esecutore le prende: chi decide le trasforma prima in compiti.
+   scritte di getto, senza brief, nessun esecutore le prende: chi decide le trasforma prima in compiti. La sezione
+   **«File»** del brief elenca i file che chi esegue dovrà leggere per intero (quelli da cambiare, quelli da imitare):
+   fuori entrano nel prompt insieme al fascicolo, e ognuno risparmia almeno un passo.
 
 **Una tappa, un ramo, una PR.** I compiti di una tappa si fanno in ordine sullo stesso ramo, un commit per compito; il
 compito seguente parte solo dopo il precedente. I lavori sciolti (un debito, un bug) hanno ognuno il suo ramo e la sua
@@ -151,7 +155,8 @@ PR.
 - **In sessione:** un sotto-agente nel worktree della tappa, col brief dell'issue; un compito alla volta per worktree.
   Chi decide rivede il diff e committa.
 - **Fuori:** l'etichetta `bottega: fuori` sull'issue madre o sul lavoro sciolto (o la notte). Il workflow sceglie il
-  candidato, gli prepara il fascicolo (issue, piano, costituzione, il quaderno del suo modello) e una copia del ramo;
+  candidato, gli prepara il fascicolo (issue, costituzione, il quaderno del suo modello, i file che il brief nomina)
+  dentro il prompt, e una copia del ramo;
   l'esecutore lavora senza chiavi di GitHub e consegna una patch; il workflow la controlla, lancia il «Fatto quando»,
   spinge e apre o aggiorna la PR in bozza della tappa. **Un consigliere rilegge ogni compito nello stesso giro**; se
   non ha quota il compito va avanti senza rilettura e il lavoro lo segna. Chi decide rivede la PR intera a fine tappa.
