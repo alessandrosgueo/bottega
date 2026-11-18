@@ -8,8 +8,9 @@ Flash. Un candidato per livello (`low`, `medium`, `high`, `xhigh`), tutti con qu
   token, B12-RV), `medium` per documenti e correzioni piccole (86-98k, B12.3 e B12.2-C1), `high` per una ricognizione
   o un modulo nuovo (140-407k, B12.0 e B12.1), `xhigh` solo per il codice più delicato (455k, B12.2). Circa 100k token
   costano un punto della finestra di cinque ore della quota Gemini (B12).
-- Lancia le prove come attività in sottofondo e scrive «attendo l'esito»: in B12 le ha aspettate davvero, ma il brief
-  continua a chiedere le prove in primo piano (B12.1, B12.2).
+- Le prove si lanciano in primo piano, nello stesso passo, anche se durano minuti: è ciò che chiede il brief (B12.1,
+  B12.2). Non lanciarle in sottofondo per scrivere «attendo l'esito»: un'attesa così ha già fatto scadere un giro,
+  e ogni controllo a ripetizione è un passo in più.
 - Davanti a una prova che dice la regola superata non la cambia e si ferma con `DOMANDA PER CHI DECIDE:` (B12.2-C1): il
   brief dice quali prove può toccare.
 - Una ricognizione esatta (17 domande su 17, righe giuste) ma con righe oltre le 120 colonne: il brief dà il comando
