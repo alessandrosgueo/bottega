@@ -58,6 +58,40 @@ def togli_commento(riga: str) -> str:
     return riga.rstrip()
 
 
+_RE_SCALARE_A_BLOCCO = re.compile(r"(?:^|:|-)\s*[|>](?:[1-9][+-]?|[+-][1-9]?)?\s*$")
+
+
+def _colonna_della_chiave(riga: str) -> int:
+    """La colonna da cui parte il nodo della riga: dopo gli spazi e dopo ogni `- ` di sequenza."""
+    col = len(riga) - len(riga.lstrip(" "))
+    while riga[col : col + 2] == "- ":
+        col += 2
+        while col < len(riga) and riga[col] == " ":
+            col += 1
+    return col
+
+
+def senza_scalari_a_blocco(righe: list[str]) -> list[str]:
+    """Le righe con il contenuto degli scalari a blocco (`|`, `>` e varianti) svuotato; le altre restano come sono.
+
+    Il contenuto è ogni riga vuota o rientrata più della chiave che apre lo scalare. Gli indici restano gli stessi.
+    """
+    uscita: list[str] = []
+    base: int | None = None
+    for riga in righe:
+        if base is not None:
+            rientro = len(riga) - len(riga.lstrip(" "))
+            if not riga.strip() or rientro > base:
+                uscita.append("")
+                continue
+            base = None
+        uscita.append(riga)
+        senza_stringhe = re.sub(r"'[^']*'|\"[^\"]*\"", "", riga)
+        if _RE_SCALARE_A_BLOCCO.search(senza_stringhe):
+            base = _colonna_della_chiave(riga)
+    return uscita
+
+
 def _ha_ancora_o_alias(riga: str) -> bool:
     """Rileva ancore (&nome) o alias (*nome) YAML fuori dagli apici."""
     senza_stringhe = re.sub(r"'[^']*'|\"[^\"]*\"", "", riga)
@@ -433,11 +467,13 @@ def _esamina_workflow(file: str, testo: str) -> list[Rischio]:
     righe_grezze = testo.splitlines()
     righe_pulite = [togli_commento(r) for r in righe_grezze]
 
-    for riga in righe_pulite:
+    # Il testo degli scalari a blocco (`run: |` e simili) è shell o testo, non YAML: graffe e `&` lì non contano.
+    righe_yaml = senza_scalari_a_blocco(righe_pulite)
+    for riga in righe_yaml:
         if _ha_ancora_o_alias(riga):
             return [Rischio(file=file, motivo="sintassi YAML con ancore (& o *) non supportata")]
 
-    if _ha_flusso_multilinea(righe_pulite):
+    if _ha_flusso_multilinea(righe_yaml):
         return [Rischio(file=file, motivo="flusso {...} multilinea non supportato")]
 
     indice_on = None
