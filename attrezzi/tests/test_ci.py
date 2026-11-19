@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from bottega.__main__ import main
-from bottega.ci import Rischio, rischi, rischi_del_ramo
+from bottega.ci import Rischio, rischi, rischi_del_ramo, senza_scalari_a_blocco
 
 BASE_CONFIG = """versione = 1
 
@@ -603,6 +603,66 @@ jobs:
 
     assert rischi({"sicuro.yml": sicuro}) == []
 
+
+
+_BLOCCO_SHELL = """
+name: board
+on:
+  schedule:
+    - cron: "23 7-21/2 * * *"
+  workflow_dispatch:
+jobs:
+  board:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Controlla
+        run: |
+          set +e
+          esito=$?
+          {
+            echo "### Riepilogo"
+            echo "- uscita: ${esito}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          ls *.txt && echo fatto &
+          exit "$esito"
+"""
+
+
+def test_graffe_e_ancore_dentro_un_blocco_run_non_contano():
+    assert rischi({"board.yml": _BLOCCO_SHELL}) == []
+
+
+def test_varianti_degli_scalari_a_blocco():
+    for indicatore in (">", "|-", ">+", "|2", "|-2"):
+        testo = _BLOCCO_SHELL.replace("run: |", f"run: {indicatore}")
+        assert rischi({"board.yml": testo}) == [], indicatore
+
+
+def test_flusso_dopo_la_fine_del_blocco_resta_un_rischio():
+    testo = _BLOCCO_SHELL + """      - name: dopo
+        with: {
+          a: b
+        }
+"""
+    r = rischi({"board.yml": testo})
+    assert len(r) == 1
+    assert "flusso" in r[0].motivo
+
+
+def test_chiave_sorella_del_blocco_si_esamina():
+    testo = _BLOCCO_SHELL.replace(
+        '          exit "$esito"\n',
+        '          exit "$esito"\n        env: {\n          A: b\n        }\n',
+    )
+    r = rischi({"board.yml": testo})
+    assert len(r) == 1
+    assert "flusso" in r[0].motivo
+
+
+def test_senza_scalari_a_blocco_tiene_gli_indici():
+    righe = ["a: |", "  {", "", "  }", "b: {", "}"]
+    assert senza_scalari_a_blocco(righe) == ["a: |", "", "", "", "b: {", "}"]
 
 def test_rischi_del_ramo(tmp_path):
     subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
