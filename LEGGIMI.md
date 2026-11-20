@@ -50,7 +50,7 @@ fuori servono anche systemd, `sudo` (una volta) e `nftables`.
 
 ## Stato
 
-Versione 0.2.7. Costruita in quindici tappe (B0-B14), più di mille prove. Il collaudo è stato fatto dal vivo,
+Versione 0.2.8. Costruita in quindici tappe (B0-B14), più di mille prove. Il collaudo è stato fatto dal vivo,
 adottandola in un progetto vero: sei lavori dell'esecutore fuori, più di venti compiti, sono arrivati alla PR,
 e ogni intervento a mano è diventato una correzione con la sua prova. La 0.2.1 chiude i fermi silenziosi visti dal
 vivo: ritentativi sugli errori passeggeri di GitHub, un giro di riserva ogni ora, un oracolo rosso che non chiude il
@@ -65,7 +65,9 @@ gesti fatti solo per misurare: `bottega correggi` chiede la correzione e scrive 
 esiti che mancano alla chiusura del lavoro, il segno di chi decide si apre e si chiude da solo; il giro dice dove va
 il suo tempo e dà il fascicolo all'esecutore dentro il prompt, perché il tempo di un giro sta nei passi del modello. La
 0.2.7 non scambia più per YAML il testo degli scalari a blocco (`run: |` e simili): un gruppo `{ … }` della
-shell in un `run:` non ferma più i lavori fuori del progetto.
+shell in un `run:` non ferma più i lavori fuori del progetto. La 0.2.8 non perde più un compito il cui rosso veniva
+dal «Fatto quando»: se chi decide corregge il comando o il ramo, l'esecutore senza niente da aggiungere lascia il
+giro all'oracolo, che riprova e chiude il compito se è verde.
 
 **Limiti noti:**
 - Il token del runner (`BOTTEGA_TOKEN`) è l'accesso `gh` di chi installa e vale su tutti i suoi repo. Un token a grana
