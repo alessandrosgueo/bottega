@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 import argparse
+import hashlib
 import os
 import random
 import re
@@ -1052,6 +1053,58 @@ def _base_della_consegna_fatta(
     return base if res.returncode == 0 else None
 
 
+def _impronta_fatto_quando(cmd: str) -> str:
+    """L'impronta del «Fatto quando» nella nota del rosso: dice se chi decide l'ha cambiato da allora."""
+    return hashlib.sha256(cmd.encode("utf-8")).hexdigest()[:16]
+
+
+def _ripresa_dal_rosso(
+    d_nota: dict[str, str], compito: int, punta: str, impronta: str, clone_progetto: Path
+) -> tuple[str, str, str] | None:
+    """0.2.8: la consegna rossa di questo compito si riprova con l'oracolo, senza un commit nuovo dell'esecutore, se da
+    allora chi decide ha cambiato il ramo (un commit sopra) o il «Fatto quando».
+
+    La nota porta `rosso=<compito>:<base>:<consegna>:<punta provata>:<impronta>`. Vale solo per lo stesso compito,
+    con la base antenata della consegna e la consegna antenata della punta di oggi. Con la stessa punta e la stessa
+    impronta l'oracolo darebbe lo stesso rosso: `None`, e il giro conta «nessun commit» (B9-R4). Restituisce base,
+    consegna e che cosa è cambiato, da dire nel commento.
+    """
+    pezzi = d_nota.get("rosso", "").split(":")
+    if len(pezzi) != 5 or pezzi[0] != str(compito):
+        return None
+    base, consegna, provata, impronta_rossa = pezzi[1:]
+    if not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) for sha in (base, consegna, provata)) or base == consegna:
+        return None
+    cambi = []
+    if provata != punta:
+        cambi.append("il ramo")
+    if impronta_rossa != impronta:
+        cambi.append("il «Fatto quando»")
+    if not cambi:
+        return None
+    for antenato, discendente in ((base, consegna), (consegna, punta)):
+        if antenato == discendente:
+            continue
+        res = _esegui(
+            ["git", *OPZIONI_GIT_RUNNER, "merge-base", "--is-ancestor", antenato, discendente],
+            cwd=str(clone_progetto),
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            return None
+    return base, consegna, " e ".join(cambi)
+
+
+def _togli_il_rosso(d_nota: dict[str, str], board: Any, lavoro: int) -> None:
+    """0.2.8: la nota perde il rosso sulla board, prima che il giro spinga lavoro dell'esecutore o consegni il lavoro.
+
+    Prima della spinta, non dopo: un giro ucciso fra la spinta e la nota lascerebbe un rosso che al giro dopo scambia
+    quel lavoro per un cambio di chi decide, e non lo controllerebbe nessuno. Senza rosso nella nota, nessuna chiamata.
+    """
+    if d_nota.pop("rosso", None) is not None:
+        board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
+
+
 def _esito_del_rifiuto(d_nota: dict[str, str]) -> str:
     """L'esito di una consegna rifiutata: `errore` (un tentativo) per i messaggi che chiudono un'issue sotto il terzo
     tentativo, altrimenti `bloccato`."""
@@ -1369,6 +1422,7 @@ def _giro(
         d_nota.pop("tentativi", None)
         d_nota.pop("attese", None)
         d_nota.pop("quote", None)
+        d_nota.pop("rosso", None)
     d_nota["compito"] = str(compito.numero)
 
     # C5: il brief lo può cambiare il suo autore anche dopo l'etichetta: solo issue di un comandante.
@@ -1605,7 +1659,9 @@ def _giro(
             "scrivi una riga che comincia con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa (le opzioni "
             "possono seguire, fino alla fine del rapporto).\n"
             "5. Se in commenti.md l'ultimo esito dell'oracolo è ROSSO, il ramo porta già la consegna di prima: "
-            "correggi ciò che l'oracolo segnala e committa la correzione.\n"
+            "correggi ciò che l'oracolo segnala e committa la correzione. Se il codice è giusto e il rosso veniva "
+            "dal comando, che chi decide ha corretto, non committare niente e dillo nel rapporto: il giro riprova "
+            "l'oracolo.\n"
             # B11: il tempo di un giro va nei passi del modello (circa 5 s l'uno, ognuno rilegge il contesto), non
             # nelle prove (Jarvis, 2026-11-12: 373 passi in 55 minuti, 174 letture a finestre di 40 righe).
             "6. Lavora in pochi passi: ogni passo costa tempo e quota. Leggi i file interi o a blocchi grandi; cerca "
@@ -1794,6 +1850,7 @@ def _giro(
                 )
                 bundle_salv = dir_giro / "salvataggio.bundle"
                 _copia_dall_esecutore(bundle_salv_esec, bundle_salv)
+                _togli_il_rosso(d_nota, board, lavoro)
                 ok_salv, entries_salv = _verifica_e_consegna_bundle(
                     clone_progetto=clone_progetto,
                     bundle_file=bundle_salv,
@@ -1868,6 +1925,20 @@ def _giro(
             if cur_head == base_commit and ramo_remoto
             else None
         )
+        # 0.2.8: senza commit nuovi e senza una consegna da riprendere, una consegna rossa si riprova se chi decide ha
+        # cambiato da allora il ramo o il «Fatto quando». I controlli e la rilettura guardano solo la consegna
+        # dell'esecutore (`fine_consegna`), l'oracolo il ramo di oggi.
+        impronta = _impronta_fatto_quando(cmd_fatto_quando)
+        fine_consegna = "refs/bottega/consegna"
+        sha_della_consegna = base_commit
+        dal_rosso = (
+            _ripresa_dal_rosso(d_nota, compito.numero, base_commit, impronta, clone_progetto)
+            if cur_head == base_commit and ramo_remoto and base_ripresa is None
+            else None
+        )
+        if dal_rosso is not None:
+            base_ripresa, sha_della_consegna, cambiato = dal_rosso
+            fine_consegna = sha_della_consegna
         if cur_head == base_commit and base_ripresa is None:
             cron.inizia("chiusura")
             tentativi = int(d_nota.get("tentativi", 0)) + 1
@@ -1894,18 +1965,21 @@ def _giro(
             proc_ripresa = _esegui(
                 [
                     "git", *OPZIONI_GIT_RUNNER, "diff", "--raw", "-z", "-M", "--no-ext-diff", base_consegna,
-                    "refs/bottega/consegna",
+                    fine_consegna,
                 ],
                 cwd=str(clone_progetto),
                 check=True,
                 capture_output=True,
             )
             entries_diff = analizza_diff_raw(proc_ripresa.stdout)
-            forgia.commenta(
-                compito.numero,
-                f"Il compito era già consegnato sul ramo ({base_commit[:12]}): il giro riprende dall'oracolo.",
-                ruolo="esecutore",
-            )
+            if dal_rosso is not None:
+                testo_ripresa = (
+                    f"L'esecutore non ha niente da aggiungere alla consegna rossa ({sha_della_consegna[:12]}) e da "
+                    f"allora è cambiato {cambiato}: il giro riprende dall'oracolo sul ramo ({base_commit[:12]})."
+                )
+            else:
+                testo_ripresa = f"Il compito era già consegnato sul ramo ({base_commit[:12]}): il giro riprende dall'oracolo."
+            forgia.commenta(compito.numero, testo_ripresa, ruolo="esecutore")
         else:
             cron.inizia("consegna")
             # Genera bundle di consegna dall'esecutore (RV1)
@@ -1921,6 +1995,7 @@ def _giro(
             _copia_dall_esecutore(bundle_esec, bundle_file)
 
             # Controlli, verifica e applicazione eseguiti ESCLUSIVAMENTE dal runner col suo git
+            _togli_il_rosso(d_nota, board, lavoro)
             ok_consegna, entries_diff = _verifica_e_consegna_bundle(
                 clone_progetto=clone_progetto,
                 bundle_file=bundle_file,
@@ -1968,6 +2043,7 @@ def _giro(
                 _base_della_consegna_fatta(d_nota, compito.numero, base_commit, clone_progetto) if ramo_remoto else None
             ) or base_commit
             d_nota["consegnato"] = f"{compito.numero}:{base_segnata}:{sha_consegna}"
+            sha_della_consegna = sha_consegna
             board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
             cron.chiudi()
 
@@ -2048,7 +2124,7 @@ def _giro(
 
         # C5: diff della consegna, letto una volta (serve qui e alla rilettura del consigliere).
         diff_consegna = _esegui(
-            ["git", *OPZIONI_GIT_RUNNER, "diff", "--no-ext-diff", "--no-textconv", f"{base_consegna}..refs/bottega/consegna"],
+            ["git", *OPZIONI_GIT_RUNNER, "diff", "--no-ext-diff", "--no-textconv", f"{base_consegna}..{fine_consegna}"],
             cwd=str(clone_progetto),
             capture_output=True,
             text=True,
@@ -2058,7 +2134,7 @@ def _giro(
         patch_storia = _esegui(
             [
                 "git", *OPZIONI_GIT_RUNNER, "log", "-p", "--no-ext-diff", "--no-textconv", "--format=",
-                f"{base_consegna}..refs/bottega/consegna",
+                f"{base_consegna}..{fine_consegna}",
             ],
             cwd=str(clone_progetto),
             capture_output=True,
@@ -2071,7 +2147,7 @@ def _giro(
             proc_gl = _esegui(
                 [
                     "gitleaks", "git", "--no-banner", "--redact",
-                    f"--log-opts={base_consegna}..refs/bottega/consegna", str(clone_progetto),
+                    f"--log-opts={base_consegna}..{fine_consegna}", str(clone_progetto),
                 ],
                 cwd=str(clone_progetto),
                 capture_output=True,
@@ -2140,6 +2216,10 @@ def _giro(
             d_nota["tentativi"] = str(tentativi)
             d_nota["motivo"] = "oracolo rosso"
             d_nota.pop("consegnato", None)
+            # 0.2.8: la consegna rossa resta nella nota, con la punta provata e l'impronta del «Fatto quando»: se chi
+            # decide cambia l'uno o l'altro, il giro dopo la riprova anche senza un commit dell'esecutore.
+            punta_provata = base_commit if base_ripresa is not None else sha_della_consegna
+            d_nota["rosso"] = ":".join((str(compito.numero), base_consegna, sha_della_consegna, punta_provata, impronta))
             if tentativi >= 3:
                 board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
                 forgia.commenta(
@@ -2160,6 +2240,8 @@ def _giro(
             forgia.chiudi_issue(compito.numero)
 
         if ultima_sotto_issue:
+            # 0.2.8: un rosso vecchio non resta nella nota di un lavoro consegnato (un rilancio lo riprenderebbe).
+            _togli_il_rosso(d_nota, board, lavoro)
             board.consegna(lavoro, pr=pr_num)
         else:
             # RV8: precedente è l'id del candidato; azzeramento tentativi e attese
@@ -2169,6 +2251,7 @@ def _giro(
             d_nota.pop("attese", None)
             d_nota.pop("quote", None)
             d_nota.pop("consegnato", None)
+            d_nota.pop("rosso", None)
             board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
 
         _rilancia_distributore(forgia)
