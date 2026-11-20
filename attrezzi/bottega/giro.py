@@ -1095,6 +1095,16 @@ def _ripresa_dal_rosso(
     return base, consegna, " e ".join(cambi)
 
 
+def _togli_il_rosso(d_nota: dict[str, str], board: Any, lavoro: int) -> None:
+    """0.2.8: la nota perde il rosso sulla board, prima che il giro spinga lavoro dell'esecutore o consegni il lavoro.
+
+    Prima della spinta, non dopo: un giro ucciso fra la spinta e la nota lascerebbe un rosso che al giro dopo scambia
+    quel lavoro per un cambio di chi decide, e non lo controllerebbe nessuno. Senza rosso nella nota, nessuna chiamata.
+    """
+    if d_nota.pop("rosso", None) is not None:
+        board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
+
+
 def _esito_del_rifiuto(d_nota: dict[str, str]) -> str:
     """L'esito di una consegna rifiutata: `errore` (un tentativo) per i messaggi che chiudono un'issue sotto il terzo
     tentativo, altrimenti `bloccato`."""
@@ -1412,6 +1422,7 @@ def _giro(
         d_nota.pop("tentativi", None)
         d_nota.pop("attese", None)
         d_nota.pop("quote", None)
+        d_nota.pop("rosso", None)
     d_nota["compito"] = str(compito.numero)
 
     # C5: il brief lo può cambiare il suo autore anche dopo l'etichetta: solo issue di un comandante.
@@ -1839,6 +1850,7 @@ def _giro(
                 )
                 bundle_salv = dir_giro / "salvataggio.bundle"
                 _copia_dall_esecutore(bundle_salv_esec, bundle_salv)
+                _togli_il_rosso(d_nota, board, lavoro)
                 ok_salv, entries_salv = _verifica_e_consegna_bundle(
                     clone_progetto=clone_progetto,
                     bundle_file=bundle_salv,
@@ -1983,6 +1995,7 @@ def _giro(
             _copia_dall_esecutore(bundle_esec, bundle_file)
 
             # Controlli, verifica e applicazione eseguiti ESCLUSIVAMENTE dal runner col suo git
+            _togli_il_rosso(d_nota, board, lavoro)
             ok_consegna, entries_diff = _verifica_e_consegna_bundle(
                 clone_progetto=clone_progetto,
                 bundle_file=bundle_file,
@@ -2227,6 +2240,8 @@ def _giro(
             forgia.chiudi_issue(compito.numero)
 
         if ultima_sotto_issue:
+            # 0.2.8: un rosso vecchio non resta nella nota di un lavoro consegnato (un rilancio lo riprenderebbe).
+            _togli_il_rosso(d_nota, board, lavoro)
             board.consegna(lavoro, pr=pr_num)
         else:
             # RV8: precedente è l'id del candidato; azzeramento tentativi e attese
