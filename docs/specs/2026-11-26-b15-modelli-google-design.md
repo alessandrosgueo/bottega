@@ -18,9 +18,16 @@ quattro piani scritti da agenti Opus sono costati circa 2 milioni di token di qu
 
 ## 2. Obiettivi, non obiettivi, anti-obiettivi
 
+**La visione resta la stessa, per ogni bottega** (il signore, 26/11: «la visione è sempre la stessa ottenere il
+massimo spendendo il minimo. e vale per tutto anche per gemini»). Anche dentro Gemini ogni compito va al modello e al
+livello più economici che lo portano a termine bene: Hydrogen prima di Neon, Neon solo dove la sua qualità serve
+(piani, critiche, revisioni). «Usare la quota Gemini» vuol dire non lasciarla scadere inutilizzata mentre ci sono
+lavori utili pronti, mai consumarla per consumarla.
+
 **Obiettivi**
 - La quota Claude, scarsa, si spende solo dove serve Opus: domande al signore, decisioni, firme, revisioni delicate.
-- La quota Gemini, abbondante, si usa fino in fondo: ciò che non si spende entro il rinnovo settimanale è perso.
+- La quota Gemini, abbondante, non scade inutilizzata se ci sono lavori utili pronti: ciò che non si spende entro il
+  rinnovo settimanale è perso, ma ogni token speso deve portare risultato.
 - La qualità di ciò che entra nel ramo principale non scende: lo dicono le misure, non le impressioni.
 
 **Non obiettivi**
@@ -85,7 +92,8 @@ oltre una soglia, la bottega pesca da sola dalla board un lavoro pronto, in ques
 3. documenti confrontati col codice (guide che dicono una cosa che il codice non fa più).
 
 Si ferma quando la quota a cinque ore scende sotto una riserva per i lavori urgenti. Non prende mai lavori che
-aspettano il signore, design, o lavori nel delicato.
+aspettano il signore, design, o lavori nel delicato. Non crea lavori per consumare quota: se non ci sono lavori utili
+pronti, la quota resta lì. Ogni riempitivo va al candidato più economico della scala, come ogni altro compito.
 
 ### 5.4 L'unione per categorie
 
