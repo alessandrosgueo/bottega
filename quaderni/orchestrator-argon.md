@@ -1,5 +1,8 @@
 # Orchestrator (Argon)
 
+**Uscito:** Antigravity toglie Argon il 2026-11-30; l'Orchestrator con Argon non risponde più dal 2026-11-26.
+Resta come storia delle misure.
+
 Modalità di Antigravity (`agy -p … --model gemini-pro-orchestrator-g1-pro`): Gemini 4 Argon pianifica, ripianifica e
 controlla, Gemini 4 Hydrogen esegue, in un solo agente e con un livello fisso. Si usa per le tappe intere dal piano
 (candidato `su_richiesta = true`, `tempo` lungo) dalla tappa B13 (2026-11-14).

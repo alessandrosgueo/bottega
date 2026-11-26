@@ -59,10 +59,11 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
   motivo nel campo `error`.
 - Quote: `/usage` (alias `/quota`) mostra le quote per gruppo di modelli, con limite settimanale e limite di cinque
   ore. Va anche senza mani (`agy -p /quota`, `agy -p /credits`) e non spende quota.
-- I gruppi sono separati: alla versione 1.5.8 `/quota` ne stampa tre, ognuno coi suoi limiti, e un gruppo esaurito
-  non ferma gli altri (visto il 2026-11-12). In configurazione è **una sola bottega** con un secchio per gruppo
+- I gruppi sono separati: alla versione 1.5.8 `/quota` ne stampava tre, alla 1.5.17 (2026-11-26) due, uno per
+  tutti i modelli di Google e uno per gli altri fornitori, ognuno coi suoi limiti; un gruppo esaurito non ferma gli
+  altri (visto il 2026-11-12). In configurazione è **una sola bottega** con un secchio per gruppo
   (`quote = { <gruppo> = "<peso>", … }`), e ogni candidato indica il secchio del suo gruppo (`quota = "<gruppo>"`): un
-  429 ferma solo i candidati di quel secchio.
+  429 ferma solo i candidati di quel secchio. Un secchio che non ha più il suo gruppo si toglie dalla configurazione.
 - Crediti: l'impostazione «Use AI Credits» li usa quando le quote del piano sono esaurite.
 
 ## Versione e accesso
