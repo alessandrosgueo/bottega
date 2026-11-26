@@ -686,7 +686,7 @@ def _categorie(dati: dict, errori: list[str]) -> dict[str, tuple[str, ...]]:
                 _errore(errori, voce_completa, f"«{modello}» contiene caratteri non ammessi (solo [A-Za-z0-9._/*?-])")
             elif ".." in modello.split("/"):
                 _errore(errori, voce_completa, f"«{modello}» non può contenere «..»")
-            elif modello in ("**", "**/*"):
+            elif not set(modello) - {"*", "/", "."}:
                 _errore(errori, voce_completa, f"modello troppo largo: «{modello}»")
             elif modello in viste:
                 _errore(errori, voce_completa, f"«{modello}» ripetuto")

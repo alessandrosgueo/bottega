@@ -663,28 +663,49 @@ def _distribuisci_riempitivi(
             continue
 
         lav_riemp, fascia = scelto
+        nuovi = dict(nota(lav_riemp.nota))
         cand_id: str | None = None
         gradino_riemp: int | None = None
         perche_cand = ""
 
         if configurazione.progetto.scala:
+            gradino_raw = nuovi.get("gradino", "0")
+            try:
+                indice = int(gradino_raw)
+            except ValueError:
+                indice = 0
+            if indice < 0:
+                indice = 0
             esito_pg = prossimo_gradino(
                 configurazione.progetto.scala,
-                0,
+                indice,
                 configurazione,
                 variabili,
                 adesso_fuso,
                 fuori=True,
             )
+            if esito_pg.esaurita:
+                nuovi["motivo"] = esito_pg.perche
+                board.stato(lav_riemp.numero, "bloccato", nota=scrivi_nota(nuovi))
+                forgia.commenta(lav_riemp.numero, esito_pg.perche, "distributore")
+                riga = f"lavoro {lav_riemp.numero}: scala esaurita, a chi decide"
+                righe.append(riga)
+                print(riga)
+                continue
             if (
-                esito_pg.candidato is not None
-                and configurazione.candidati[esito_pg.candidato].bottega == b_id
+                esito_pg.aspetta
+                or esito_pg.candidato is None
+                or configurazione.candidati[esito_pg.candidato].bottega != b_id
             ):
-                cand_id = esito_pg.candidato
-                gradino_riemp = esito_pg.gradino
-                perche_cand = esito_pg.perche
-
-        if cand_id is None:
+                if esito_pg.aspetta:
+                    riga = f"lavoro {lav_riemp.numero}: in attesa ({esito_pg.perche})"
+                    righe.append(riga)
+                    print(riga)
+                continue
+            cand_id = esito_pg.candidato
+            gradino_riemp = esito_pg.gradino
+            perche_cand = esito_pg.perche
+        else:
             cand_bottega = {k: c for k, c in configurazione.candidati.items() if c.bottega == b_id}
             cfg_b = replace(configurazione, candidati=cand_bottega)
             scelta_b = scegli(
@@ -700,10 +721,8 @@ def _distribuisci_riempitivi(
                 continue
             cand_id = scelta_b.candidato
             perche_cand = scelta_b.perche
-            if configurazione.progetto.scala and cand_id in configurazione.progetto.scala:
-                gradino_riemp = configurazione.progetto.scala.index(cand_id)
 
-        nuovi = dict(nota(lav_riemp.nota))
+        nuovi.pop("modo", None)
         nuovi["riempitivo"] = "1"
         if gradino_riemp is not None:
             nuovi["gradino"] = str(gradino_riemp)
@@ -1014,6 +1033,7 @@ def distribuisci(
             continue
 
         nuovi = dict(valori_nota)
+        nuovi.pop("modo", None)
         if gradino_sel is not None:
             nuovi["gradino"] = str(gradino_sel)
         if _assegna_e_avvia(

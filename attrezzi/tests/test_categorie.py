@@ -269,3 +269,39 @@ def test_comando_categoria_codici_uscita(tmp_path: Path, capsys: pytest.CaptureF
     # Verifica predefinito --file
     assert parser.parse_args([]).file == PERCORSO_PREDEFINITO
     assert isinstance(Namespace(), Namespace)
+
+
+def test_gravi_malformato_rende_il_verdetto_non_valido():
+    for testo in (
+        "VERDETTO: APPROVATO\nGRAVI: uno\nMINORI: 0\n",
+        "VERDETTO: APPROVATO\nGRAVI: -1\nMINORI: 0\n",
+        "VERDETTO: APPROVATO\nGRAVI: 0\nMINORI: due\n",
+        "VERDETTO: APPROVATO\nGRAVI:\nMINORI: 0\n",
+    ):
+        v = analizza_verdetto(testo)
+        assert v.valido is False
+        assert v.stato == "non_valido"
+        assert v.approvato is False
+
+
+def test_gravi_con_punto_finale_conta():
+    v = analizza_verdetto("VERDETTO: APPROVATO\nGRAVI: 1.\nMINORI: 0\n")
+    assert v.valido is True
+    assert v.gravi == 1
+    assert v.stato == "RILIEVI_GRAVI"
+    assert v.approvato is False
+    assert v.bloccante is True
+
+    v2 = analizza_verdetto("VERDETTO: APPROVATO\nGRAVI: 0\nMINORI: 2.\n")
+    assert v2.valido is True
+    assert v2.minori == 2
+    assert v2.approvato is True
+
+
+def test_percorso_con_due_punti_e_delicato():
+    categorie = {"documenti": ("docs/**",)}
+    for percorso in ("docs/../segreto.py", "../docs/a.md"):
+        esito = classifica_diff([percorso], categorie)
+        assert esito.delicata is True
+        assert percorso in esito.fuori_elenco
+        assert any("percorso con .." in m for m in esito.motivi)

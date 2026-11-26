@@ -1069,4 +1069,12 @@ riserva_settimana = 10
         assert errori[0].startswith(f"bottega.toml: ritmo.{chiave}: ")
 
 
+def test_glob_equivalenti_a_tutto_rifiutati(tmp_path):
+    for largo in ("**", "**/*", "./**", "**/**", "*/**", "*", "*/*", "."):
+        t_largo = BASE + f'\n[categorie]\ndocumenti = ["{largo}"]\n'
+        assert _errori(tmp_path, t_largo) == [
+            f"bottega.toml: categorie.documenti[0]: modello troppo largo: «{largo}»"
+        ]
+
+
 

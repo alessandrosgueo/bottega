@@ -11,9 +11,12 @@ import pytest
 
 from bottega.board import Lavoro
 from bottega.configurazione import Bottega, Candidato, Configurazione, Progetto, Ritmo
+from bottega.conti import conti
+from bottega.distributore import distribuisci
 from bottega.finta import BoardFinta, ForgiaFinta
 from bottega.forgia import Issue
 from bottega.giro import giro
+import bottega.misure as misure
 from bottega.porte import Controllo, Lancio
 from bottega.quota import PuntoQuota, leggi_punti, nome_variabile_punti
 from bottega.segni import nota, scrivi_nota
@@ -700,3 +703,196 @@ def test_punti_quota_salvati_in_variabile_e_misura_gradino_registrata(
     assert "misura gradino: candidato=c1; gradino=1/2;" in out
     assert "punti_settimana=2; punti_5h=5;" in out
     assert "oracolo=ok;" in out
+
+
+def test_dopo_la_bozza_il_lavoro_col_fatto_quando_parte_normale(tmp_path: Path) -> None:
+    _origin, clone = _crea_repo(tmp_path)
+    cfg = _cfg(con_pianificatore=True)
+    iss = Issue(numero=1, titolo="Feature", corpo="Descrizione senza Fatto quando.", autore="maestro")
+    forgia = ForgiaFinta([iss])
+    board = BoardFinta([
+        Lavoro(
+            numero=1,
+            titolo="Feature",
+            stato="in corso",
+            esecutore="Pianificatore",
+            nota="modo=pianifica",
+        )
+    ])
+
+    def cb(cartella, prompt, **kwargs):
+        if "Sei il pianificatore" in prompt:
+            _committa(cartella, "docs/plans/2026-11-26-issue-1-bozza.md", "# Bozza\n")
+            return Lancio(esito="fatto", testo="bozza pronta")
+        _committa(cartella, "ok.txt", "fatto\n")
+        return Lancio(esito="fatto", testo="eseguito")
+
+    porta = _PortaFinta(cb)
+    esito_bozza = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "sp_bozza",
+        prefisso=(),
+        adesso=ADESSO,
+        caso=random.Random(1),
+    )
+    assert esito_bozza.esito == "consegnato"
+    lav_dopo_bozza = board.lavoro(1)
+    assert lav_dopo_bozza is not None
+    assert "modo" not in nota(lav_dopo_bozza.nota)
+
+    # Anche con nota sporca lasciata a modo=pianifica, il distributore la ripulisce quando il lavoro ha Fatto quando.
+    forgia._issues[2] = Issue(
+        numero=2,
+        titolo="Feature 2",
+        corpo="Brief\n\n## Fatto quando\n```\ntest -f ok.txt\n```\n",
+        etichette=["bottega: fuori"],
+        autore="maestro",
+    )
+    board2 = BoardFinta([
+        Lavoro(
+            numero=2,
+            titolo="Feature 2",
+            stato="pronto",
+            etichette=["bottega: fuori"],
+            nota="modo=pianifica",
+        )
+    ])
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board2,
+        variabili={},
+        adesso=ADESSO,
+        caso=random.Random(1),
+    )
+    lav_avviato = board2.lavoro(2)
+    assert lav_avviato is not None
+    assert lav_avviato.esecutore != "Pianificatore"
+    assert "modo" not in nota(lav_avviato.nota)
+
+    esito_normale = giro(
+        lavoro=2,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board2,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "sp_normale",
+        prefisso=(),
+        adesso=ADESSO + timedelta(minutes=5),
+        caso=random.Random(1),
+    )
+    assert esito_normale.esito == "consegnato"
+    assert esito_normale.oracolo_ok is True
+
+
+def test_un_attesa_poi_ok_dello_stesso_gradino_conta_una_volta(tmp_path: Path) -> None:
+    _origin, clone = _crea_repo(tmp_path)
+    cfg = _cfg(scala=("c1", "c2"), con_consigliere=True)
+    iss = Issue(numero=1, titolo="Consulto poi ok", corpo="Brief\n\n## Fatto quando\n```\ntest -f ok.txt\n```\n")
+    forgia = ForgiaFinta([iss])
+    board = BoardFinta([Lavoro(numero=1, titolo="Consulto poi ok", stato="pronto", nota="gradino=0")])
+
+    fase = {"turno": 1}
+
+    def cb(cartella, prompt, sola_lettura=False, **kwargs):
+        if sola_lettura:
+            return Lancio(esito="fatto", testo="A CHI DECIDE\nServe scelta umana.")
+        if fase["turno"] == 1:
+            return Lancio(esito="fatto", testo="DOMANDA PER CHI DECIDE: Quale formato usare?")
+        _committa(cartella, "ok.txt", "ok\n")
+        return Lancio(esito="fatto", testo="fatto", contatori={"total_tokens": 250})
+
+    porta = _PortaFinta(cb)
+    esito1 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "sp1",
+        prefisso=(),
+        adesso=ADESSO,
+        caso=random.Random(1),
+    )
+    assert esito1.esito == "in_attesa"
+    lav1 = board.lavoro(1)
+    assert lav1 is not None
+    assert nota(lav1.nota).get("gradino") == "0"
+    assert "fallito" not in (lav1.campi.get("Misure parziali") or "")
+
+    fase["turno"] = 2
+    board.stato(1, "pronto", nota=lav1.nota)
+    esito2 = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "sp2",
+        prefisso=(),
+        adesso=ADESSO + timedelta(minutes=10),
+        caso=random.Random(1),
+    )
+    assert esito2.esito == "consegnato"
+    board.campo(1, "Esito del compito", "unito com'era")
+    lav2 = board.lavoro(1)
+    assert lav2 is not None
+
+    res = misure.risultati([lav2], cfg)[("c1", "*")]
+    c_esiti = conti([lav2])["per_candidato"]["c1"]["esiti"]
+    assert res == misure.Risultati(uniti=1, corretti=0, rifiutati=0)
+    assert c_esiti == {"unito com'era": 1, "corretto": 0, "rifiutato": 0}
+
+
+def test_bozza_con_percorso_con_spazio_rifiutata(tmp_path: Path) -> None:
+    origin, clone = _crea_repo(tmp_path)
+    cfg = _cfg(con_pianificatore=True)
+    iss = Issue(numero=1, titolo="Bozza spazio", corpo="Idea senza Fatto quando.")
+    forgia = ForgiaFinta([iss])
+    board = BoardFinta([
+        Lavoro(
+            numero=1,
+            titolo="Bozza spazio",
+            stato="in corso",
+            esecutore="Pianificatore",
+            nota="modo=pianifica",
+        )
+    ])
+
+    def cb(cartella, prompt, **kwargs):
+        _committa(cartella, " docs/plans/x.md", "# Bozza con spazio\n")
+        return Lancio(esito="fatto", testo="fatto")
+
+    porta = _PortaFinta(cb)
+    esito = giro(
+        lavoro=1,
+        bottega="principale",
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        porte={"finta": porta},
+        clone_progetto=clone,
+        spazio=tmp_path / "sp",
+        prefisso=(),
+        adesso=ADESSO,
+        caso=random.Random(1),
+    )
+    assert esito.esito == "bloccato"
+    lav = board.lavoro(1)
+    assert lav is not None
+    assert lav.stato == "bloccato"
+    assert "bozza di piano fuori da docs/plans/" in nota(lav.nota).get("motivo", "")
+    refs = subprocess.run(["git", "show-ref"], cwd=str(origin), capture_output=True, text=True, check=True).stdout
+    assert "bottega/" not in refs

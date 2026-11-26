@@ -576,7 +576,7 @@ def _scrivi_misure(
     forgia: Forgia | None = None,
     lavoro_numero: int | None = None,
     scala_attiva: bool = False,
-    esito_gradino: str = "ok",
+    esito_gradino: str | None = "ok",
 ) -> list[tuple[str, int | float | str]]:
     """Scrive le misure del compito sulla board nel finally del giro (B5-R6, B15-R10).
 
@@ -602,16 +602,17 @@ def _scrivi_misure(
             misurato_da_persa = True
             print(f"misure: errore scrittura Misurato da per #{compito_numero}: {exc}", file=sys.stderr)
     if scala_attiva:
-        voci = (
-            [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
-            if lav is not None
-            else []
-        )
-        voci.append(misure.formatta_gradino(candidato.id, esito_gradino, token_esecutore, durata_secondi))
-        try:
-            board.campo(compito_numero, "Misure parziali", ", ".join(voci))
-        except Exception as exc:
-            print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
+        if esito_gradino is not None:
+            voci = (
+                [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
+                if lav is not None
+                else []
+            )
+            voci.append(misure.formatta_gradino(candidato.id, esito_gradino, token_esecutore, durata_secondi))
+            try:
+                board.campo(compito_numero, "Misure parziali", ", ".join(voci))
+            except Exception as exc:
+                print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
         da_scrivere: tuple[tuple[str, str], ...] = (
             ("Esecutore", candidato.nome),
             ("Porta", candidato.porta),
@@ -927,8 +928,7 @@ def _controlla_diff_bozza_piano(entries_tutte: Sequence[tuple[str, str, str, str
         for p in (old_p, new_p):
             if not p:
                 continue
-            p_norm = p.strip()
-            if not (p_norm.startswith("docs/plans/") and p_norm.endswith(".md")) or ".." in Path(p_norm).parts:
+            if not (p.startswith("docs/plans/") and p.endswith(".md")) or ".." in Path(p).parts:
                 return f"bozza di piano fuori da docs/plans/: {p}"
     return None
 
@@ -1879,7 +1879,7 @@ def _giro(
         return EsitoGiro("senza_fatto_quando", motivo="manca fatto quando")
 
     indice_gradino_usato = _indice_gradino_corrente(d_nota, configurazione, candidato)
-    esito_gradino_finale = "ok"
+    esito_gradino_finale: str | None = "ok"
     esito_giro_finale = "consegnato"
     oracolo_esito_finale: bool | None = None
     verdetto_finale: Any | None = None
@@ -2157,7 +2157,7 @@ def _giro(
                 consulti_effettuati += 1
                 if consulti_effettuati > 2:
                     cron.passa_a("chiusura")
-                    esito_gradino_finale = "fallito"
+                    esito_gradino_finale = None
                     esito_giro_finale = "in_attesa"
                     d_nota["motivo"] = "troppi consulti"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
@@ -2180,7 +2180,7 @@ def _giro(
 
                 if not scelta_cons.candidato or scelta_cons.aspetta:
                     cron.passa_a("chiusura")
-                    esito_gradino_finale = "fallito"
+                    esito_gradino_finale = None
                     esito_giro_finale = "in_attesa"
                     msg = "Nessun consigliere con quota disponibile per il consulto."
                     forgia.commenta(compito.numero, msg, ruolo="avviso")
@@ -2235,7 +2235,7 @@ def _giro(
 
                 if lancio_cons.esito != "fatto":
                     cron.passa_a("chiusura")
-                    esito_gradino_finale = "fallito"
+                    esito_gradino_finale = None
                     esito_giro_finale = "in_attesa"
                     d_nota["motivo"] = lancio_cons.esito
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
@@ -2265,7 +2265,7 @@ def _giro(
                     continue
                 else:
                     cron.passa_a("chiusura")
-                    esito_gradino_finale = "fallito"
+                    esito_gradino_finale = None
                     esito_giro_finale = "in_attesa"
                     d_nota["motivo"] = "consulto a chi decide"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
@@ -2559,6 +2559,7 @@ def _giro(
             forgia.etichetta(iss_madre.numero, ETICHETTA_BOZZA_PIANO, aggiungi=True)
             _togli_il_rosso(d_nota, board, lavoro)
             d_nota.pop("consegnato", None)
+            d_nota.pop("modo", None)
             board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
             board.consegna(lavoro, pr=pr_num)
             _rilancia_distributore(forgia)
