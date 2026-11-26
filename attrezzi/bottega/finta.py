@@ -112,6 +112,12 @@ class ForgiaFinta:
             self._pr[n]["etichette"] = etichette
         self.registro.append(("etichetta", n, nome, aggiungi))
 
+    def etichette_pr(self, n: int) -> list[str]:
+        """Restituisce i nomi delle etichette presenti sulla PR `n`."""
+        if n not in self._pr:
+            raise ErroreForgia(f"PR {n} non trovata")
+        return list(self._pr[n].get("etichette", []))
+
     def pr_del_ramo(self, ramo: str) -> int | None:
         for num, d in self._pr.items():
             if d.get("ramo") == ramo:
