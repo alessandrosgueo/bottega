@@ -1270,3 +1270,220 @@ def test_precedente_su_richiesta_non_ereditato() -> None:
     assert scelta_subito.aspetta is False
 
 
+# --- B15-A3: prossimo_gradino e bottega scala ---
+
+
+def _cfg_scala() -> Configurazione:
+    progetto = Progetto(
+        comandanti=("alice",),
+        adattatore=None,
+        fuso="UTC",
+        notte=None,
+        manutenzione=(),
+        scala=("c0", "c1", "c2", "c3"),
+    )
+    botteghe = {
+        "b0": Bottega("b0", "abbondante", ("porta",)),
+        "b1": Bottega("b1", "normale", ("porta",)),
+        "b2": Bottega("b2", "scarsa", ("porta",)),
+    }
+    candidati = {
+        "c0": Candidato("c0", "Cand 0", "b0", "porta", "mod-0", ("eseguire",), "runner-1"),
+        "c1": Candidato("c1", "Cand 1", "b1", "porta", "mod-1", ("eseguire",), "runner-1", riserva=True),
+        "c2": Candidato("c2", "Cand 2", "b2", "porta", "mod-2", ("eseguire",), None, riserva=True),
+        "c3": Candidato("c3", "Cand 3", "b2", "porta", "mod-3", ("eseguire",), "runner-1", su_richiesta=True),
+    }
+    return Configurazione(1, progetto, botteghe, candidati)
+
+
+def test_prossimo_gradino_percorre_tutta_la_scala() -> None:
+    from bottega.scelta import EsitoScala, prossimo_gradino
+
+    cfg = _cfg_scala()
+    adesso = datetime(2026, 11, 26, 12, 0, 0, tzinfo=timezone.utc)
+    scala = cfg.progetto.scala
+
+    for idx, atteso in enumerate(scala):
+        esito = prossimo_gradino(scala, idx, cfg, {}, adesso, fuori=False)
+        assert isinstance(esito, EsitoScala)
+        assert esito.candidato == atteso
+        assert esito.gradino == idx
+        assert esito.totale == 4
+        assert esito.aspetta is False
+        assert esito.esaurita is False
+        assert f"{idx + 1}/4" in esito.perche
+
+    fine = prossimo_gradino(scala, 4, cfg, {}, adesso, fuori=False)
+    assert fine.candidato is None
+    assert fine.gradino is None
+    assert fine.totale == 4
+    assert fine.aspetta is False
+    assert fine.esaurita is True
+    assert "scala esaurita" in fine.perche
+
+
+def test_prossimo_gradino_senza_quota_aspetta() -> None:
+    from bottega.scelta import prossimo_gradino
+
+    cfg = _cfg_scala()
+    adesso = datetime(2026, 11, 26, 12, 0, 0, tzinfo=timezone.utc)
+    quote = {nome_variabile("b1"): valore_esaurita(adesso + timedelta(hours=1))}
+
+    esito = prossimo_gradino(cfg.progetto.scala, 1, cfg, quote, adesso, fuori=True)
+    assert esito.candidato is None
+    assert esito.gradino == 1
+    assert esito.totale == 4
+    assert esito.aspetta is True
+    assert esito.esaurita is False
+    assert "aspetta" in esito.perche
+    assert "c1" in esito.perche
+
+
+def test_prossimo_gradino_fuori_salta_candidato_senza_runner() -> None:
+    from bottega.scelta import prossimo_gradino
+
+    cfg = _cfg_scala()
+    adesso = datetime(2026, 11, 26, 12, 0, 0, tzinfo=timezone.utc)
+
+    # c2 non ha runner: fuori=True lo salta e prende c3
+    esito_fuori = prossimo_gradino(cfg.progetto.scala, 2, cfg, {}, adesso, fuori=True)
+    assert esito_fuori.candidato == "c3"
+    assert esito_fuori.gradino == 3
+    assert esito_fuori.esaurita is False
+
+    # fuori=False (sessione) sceglie c2
+    esito_sessione = prossimo_gradino(cfg.progetto.scala, 2, cfg, {}, adesso, fuori=False)
+    assert esito_sessione.candidato == "c2"
+    assert esito_sessione.gradino == 2
+
+
+def test_prossimo_gradino_scala_vuota() -> None:
+    from bottega.scelta import prossimo_gradino
+
+    cfg = _configurazione_di_base()
+    adesso = datetime(2026, 11, 26, 12, 0, 0, tzinfo=timezone.utc)
+
+    esito = prossimo_gradino((), 0, cfg, {}, adesso)
+    assert esito.candidato is None
+    assert esito.gradino is None
+    assert esito.totale == 0
+    assert esito.aspetta is False
+    assert esito.esaurita is False
+    assert "nessuna scala" in esito.perche
+
+
+def test_prossimo_gradino_indice_negativo_errore() -> None:
+    from bottega.scelta import prossimo_gradino
+
+    cfg = _cfg_scala()
+    adesso = datetime(2026, 11, 26, 12, 0, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError):
+        prossimo_gradino(cfg.progetto.scala, -1, cfg, {}, adesso)
+
+
+def test_comando_scala_codici_uscita(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import argparse
+
+    from bottega.scelta import argomenti_scala, comando_scala
+
+    def _esegui_cli(argv: list[str]) -> tuple[int, str, str]:
+        parser = argparse.ArgumentParser(prog="scala")
+        argomenti_scala(parser)
+        try:
+            args = parser.parse_args(argv)
+        except SystemExit as e:
+            catt = capsys.readouterr()
+            return int(e.code) if isinstance(e.code, int) else 2, catt.out, catt.err
+        codice = comando_scala(args)
+        catt = capsys.readouterr()
+        return codice, catt.out, catt.err
+
+    cfg_file = tmp_path / "bottega.toml"
+    cfg_file.write_text(
+        """versione = 1
+
+[progetto]
+fuso = "UTC"
+project = 1
+scala = ["c0", "c1"]
+
+[botteghe.b0]
+quota = "abbondante"
+porte = ["antigravity"]
+
+[botteghe.b1]
+quota = "normale"
+porte = ["antigravity"]
+
+[candidati.c0]
+nome = "Cand 0"
+bottega = "b0"
+porta = "antigravity"
+modello = "mod-0"
+funzioni = ["decidere", "eseguire"]
+runner = "linux-x64"
+
+[candidati.c1]
+nome = "Cand 1"
+bottega = "b1"
+porta = "antigravity"
+modello = "mod-1"
+funzioni = ["eseguire"]
+runner = "linux-x64"
+riserva = true
+""",
+        encoding="utf-8",
+    )
+
+    # 1. --gradino 0 -> esce 0 con <id>\t<modello>\t<perche>
+    codice, out, _ = _esegui_cli(["--file", str(cfg_file), "--gradino", "0", "--fuori"])
+    assert codice == 0
+    parti = out.strip().split("\t")
+    assert len(parti) == 3
+    assert parti[0] == "c0"
+    assert parti[1] == "mod-0"
+    assert "1/2" in parti[2]
+
+    # 2. --dopo c0 -> esce 0 con c1
+    codice, out, _ = _esegui_cli(["--file", str(cfg_file), "--dopo", "c0", "--fuori"])
+    assert codice == 0
+    parti = out.strip().split("\t")
+    assert parti[0] == "c1"
+    assert parti[1] == "mod-1"
+
+    # 3. --dopo c1 (ultimo gradino) -> esce 1 (esaurita)
+    codice, out, _ = _esegui_cli(["--file", str(cfg_file), "--dopo", "c1", "--fuori"])
+    assert codice == 1
+    assert out.strip().startswith("esaurita\t\t")
+
+    # 4. --json su esito pronto ed esaurito
+    codice, out, _ = _esegui_cli(["--file", str(cfg_file), "--gradino", "0", "--json"])
+    assert codice == 0
+    dati = json.loads(out)
+    assert dati["candidato"] == "c0"
+    assert dati["modello"] == "mod-0"
+    assert dati["gradino"] == 0
+    assert dati["totale"] == 2
+    assert dati["aspetta"] is False
+    assert dati["esaurita"] is False
+
+    # 5. Quota esaurita -> esce 3 (aspetta)
+    f_quote = tmp_path / "quote.json"
+    adesso = datetime.now(timezone.utc)
+    f_quote.write_text(json.dumps({nome_variabile("b1"): valore_esaurita(adesso + timedelta(hours=1))}))
+    codice, out, _ = _esegui_cli(["--file", str(cfg_file), "--gradino", "1", "--quote", str(f_quote)])
+    assert codice == 3
+    assert out.strip().startswith("aspetta\t\t")
+
+    # 6. --dopo inesistente -> esce 2
+    codice, _, err = _esegui_cli(["--file", str(cfg_file), "--dopo", "non-esiste"])
+    assert codice == 2
+    assert "errore" in err.lower()
+
+    # 7. --gradino e --dopo insieme -> esce 2
+    codice, _, _ = _esegui_cli(["--file", str(cfg_file), "--gradino", "0", "--dopo", "c0"])
+    assert codice == 2
+
+
+

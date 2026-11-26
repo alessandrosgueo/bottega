@@ -9,7 +9,7 @@ import argparse
 import json
 import random
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -62,6 +62,169 @@ class Scelta:
     candidato: str | None
     aspetta: bool
     perche: str
+
+
+@dataclass(frozen=True)
+class EsitoScala:
+    """L'esito della ricerca del prossimo gradino nella scala."""
+
+    candidato: str | None
+    gradino: int | None
+    totale: int
+    aspetta: bool
+    esaurita: bool
+    perche: str
+
+
+def prossimo_gradino(
+    scala: Sequence[str],
+    indice: int,
+    configurazione: Configurazione,
+    quote: Mapping[str, str | None],
+    adesso: datetime,
+    *,
+    fuori: bool = True,
+) -> EsitoScala:
+    """Restituisce il prossimo gradino eleggibile della scala a partire da `indice`."""
+    if indice < 0:
+        raise ValueError(f"indice negativo non ammesso: {indice}")
+    totale = len(scala)
+    if not scala:
+        return EsitoScala(None, None, 0, False, False, "nessuna scala configurata")
+    for i in range(indice, totale):
+        c = configurazione.candidati.get(scala[i])
+        if c is None or (fuori and not c.runner):
+            continue
+        ha_quota, _ = _ha_quota(c, quote, adesso)
+        if not ha_quota:
+            return EsitoScala(
+                None,
+                i,
+                totale,
+                True,
+                False,
+                f"aspetta: gradino {i + 1}/{totale} («{c.id}») senza quota",
+            )
+        return EsitoScala(
+            c.id,
+            i,
+            totale,
+            False,
+            False,
+            f"gradino {i + 1}/{totale}: «{c.id}»",
+        )
+    return EsitoScala(
+        None,
+        None,
+        totale,
+        False,
+        True,
+        f"scala esaurita ({totale} gradini): torna a chi decide",
+    )
+
+
+def argomenti_scala(parser: argparse.ArgumentParser) -> None:
+    """Registra gli argomenti del comando `bottega scala`."""
+    parser.add_argument(
+        "--file",
+        default=PERCORSO_PREDEFINITO,
+        metavar="TOML",
+        help=f"il file di configurazione (predefinito: {PERCORSO_PREDEFINITO})",
+    )
+    gruppo = parser.add_mutually_exclusive_group()
+    gruppo.add_argument(
+        "--gradino",
+        type=int,
+        default=None,
+        metavar="N",
+        help="indice 0-based del gradino da valutare (predefinito: 0)",
+    )
+    gruppo.add_argument(
+        "--dopo",
+        default=None,
+        metavar="ID",
+        help="sceglie il gradino successivo al candidato ID",
+    )
+    parser.add_argument("--fuori", action="store_true", help="considera solo candidati con runner esterno")
+    parser.add_argument("--quote", default=None, metavar="FILE", help="file JSON con lo stato delle quote")
+    parser.add_argument("--json", action="store_true", help="stampa l'esito in formato JSON")
+
+
+def comando_scala(args: argparse.Namespace) -> int:
+    """Restituisce il prossimo gradino della scala: 0 pronto, 1 esaurita, 3 aspetta, 2 errore."""
+    if args.gradino is not None and args.dopo is not None:
+        print("errore: --gradino e --dopo sono mutuamente esclusivi", file=sys.stderr)
+        return 2
+
+    percorso_cfg = Path(args.file)
+    try:
+        cfg = leggi_configurazione(percorso_cfg)
+    except (ErroreConfigurazione, OSError) as e:
+        motivo = e.strerror or str(e) if isinstance(e, OSError) else str(e)
+        print(f"errore: {percorso_cfg}: {motivo}", file=sys.stderr)
+        return 2
+
+    quote_map: dict[str, str | None] = {}
+    if args.quote:
+        percorso_quote = Path(args.quote)
+        dati_quote, errore = _carica_quote_json(percorso_quote)
+        if errore is not None:
+            print(f"errore: {percorso_quote}: {errore}", file=sys.stderr)
+            return 2
+        assert dati_quote is not None
+        quote_map = dati_quote
+
+    scala = cfg.progetto.scala
+    if args.dopo is not None:
+        if args.dopo not in scala:
+            print(f"errore: candidato «{args.dopo}» non presente in progetto.scala", file=sys.stderr)
+            return 2
+        indice = scala.index(args.dopo) + 1
+    else:
+        indice = 0 if args.gradino is None else args.gradino
+
+    if indice < 0:
+        print(f"errore: --gradino deve essere >= 0 (ricevuto {indice})", file=sys.stderr)
+        return 2
+
+    try:
+        fuso = ZoneInfo(cfg.progetto.fuso)
+    except Exception:
+        fuso = ZoneInfo("UTC")
+    adesso = datetime.now(fuso)
+
+    for avviso in _avvisi_quote(cfg, quote_map, adesso):
+        print(f"avviso: {avviso}", file=sys.stderr)
+
+    esito = prossimo_gradino(scala, indice, cfg, quote_map, adesso, fuori=args.fuori)
+    modello = cfg.candidati[esito.candidato].modello if esito.candidato is not None else None
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "candidato": esito.candidato,
+                    "modello": modello,
+                    "gradino": esito.gradino,
+                    "totale": esito.totale,
+                    "aspetta": esito.aspetta,
+                    "esaurita": esito.esaurita,
+                    "perche": esito.perche,
+                },
+                ensure_ascii=False,
+            )
+        )
+    elif esito.candidato is not None:
+        print(f"{esito.candidato}\t{modello}\t{esito.perche}")
+    elif esito.aspetta:
+        print(f"aspetta\t\t{esito.perche}")
+    else:
+        print(f"esaurita\t\t{esito.perche}")
+
+    if esito.candidato is not None:
+        return 0
+    if esito.aspetta:
+        return 3
+    return 1
 
 
 def scegli(
