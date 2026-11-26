@@ -106,6 +106,8 @@ class Forgia(Protocol):
 
     def etichetta(self, n: int, nome: str, aggiungi: bool = True) -> None: ...
 
+    def etichette_pr(self, n: int) -> list[str]: ...
+
     def pr_del_ramo(self, ramo: str) -> int | None: ...
 
     def apri_pr(self, ramo: str, titolo: str, corpo: str) -> int: ...
@@ -269,6 +271,16 @@ class ForgiaGh:
             self._assicura_etichetta(nome)
         flag = "--add-label" if aggiungi else "--remove-label"
         self._esegui(["issue", "edit", str(n), "--repo", self.repo, flag, nome])
+
+    def etichette_pr(self, n: int) -> list[str]:
+        """Restituisce i nomi delle etichette presenti sulla PR `n`."""
+        out = self._esegui([
+            "pr", "view", str(n),
+            "--repo", self.repo,
+            "--json", "labels",
+        ])
+        d = json.loads(out)
+        return [et["name"] if isinstance(et, dict) else str(et) for et in (d.get("labels") or [])]
 
     def pr_del_ramo(self, ramo: str) -> int | None:
         out = self._esegui([

@@ -31,8 +31,63 @@ _CAMPI_NON_MISURA = frozenset({"Segno", "Misure parziali"})
 
 
 def _ha_misura(lav: Lavoro) -> bool:
-    """Vero se il lavoro possiede almeno un valore per i campi di misura del Project (esclusi Segno e Misure parziali)."""
-    return any(k not in _CAMPI_NON_MISURA and lav.campi.get(k, "").strip() != "" for k in CAMPI)
+    """Vero se il lavoro possiede almeno un valore per i campi di misura del Project o voci gradino."""
+    return any(k not in _CAMPI_NON_MISURA and lav.campi.get(k, "").strip() != "" for k in CAMPI) or bool(
+        misure.gradini(lav)
+    )
+
+
+_CAMPI_FINALI_LAVORO = (
+    "Token di chi decide",
+    "Rilievi del piano",
+    "Rilievi del brief",
+    "Rilievi dell'esecuzione",
+    "Consigli accolti",
+    "Consigli respinti",
+)
+
+
+def _voci_per_gradino(lav: Lavoro, lista_gradini: Sequence[misure.MisuraGradino]) -> list[tuple[str, Lavoro]]:
+    """Costruisce un Lavoro sintetico per ciascun candidato presente nei gradini del lavoro."""
+    ultimo_ok_idx = max((i for i, g in enumerate(lista_gradini) if g.esito == "ok"), default=None)
+    durate: dict[str, int] = defaultdict(int)
+    token: dict[str, int] = defaultdict(int)
+    giri: dict[str, int] = defaultdict(int)
+    ha_fallito: dict[str, bool] = defaultdict(bool)
+    ha_ultimo_ok: dict[str, bool] = defaultdict(bool)
+    ordine: list[str] = []
+
+    for i, g in enumerate(lista_gradini):
+        cid = g.candidato_id
+        if cid not in durate:
+            ordine.append(cid)
+        durate[cid] += g.durata
+        token[cid] += g.token
+        giri[cid] += 1
+        if g.esito == "fallito":
+            ha_fallito[cid] = True
+        if i == ultimo_ok_idx:
+            ha_ultimo_ok[cid] = True
+
+    esito_finale = lav.campi.get("Esito del compito")
+    risultato: list[tuple[str, Lavoro]] = []
+    for cid in ordine:
+        campi: dict[str, str] = {
+            "Esecutore": cid,
+            "Durata": str(durate[cid]),
+            "Token esecutore": str(token[cid]),
+            "Giri": str(giri[cid]),
+        }
+        if ha_ultimo_ok[cid]:
+            if esito_finale in OPZIONI_ESITO:
+                campi["Esito del compito"] = esito_finale
+            for k in _CAMPI_FINALI_LAVORO:
+                if k in lav.campi:
+                    campi[k] = lav.campi[k]
+        elif ha_fallito[cid]:
+            campi["Esito del compito"] = "corretto"
+        risultato.append((cid, Lavoro(numero=lav.numero, titolo=lav.titolo, esecutore=cid, campi=campi)))
+    return risultato
 
 
 def _statistiche_gruppo(lavori: Sequence[Lavoro]) -> dict[str, Any]:
@@ -111,6 +166,11 @@ def conti(lavori: Sequence[Lavoro]) -> dict[str, Any]:
 
     per_candidato: dict[str, list[Lavoro]] = defaultdict(list)
     for l in lavori_misurati:
+        lista_gradini = misure.gradini(l)
+        if lista_gradini:
+            for cid, voce in _voci_per_gradino(l, lista_gradini):
+                per_candidato[cid].append(voce)
+            continue
         if misure.PIU_ESECUTORI in [v.strip() for v in (l.campi.get("Misure parziali") or "").split(",")]:
             continue
         esec = l.campi.get("Esecutore") or l.esecutore

@@ -262,3 +262,74 @@ def test_risultati_spostano_la_scelta() -> None:
 
     percentuale_scarso = vittorie_scarso / semi
     assert percentuale_scarso < 0.15, f"Candidato scarso scelto troppo spesso: {percentuale_scarso:.1%}"
+
+
+def test_formatta_e_leggi_gradini() -> None:
+    from bottega.misure import MisuraGradino, formatta_gradino, gradini
+
+    v1 = formatta_gradino("cand-a", "fallito", 100, 60)
+    v2 = formatta_gradino("cand-b", "ok", 200, 90)
+    assert v1 == "gradino:cand-a:fallito:100:60"
+    assert v2 == "gradino:cand-b:ok:200:90"
+
+    lav = Lavoro(
+        numero=10,
+        titolo="Compito",
+        campi={"Misure parziali": f"{v1}, gradino:malformato, gradino::ok:10:5, gradino:c:boh:1:2, {v2}"},
+    )
+    assert gradini(lav) == [
+        MisuraGradino("cand-a", "fallito", 100, 60),
+        MisuraGradino("cand-b", "ok", 200, 90),
+    ]
+
+
+def test_risultati_per_gradino() -> None:
+    cfg = _configurazione_di_base()
+    lav = Lavoro(
+        numero=1,
+        titolo="Compito con scala",
+        etichette=["docs", "prove"],
+        campi={
+            "Esecutore": "cand-b",
+            "Esito del compito": "unito com'era",
+            "Misure parziali": "gradino:cand-a:fallito:100:60, gradino:cand-b:ok:200:90",
+        },
+    )
+    res = risultati([lav], cfg)
+    assert res[("cand-a", "*")] == Risultati(uniti=0, corretti=1, rifiutati=0)
+    assert res[("cand-a", "docs")] == Risultati(uniti=0, corretti=1, rifiutati=0)
+    assert res[("cand-a", "prove")] == Risultati(uniti=0, corretti=1, rifiutati=0)
+    assert res[("cand-b", "*")] == Risultati(uniti=1, corretti=0, rifiutati=0)
+    assert res[("cand-b", "docs")] == Risultati(uniti=1, corretti=0, rifiutati=0)
+    assert res[("cand-b", "prove")] == Risultati(uniti=1, corretti=0, rifiutati=0)
+
+
+def test_costi_propri_per_gradino() -> None:
+    cfg = _configurazione_di_base()
+    lav = Lavoro(
+        numero=1,
+        titolo="Compito con scala",
+        campi={
+            "Esecutore": "cand-b",
+            "Misure parziali": "gradino:cand-a:fallito:100:60, gradino:cand-b:ok:200:90",
+        },
+    )
+    costi = costi_propri([lav], cfg)
+    assert pytest.approx(costi["cand-a"], rel=1e-4) == 2 / 3
+    assert pytest.approx(costi["cand-b"], rel=1e-4) == 4 / 3
+
+
+def test_piu_esecutori_senza_gradini_resta_escluso() -> None:
+    cfg = _configurazione_di_base()
+    lav = Lavoro(
+        numero=1,
+        titolo="Compito vecchio B5",
+        campi={
+            "Esecutore": "cand-a",
+            "Esito del compito": "unito com'era",
+            "Token esecutore": "500",
+            "Misure parziali": "più esecutori",
+        },
+    )
+    assert risultati([lav], cfg) == {}
+    assert costi_propri([lav], cfg) == {}

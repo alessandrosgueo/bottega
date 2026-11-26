@@ -7,6 +7,7 @@ Solo libreria standard.
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 import math
 import sys
 
@@ -38,6 +39,48 @@ OPZIONI_ESITO: tuple[str, ...] = ("unito com'era", "corretto", "rifiutato")
 
 # La voce di `Misure parziali` di un compito eseguito da più candidati: non entra in risultati e costi.
 PIU_ESECUTORI = "più esecutori"
+
+PREFISSO_GRADINO = "gradino:"
+_ESITI_GRADINO = frozenset({"ok", "fallito", "quota"})
+
+
+@dataclass(frozen=True)
+class MisuraGradino:
+    """Misura di un singolo gradino della scala registrata in `Misure parziali`."""
+
+    candidato_id: str
+    esito: str  # "ok", "fallito", "quota"
+    token: int
+    durata: int
+
+
+def formatta_gradino(candidato_id: str, esito: str, token: int, durata: int) -> str:
+    """Formatta una voce `gradino:<id>:<esito>:<token>:<durata>` per `Misure parziali`."""
+    return f"{PREFISSO_GRADINO}{candidato_id}:{esito}:{int(token)}:{int(durata)}"
+
+
+def gradini(lavoro: Lavoro) -> list[MisuraGradino]:
+    """Estrae le voci `gradino:` valide da `Misure parziali`, ignorando quelle malformate."""
+    risultato: list[MisuraGradino] = []
+    for voce in (lavoro.campi.get("Misure parziali") or "").split(","):
+        v = voce.strip()
+        if not v.startswith(PREFISSO_GRADINO):
+            continue
+        parti = v.split(":")
+        if len(parti) != 5:
+            continue
+        _, cid, esito, tok_s, dur_s = parti
+        if not cid or esito not in _ESITI_GRADINO:
+            continue
+        try:
+            tok = int(tok_s)
+            dur = int(dur_s)
+        except ValueError:
+            continue
+        if tok < 0 or dur < 0:
+            continue
+        risultato.append(MisuraGradino(candidato_id=cid, esito=esito, token=tok, durata=dur))
+    return risultato
 
 # L'intestazione del commento che il giro scrive sul lavoro madre quando una misura non entra sulla board (B10-R1):
 # `bottega segui` la cerca fra i commenti per avvisare.
@@ -98,15 +141,46 @@ def _trova_candidato_id(esecutore: str, configurazione: Configurazione) -> str |
     return None
 
 
+def _registra_esito(
+    conteggi: dict[tuple[str, str], list[int]],
+    cid: str,
+    esito: str,
+    etichette: Sequence[str],
+) -> None:
+    if esito == "unito com'era":
+        idx = 0
+    elif esito == "corretto":
+        idx = 1
+    else:
+        idx = 2
+    conteggi[(cid, "*")][idx] += 1
+    for etichetta in set(etichette):
+        conteggi[(cid, etichetta)][idx] += 1
+
+
 def risultati(lavori: Sequence[Lavoro], configurazione: Configurazione) -> dict[tuple[str, str], Risultati]:
     """Risultati storici per (candidato_id, etichetta) e (candidato_id, '*')."""
     conteggi: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
 
     for lav in lavori:
-        if _di_piu_esecutori(lav):
-            continue
         esito = lav.campi.get("Esito del compito")
         if esito not in OPZIONI_ESITO:
+            continue
+
+        lista_gradini = gradini(lav)
+        if lista_gradini:
+            ultimo_ok_idx = max((i for i, g in enumerate(lista_gradini) if g.esito == "ok"), default=None)
+            for i, g in enumerate(lista_gradini):
+                cid = _trova_candidato_id(g.candidato_id, configurazione)
+                if cid is None:
+                    continue
+                if g.esito == "fallito":
+                    _registra_esito(conteggi, cid, "corretto", lav.etichette)
+                elif i == ultimo_ok_idx:
+                    _registra_esito(conteggi, cid, esito, lav.etichette)
+            continue
+
+        if _di_piu_esecutori(lav):
             continue
 
         esec_testo = lav.campi.get("Esecutore") or lav.esecutore
@@ -117,16 +191,7 @@ def risultati(lavori: Sequence[Lavoro], configurazione: Configurazione) -> dict[
         if cid is None:
             continue
 
-        if esito == "unito com'era":
-            idx = 0
-        elif esito == "corretto":
-            idx = 1
-        else:
-            idx = 2
-
-        conteggi[(cid, "*")][idx] += 1
-        for etichetta in set(lav.etichette):
-            conteggi[(cid, etichetta)][idx] += 1
+        _registra_esito(conteggi, cid, esito, lav.etichette)
 
     return {
         chiave: Risultati(uniti=c[0], corretti=c[1], rifiutati=c[2])
@@ -142,6 +207,18 @@ def costi_propri(lavori: Sequence[Lavoro], configurazione: Configurazione) -> di
     token_per_candidato: dict[str, list[float]] = {}
 
     for lav in lavori:
+        lista_gradini = gradini(lav)
+        if lista_gradini:
+            somma_lav: dict[str, int] = defaultdict(int)
+            for g in lista_gradini:
+                cid = _trova_candidato_id(g.candidato_id, configurazione)
+                if cid is not None and g.token > 0:
+                    somma_lav[cid] += g.token
+            for cid, tok_tot in somma_lav.items():
+                if tok_tot > 0:
+                    token_per_candidato.setdefault(cid, []).append(float(tok_tot))
+            continue
+
         if _di_piu_esecutori(lav):
             continue
         esec_testo = lav.campi.get("Esecutore") or lav.esecutore
