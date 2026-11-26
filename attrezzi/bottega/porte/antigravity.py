@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 
 from bottega.porte import Controllo, Lancio, Token, controlla_eseguibile, esegui_porta, somma_pesata
+from bottega.quota import PuntoQuota, analizza_uscita_quota
 
 
 @dataclass
@@ -24,6 +25,18 @@ class Antigravity:
     def controlla(self, prefisso: Sequence[str] = ()) -> Controllo:
         """Verifica se l'eseguibile di Antigravity risponde a --version, col prefisso dell'esecutore (RV9)."""
         return controlla_eseguibile(self.eseguibile, prefisso=prefisso)
+
+    def leggi_quota(
+        self,
+        prefisso: Sequence[str] = (),
+        tempo: int | float = 60,
+    ) -> dict[str, PuntoQuota] | None:
+        """Interroga `agy -p /quota` e restituisce i punti per gruppo, oppure None se fallisce."""
+        ret, stdout, _stderr, err_ecc = esegui_porta([self.eseguibile, "-p", "/quota"], Path("/"), tempo, prefisso)
+        if err_ecc is not None or ret != 0:
+            return None
+        punti = analizza_uscita_quota(stdout)
+        return punti if punti else None
 
     def lancia(
         self,
