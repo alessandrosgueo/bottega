@@ -12,6 +12,9 @@ notte = "01:30"                                 # facoltativo: l'ora del giro di
 manutenzione = ["03:00-04:30", "23:30-01:00"]   # facoltativo: finestre senza giri; possono passare la mezzanotte
 project = 1                                     # numero del Project GitHub; obbligatorio se un candidato ha runner
 liberi = ["<etichetta>"]                        # facoltativo: etichette dei compiti sciolti per la notte
+scala = ["lavorante", "riserva"]                # facoltativo: scala di fallback sui fallimenti di esecuzione
+aree_non_delicate = ["docs", "prove", "debito"] # facoltativo: etichette ammesse come riempitivi sulla quota
+bozze_piano = 3                                 # facoltativo (0-10, di serie 3): tetto bozze di piano notturne
 # costituzione = "docs/costituzione.md"         # facoltativo: dove sta la costituzione del progetto
 
 # Una bottega è un abbonamento con la sua quota (o più secchi separati in `quote`). L'id (a-z, 0-9 e -) lo sceglie chi
@@ -30,7 +33,7 @@ nome = "Maestro <modello forte>"        # titolo e modello, unico nel file
 bottega = "principale"                  # l'id di una bottega qui sopra
 porta = "claude-code"                   # una porta di quella bottega
 modello = "<modello forte>"             # il nome del modello, come lo vuole la porta
-funzioni = ["decidere", "rivedere"]     # fra decidere, eseguire, rivedere, consigliare
+funzioni = ["decidere", "rivedere"]     # fra decidere, eseguire, rivedere, consigliare, pianificare
 
 [candidati.lavorante]
 nome = "Lavorante <modello economico>"
@@ -52,3 +55,25 @@ funzioni = ["eseguire"]
 quota = "forte"                         # il secchio della bottega secondaria
 riserva = true                          # facoltativo (di serie false): scelto solo se i normali non hanno quota
 quaderno = "<nome>"                     # facoltativo: nome del quaderno in comune (senza, usa lo slug del modello)
+
+[candidati.pianificatore]
+nome = "Pianificatore <modello>"
+bottega = "secondaria"
+porta = "pi"
+modello = "<modello>"
+funzioni = ["pianificare"]
+quota = "veloce"
+runner = "<etichetta del runner>"
+
+# Facoltativo: categorie di percorsi per riconoscere le PR non delicate nel passo finale.
+[categorie]
+documenti = ["docs/**", "*.md"]
+prove = ["tests/**"]
+quaderni = ["quaderni/**"]
+
+# Facoltativo: ritmo della quota per i riempitivi automatici.
+[ritmo]
+gruppo = "<gruppo>"                     # facoltativo: gruppo di quota da leggere
+ritardo = 15                            # facoltativo (1-99, di serie 15): punti indietro rispetto alla settimana
+riserva_5h = 30                         # facoltativo (0-100, di serie 30): riserva minima nella finestra 5 ore
+riserva_settimana = 15                  # facoltativo (0-100, di serie 15): riserva minima nella settimana
