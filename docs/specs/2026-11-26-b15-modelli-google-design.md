@@ -47,7 +47,7 @@ lavori utili pronti, mai consumarla per consumarla.
   `gemini-pro-orchestrator-g1-pro` (Argon) no. L'Orchestrator ha un livello fisso (niente `--effort`).
 - `agy -p /quota` mostra due gruppi: «Gemini Models» (settimana e cinque ore) e «Claude and GPT models».
 - Hydrogen a `xhigh` costa per compito quanto Neon e risponde lento: in sessione si usa `high`, nella bottega `medium`.
-- Il repo `alessandrosgueo/bottega` è pubblico: pubblicare una versione nuova lo chiede il signore, ogni volta.
+- Il repo della bottega è pubblico: pubblicare una versione nuova lo chiede il signore, ogni volta.
 - Il Lavorante non ha chiavi di GitHub, non unisce e non tocca il ramo principale né `.github/`.
 
 ## 4. Gli approcci
@@ -163,4 +163,4 @@ Il controllo del costruttore l'ha fatto Neon (26/11, 2 minuti, 161k token). Le r
 ## 6. Lasciato a chi costruisce
 
 Le soglie esatte del ritmo (quanto indietro, quanta riserva a cinque ore), l'ordine di dettaglio dei riempitivi, il
-formato del verdetto di Neon, l'elenco preciso dei percorsi delle categorie per Jarvis, i nomi dei comandi nuovi.
+formato del verdetto di Neon, l'elenco preciso dei percorsi delle categorie di ogni progetto, i nomi dei comandi nuovi.
