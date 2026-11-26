@@ -333,3 +333,22 @@ def test_piu_esecutori_senza_gradini_resta_escluso() -> None:
     )
     assert risultati([lav], cfg) == {}
     assert costi_propri([lav], cfg) == {}
+
+
+def test_risultati_e_conti_stesso_conto_con_gradino_ripetuto() -> None:
+    from bottega.conti import conti
+
+    cfg = _configurazione_di_base()
+    lav = Lavoro(
+        numero=1,
+        titolo="Compito stesso gradino",
+        campi={
+            "Esecutore": "cand-a",
+            "Esito del compito": "unito com'era",
+            "Misure parziali": "gradino:cand-a:fallito:100:60, gradino:cand-a:ok:200:90",
+        },
+    )
+    res = risultati([lav], cfg)[("cand-a", "*")]
+    c = conti([lav])["per_candidato"]["cand-a"]["esiti"]
+    assert res == Risultati(uniti=1, corretti=0, rifiutati=0)
+    assert c == {"unito com'era": 1, "corretto": 0, "rifiutato": 0}

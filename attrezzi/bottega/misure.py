@@ -170,14 +170,17 @@ def risultati(lavori: Sequence[Lavoro], configurazione: Configurazione) -> dict[
         lista_gradini = gradini(lav)
         if lista_gradini:
             ultimo_ok_idx = max((i for i, g in enumerate(lista_gradini) if g.esito == "ok"), default=None)
+            esiti_cand: dict[str, str] = {}
             for i, g in enumerate(lista_gradini):
                 cid = _trova_candidato_id(g.candidato_id, configurazione)
                 if cid is None:
                     continue
-                if g.esito == "fallito":
-                    _registra_esito(conteggi, cid, "corretto", lav.etichette)
-                elif i == ultimo_ok_idx:
-                    _registra_esito(conteggi, cid, esito, lav.etichette)
+                if i == ultimo_ok_idx:
+                    esiti_cand[cid] = esito
+                elif g.esito == "fallito" and cid not in esiti_cand:
+                    esiti_cand[cid] = "corretto"
+            for cid, esito_cid in esiti_cand.items():
+                _registra_esito(conteggi, cid, esito_cid, lav.etichette)
             continue
 
         if _di_piu_esecutori(lav):

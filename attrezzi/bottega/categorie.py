@@ -15,6 +15,7 @@ from bottega.giro import analizza_diff_raw
 
 ETICHETTE_DELICATE: frozenset[str] = frozenset({"bottega: prove cambiate", "bottega: segreti"})
 _SEGMENTI_PROTETTI: frozenset[str] = frozenset({".github", ".bottega", ".gitleaksignore", ".gitleaks.toml"})
+_INTERO_NON_NEGATIVO = re.compile(r"^(\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,11 @@ def _normalizza_percorso(percorso: str) -> str:
     return p.lstrip("/")
 
 
+def _ha_due_punti(percorso: str) -> bool:
+    """Vero se il percorso contiene almeno un segmento `..`."""
+    return ".." in _normalizza_percorso(percorso).split("/")
+
+
 @lru_cache(maxsize=512)
 def _compila_glob(modello: str) -> re.Pattern[str]:
     """Converte un modello glob POSIX in espressione regolare ancorata."""
@@ -90,6 +96,8 @@ def _compila_glob(modello: str) -> re.Pattern[str]:
 
 def corrisponde_glob(percorso: str, modello: str) -> bool:
     """Verifica se `percorso` corrisponde al `modello` glob POSIX."""
+    if _ha_due_punti(percorso) or _ha_due_punti(modello):
+        return False
     p = _normalizza_percorso(percorso)
     m = _normalizza_percorso(modello)
     if not p or not m:
@@ -110,6 +118,7 @@ def analizza_verdetto(testo: str) -> Verdetto:
     stato_letto: str | None = None
     gravi_letto: int | None = None
     minori_letto: int | None = None
+    malformato = False
 
     recinto_car: str | None = None
     recinto_len = 0
@@ -138,22 +147,20 @@ def analizza_verdetto(testo: str) -> Verdetto:
         if chiave == "VERDETTO" and stato_letto is None:
             norm = " ".join(valore.upper().split()).replace(" ", "_")
             stato_letto = norm if norm in ("APPROVATO", "RILIEVI_GRAVI", "SICUREZZA") else "non_valido"
-        elif chiave == "GRAVI" and gravi_letto is None and valore:
-            try:
-                val = int(valore.split()[0])
-                if val >= 0:
-                    gravi_letto = val
-            except ValueError:
-                pass
-        elif chiave == "MINORI" and minori_letto is None and valore:
-            try:
-                val = int(valore.split()[0])
-                if val >= 0:
-                    minori_letto = val
-            except ValueError:
-                pass
+        elif chiave == "GRAVI" and gravi_letto is None:
+            m_int = _INTERO_NON_NEGATIVO.match(valore)
+            if m_int is None:
+                malformato = True
+            else:
+                gravi_letto = int(m_int.group(1))
+        elif chiave == "MINORI" and minori_letto is None:
+            m_int = _INTERO_NON_NEGATIVO.match(valore)
+            if m_int is None:
+                malformato = True
+            else:
+                minori_letto = int(m_int.group(1))
 
-    if stato_letto is None or stato_letto == "non_valido":
+    if stato_letto is None or stato_letto == "non_valido" or malformato:
         return Verdetto(stato="non_valido", gravi=0, minori=0, sicurezza=False, valido=False)
 
     gravi = gravi_letto if gravi_letto is not None else 0
@@ -194,9 +201,14 @@ def classifica_diff(
         delicata = True
         motivi.append("segnalazione di sicurezza nella revisione")
 
+    con_due_punti: list[str] = []
     toccate: set[str] = set()
     fuori: list[str] = []
     for p in percorsi:
+        if _ha_due_punti(p):
+            con_due_punti.append(p)
+            fuori.append(p)
+            continue
         if percorso_protetto(p):
             fuori.append(p)
             continue
@@ -207,6 +219,10 @@ def classifica_diff(
                 trovata = True
         if not trovata:
             fuori.append(p)
+
+    if con_due_punti:
+        delicata = True
+        motivi.append(f"percorso con ..: {', '.join(sorted(set(con_due_punti)))}")
 
     fuori_ordinate = tuple(sorted(set(fuori)))
     if fuori_ordinate:

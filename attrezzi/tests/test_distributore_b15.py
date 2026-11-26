@@ -7,11 +7,18 @@ import random
 from zoneinfo import ZoneInfo
 
 from bottega.board import Lavoro
-from bottega.configurazione import Bottega, Candidato, Configurazione, Progetto, Ritmo
+from bottega.configurazione import (
+    Bottega,
+    Candidato,
+    Configurazione,
+    Progetto,
+    Ritmo,
+    variabile_della_quota,
+)
 from bottega.distributore import distribuisci
 from bottega.finta import BoardFinta, ForgiaFinta
 from bottega.forgia import Issue
-from bottega.quota import PuntoQuota, formatta_punti, nome_variabile_punti
+from bottega.quota import PuntoQuota, formatta_punti, nome_variabile_punti, valore_esaurita
 
 
 def _cfg_b15(
@@ -447,3 +454,190 @@ def test_distributore_tetto_tre_bozze_di_piano() -> None:
     assert not any(r[0] == "prendi" for r in board.registro)
     assert forgia._workflow_avviati == []
     assert any("bozze di piano al tetto (3/3)" in r for r in righe)
+
+
+def test_riempitivo_fallito_riparte_dal_suo_gradino() -> None:
+    cfg = _cfg_b15()
+    adesso = datetime(2026, 11, 26, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso))
+    variabili = _variabile_punti(adesso, settimana=75, cinque_ore=60)
+
+    board = BoardFinta([
+        Lavoro(
+            numero=12,
+            titolo="Sistema debito",
+            stato="pronto",
+            etichette=["debito"],
+            nota="riempitivo=1; gradino=1",
+        ),
+        Lavoro(
+            numero=13,
+            titolo="Altro debito",
+            stato="pronto",
+            etichette=["debito"],
+            nota="gradino=non_intero",
+        ),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=12, titolo="Sistema debito", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+        Issue(numero=13, titolo="Altro debito", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili=variabili,
+        adesso=adesso,
+        caso=random.Random(1),
+        notte=False,
+    )
+
+    lav12 = board.lavoro(12)
+    assert lav12 is not None
+    assert lav12.esecutore == "Esecutore Forte"
+    assert "gradino=1" in lav12.nota
+
+    # Con gradino non intero riparte da 0
+    board2 = BoardFinta([
+        Lavoro(
+            numero=13,
+            titolo="Altro debito",
+            stato="pronto",
+            etichette=["debito"],
+            nota="gradino=boh",
+        ),
+    ])
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board2,
+        variabili=variabili,
+        adesso=adesso,
+        caso=random.Random(1),
+        notte=False,
+    )
+    lav13 = board2.lavoro(13)
+    assert lav13 is not None
+    assert lav13.esecutore == "Esecutore Medio"
+    assert "gradino=0" in lav13.nota
+
+
+def test_riempitivo_con_scala_senza_quota_non_ripiega() -> None:
+    adesso = datetime(2026, 11, 26, 12, 0, tzinfo=ZoneInfo("Europe/Rome"))
+    progetto = Progetto(
+        comandanti=("alice",),
+        adattatore=None,
+        fuso="Europe/Rome",
+        notte="02:00",
+        manutenzione=(),
+        project=1,
+        liberi=("bug", "debito"),
+        scala=("c-med", "c-high"),
+        aree_non_delicate=("debito",),
+    )
+    botteghe = {
+        "google": Bottega(
+            id="google",
+            quota="",
+            quote=(("gemini", "abbondante"), ("altro", "abbondante")),
+            porte=("antigravity",),
+        ),
+        "altra": Bottega(id="altra", quota="abbondante", porte=("claude-code",)),
+    }
+    c_med = Candidato(
+        id="c-med",
+        nome="Esecutore Medio",
+        bottega="google",
+        porta="antigravity",
+        modello="modello-medio",
+        funzioni=("eseguire",),
+        runner="linux",
+        quota="gemini",
+    )
+    c_high = Candidato(
+        id="c-high",
+        nome="Esecutore Forte",
+        bottega="google",
+        porta="antigravity",
+        modello="modello-forte",
+        funzioni=("eseguire",),
+        runner="linux",
+        riserva=True,
+        quota="gemini",
+    )
+    c_alt = Candidato(
+        id="c-alt",
+        nome="Altro Google",
+        bottega="google",
+        porta="antigravity",
+        modello="modello-alt",
+        funzioni=("eseguire",),
+        runner="linux",
+        quota="altro",
+    )
+    cfg = Configurazione(
+        versione=1,
+        progetto=progetto,
+        botteghe=botteghe,
+        candidati={"c-med": c_med, "c-high": c_high, "c-alt": c_alt},
+        ritmo=Ritmo(gruppo="Gemini Models", ritardo=15, riserva_5h=30, riserva_settimana=15),
+    )
+    variabili = _variabile_punti(adesso, settimana=75, cinque_ore=60)
+    variabili[variabile_della_quota(c_med)] = valore_esaurita(adesso + timedelta(hours=1))
+
+    board = BoardFinta([
+        Lavoro(numero=12, titolo="Sistema debito", stato="pronto", etichette=["debito"]),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=12, titolo="Sistema debito", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili=variabili,
+        adesso=adesso,
+        caso=random.Random(1),
+        notte=False,
+    )
+
+    assert not any(r[0] == "prendi" for r in board.registro)
+    assert forgia._workflow_avviati == []
+
+
+def test_riempitivo_a_scala_esaurita_va_a_chi_decide() -> None:
+    cfg = _cfg_b15(scala=("c-med", "c-high"))
+    adesso = datetime(2026, 11, 26, 12, 0, tzinfo=ZoneInfo(cfg.progetto.fuso))
+    variabili = _variabile_punti(adesso, settimana=75, cinque_ore=60)
+
+    board = BoardFinta([
+        Lavoro(
+            numero=12,
+            titolo="Sistema debito",
+            stato="pronto",
+            etichette=["debito"],
+            nota="riempitivo=1; gradino=2",
+        ),
+    ])
+    forgia = ForgiaFinta([
+        Issue(numero=12, titolo="Sistema debito", corpo="## Fatto quando\n```\npytest\n```", autore="alice"),
+    ])
+
+    righe = distribuisci(
+        configurazione=cfg,
+        forgia=forgia,
+        board=board,
+        variabili=variabili,
+        adesso=adesso,
+        caso=random.Random(1),
+        notte=False,
+    )
+
+    assert not any(r[0] == "prendi" for r in board.registro)
+    assert forgia._workflow_avviati == []
+    lav12 = board.lavoro(12)
+    assert lav12 is not None
+    assert lav12.stato == "bloccato"
+    assert "scala esaurita" in lav12.nota
+    assert "lavoro 12: scala esaurita, a chi decide" in righe
