@@ -41,9 +41,18 @@ from bottega.configurazione import (
 from bottega.forgia import Commento, Forgia, ForgiaGh, Issue, _spoglia_segno
 import bottega.misure as misure
 from bottega.porte import Controllo, Lancio, Porta, ambiente_ripulito, esegui_con_tetto, porta as fabbrica_porte
-from bottega.quota import valore_esaurita
-from bottega.scelta import Compito, scegli
+from bottega.quota import PuntoQuota, differenza_punti, formatta_punti, nome_variabile_punti, valore_esaurita
+from bottega.ritmo import seleziona_gruppo_punti
+from bottega.scelta import Compito, Risultati, scegli
 from bottega.segni import nota, ruolo, scrivi_nota
+
+ETICHETTA_BOZZA_PIANO = "bottega: bozza di piano"
+_ISTRUZIONE_VERDETTO = (
+    "Apri la risposta con tre righe esatte:\n"
+    "VERDETTO: APPROVATO | RILIEVI_GRAVI | SICUREZZA\n"
+    "GRAVI: <intero >= 0>\n"
+    "MINORI: <intero >= 0>\n\n"
+)
 
 # RV2: Ogni git del runner ha opzioni rigorose per isolamento e quotePath disattivato
 OPZIONI_GIT_RUNNER: tuple[str, ...] = (
@@ -317,8 +326,10 @@ def _trova_candidato(
     bottega_id: str,
     configurazione: Configurazione,
     board: Board,
+    *,
+    funzione: str = "eseguire",
 ) -> Candidato:
-    """Trova il candidato esecutore per la bottega indicata."""
+    """Trova il candidato per la bottega e la funzione indicate."""
     lav = board.lavoro(lavoro_numero)
     if lav and lav.esecutore:
         for cand in configurazione.candidati.values():
@@ -326,10 +337,10 @@ def _trova_candidato(
                 return cand
 
     for cand in configurazione.candidati.values():
-        if cand.bottega == bottega_id and "eseguire" in cand.funzioni:
+        if cand.bottega == bottega_id and funzione in cand.funzioni:
             return cand
 
-    raise ValueError(f"Nessun candidato esecutore trovato per la bottega {bottega_id!r}")
+    raise ValueError(f"Nessun candidato {funzione} trovato per la bottega {bottega_id!r}")
 
 
 def _solo_runner(configurazione: Configurazione, runner: str | None) -> Configurazione:
@@ -564,8 +575,10 @@ def _scrivi_misure(
     *,
     forgia: Forgia | None = None,
     lavoro_numero: int | None = None,
+    scala_attiva: bool = False,
+    esito_gradino: str = "ok",
 ) -> list[tuple[str, int | float | str]]:
-    """Scrive le misure del compito sulla board nel finally del giro (B5-R6).
+    """Scrive le misure del compito sulla board nel finally del giro (B5-R6, B15-R10).
 
     Restituisce le misure che non sono entrate sulla board (B10-R1). Se ce ne sono e il giro conosce il lavoro madre,
     le commenta su quel lavoro; senza misure perse non legge né commenta nulla in più.
@@ -578,9 +591,8 @@ def _scrivi_misure(
     except Exception as exc:
         print(f"misure: errore verifica/aggiunta compito #{compito_numero}: {exc}", file=sys.stderr)
 
-    # Un compito già misurato per un altro candidato (cambio dopo una quota): le misure si sommano, ma il compito si
-    # segna «più esecutori» e non entra né nei risultati né nei costi di un candidato. Chi ha misurato per primo sta in
-    # `Misurato da` (l'id del candidato), che scrive solo il giro: `Esecutore` lo riscrive `prendi` prima del giro.
+    # Un compito già misurato per un altro candidato (cambio dopo una quota): senza scala si segna «più esecutori» e
+    # resta fuori dalle statistiche; con la scala attiva registra la voce `gradino:<id>:<esito>:<token>:<durata>`.
     precedente = (lav.campi.get("Misurato da") or "").strip() if lav is not None else ""
     misurato_da_persa = False
     if not precedente:
@@ -589,7 +601,23 @@ def _scrivi_misure(
         except Exception as exc:
             misurato_da_persa = True
             print(f"misure: errore scrittura Misurato da per #{compito_numero}: {exc}", file=sys.stderr)
-    if precedente and precedente.lower() != candidato.id.lower():
+    if scala_attiva:
+        voci = (
+            [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
+            if lav is not None
+            else []
+        )
+        voci.append(misure.formatta_gradino(candidato.id, esito_gradino, token_esecutore, durata_secondi))
+        try:
+            board.campo(compito_numero, "Misure parziali", ", ".join(voci))
+        except Exception as exc:
+            print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
+        da_scrivere: tuple[tuple[str, str], ...] = (
+            ("Esecutore", candidato.nome),
+            ("Porta", candidato.porta),
+            ("Dove", "fuori"),
+        )
+    elif precedente and precedente.lower() != candidato.id.lower():
         voci = [v.strip() for v in (lav.campi.get("Misure parziali") or "").split(",") if v.strip()]
         if misure.PIU_ESECUTORI not in voci:
             voci.append(misure.PIU_ESECUTORI)
@@ -598,7 +626,7 @@ def _scrivi_misure(
             except Exception as exc:
                 print(f"misure: errore scrittura Misure parziali per #{compito_numero}: {exc}", file=sys.stderr)
         # Esecutore resta com'è (lo usa `prendi` per il lavoro in corso): il compito è fuori dalle statistiche.
-        da_scrivere: tuple[tuple[str, str], ...] = ()
+        da_scrivere = ()
     else:
         da_scrivere = (("Esecutore", candidato.nome), ("Porta", candidato.porta), ("Dove", "fuori"))
 
@@ -893,6 +921,18 @@ def componi_prompt_con_fascicolo(
     return prompt_corrente
 
 
+def _controlla_diff_bozza_piano(entries_tutte: Sequence[tuple[str, str, str, str, str]]) -> str | None:
+    """Verifica che ogni percorso (old_path e new_path) di una bozza di piano stia in `docs/plans/*.md`."""
+    for _st, _sm, _dm, old_p, new_p in entries_tutte:
+        for p in (old_p, new_p):
+            if not p:
+                continue
+            p_norm = p.strip()
+            if not (p_norm.startswith("docs/plans/") and p_norm.endswith(".md")) or ".." in Path(p_norm).parts:
+                return f"bozza di piano fuori da docs/plans/: {p}"
+    return None
+
+
 def _verifica_e_consegna_bundle(
     clone_progetto: Path,
     bundle_file: Path,
@@ -903,6 +943,8 @@ def _verifica_e_consegna_bundle(
     d_nota: dict[str, str],
     board: Board,
     lavoro: int,
+    *,
+    modo_pianifica: bool = False,
 ) -> tuple[bool, list[tuple[str, str, str, str, str]]]:
     """Verifica il bundle con il git del runner, controlla l'antenato, diff raw -z -M e applica.
 
@@ -1009,6 +1051,17 @@ def _verifica_e_consegna_bundle(
         d_nota["motivo"] = "modifica a .github vietata" if "github" in categoria else categoria
         board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
         return False, []
+    if modo_pianifica:
+        viol_bozza = _controlla_diff_bozza_piano(entries_storia + entries)
+        if viol_bozza:
+            forgia.commenta(
+                compito_numero,
+                f"Consegna rifiutata: bozza di piano fuori da docs/plans/\n\n{recinta_testo_modello(viol_bozza)}",
+                ruolo="esecutore",
+            )
+            d_nota["motivo"] = "bozza di piano fuori da docs/plans/"
+            board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
+            return False, []
 
     # 6. Se vi sono modifiche, il ramo locale va su refs/bottega/consegna e si spinge. Niente checkout: l'albero del
     # runner resta quello del ramo principale, e nessun file del modello (un adattatore, un modulo) ci entra (C5).
@@ -1236,6 +1289,366 @@ class _CronometroFasi:
             pass
 
 
+def _ha_etichetta_esegue(etichette: Sequence[str]) -> bool:
+    """Vero se le etichette contengono un `esegue:` esplicito."""
+    return any(et.casefold().strip().startswith("esegue:") for et in etichette)
+
+
+def _scala_attiva(cfg: Configurazione, iss_madre: Issue) -> bool:
+    """Vero se `progetto.scala` è configurata e il lavoro non ha un `esegue:` forzato."""
+    return bool(cfg.progetto.scala) and not _ha_etichetta_esegue(iss_madre.etichette)
+
+
+def _indice_gradino_corrente(d_nota: Mapping[str, str], cfg: Configurazione, candidato: Candidato) -> int:
+    """Ricava l'indice 0-based del gradino corrente nella scala."""
+    gradino_raw = d_nota.get("gradino", "")
+    if gradino_raw.isdigit():
+        return int(gradino_raw)
+    if candidato.id in cfg.progetto.scala:
+        return cfg.progetto.scala.index(candidato.id)
+    return 0
+
+
+def _avanza_gradino_o_blocca(
+    d_nota: dict[str, str],
+    cfg: Configurazione,
+    candidato: Candidato,
+    motivo: str,
+    board: Board,
+    forgia: Forgia,
+    lavoro: int,
+    compito_numero: int,
+    *,
+    iss_madre: Issue,
+    modo_pianifica: bool = False,
+    togli_consegnato: bool = True,
+    esito_non_bloccato: str = "errore",
+    commento_non_bloccato: str | None = None,
+    commento_blocco: str | None = None,
+) -> tuple[str, str]:
+    """Applica la salita di 1 gradino (B15-R6) o i 3 tentativi classici; restituisce `(esito_giro, stato_board)`."""
+    if _scala_attiva(cfg, iss_madre) and not modo_pianifica:
+        indice_corrente = _indice_gradino_corrente(d_nota, cfg, candidato)
+        prossimo = indice_corrente + 1
+        if prossimo >= len(cfg.progetto.scala):
+            if togli_consegnato:
+                d_nota.pop("consegnato", None)
+            d_nota["motivo"] = f"scala esaurita: {motivo}"
+            board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
+            msg_blocco = commento_blocco or (
+                f"Lavoro bloccato: scala esaurita ({len(cfg.progetto.scala)} gradini) dopo «{motivo}», "
+                "serve chi decide."
+            )
+            forgia.commenta(compito_numero, msg_blocco, ruolo="esecutore")
+            _rilancia_distributore(forgia)
+            return "bloccato", "bloccato"
+        d_nota["gradino"] = str(prossimo)
+        d_nota["motivo"] = motivo
+        d_nota.pop("precedente", None)
+        d_nota.pop("conversazione", None)
+        d_nota.pop("consegnato", None)
+        board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
+        if commento_non_bloccato:
+            forgia.commenta(compito_numero, commento_non_bloccato, ruolo="esecutore")
+        _rilancia_distributore(forgia)
+        return esito_non_bloccato, "pronto"
+
+    if togli_consegnato:
+        d_nota.pop("consegnato", None)
+    tentativi = int(d_nota.get("tentativi", 0)) + 1
+    d_nota["tentativi"] = str(tentativi)
+    d_nota["motivo"] = motivo
+    stato_dest = "bloccato" if tentativi >= 3 else "pronto"
+    board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+    if stato_dest == "bloccato" and commento_blocco:
+        forgia.commenta(compito_numero, commento_blocco, ruolo="esecutore")
+    elif stato_dest == "pronto" and commento_non_bloccato:
+        forgia.commenta(compito_numero, commento_non_bloccato, ruolo="esecutore")
+    _rilancia_distributore(forgia)
+    return ("bloccato" if stato_dest == "bloccato" else esito_non_bloccato), stato_dest
+
+
+def _aggiorna_punti_quota(
+    porta_esecutore: Porta,
+    prefisso: Sequence[str],
+    punti_prima: Mapping[str, PuntoQuota] | None,
+    cfg: Configurazione,
+    bottega: str,
+    forgia: Forgia,
+    adesso: datetime,
+) -> tuple[str, str]:
+    """Legge `/quota` dopo il lancio, aggiorna `BOTTEGA_PUNTI_<BOTTEGA>` e calcola i delta."""
+    leggi_quota_fn = getattr(porta_esecutore, "leggi_quota", None)
+    if not callable(leggi_quota_fn):
+        return "-", "-"
+    try:
+        punti_dopo = leggi_quota_fn(prefisso=prefisso)
+    except Exception as exc:
+        print(f"quota: errore lettura punti dopo il lancio: {exc}", file=sys.stderr)
+        return "-", "-"
+    if not punti_dopo:
+        return "-", "-"
+    try:
+        forgia.imposta_variabile(nome_variabile_punti(bottega), formatta_punti(punti_dopo, adesso))
+    except Exception as exc:
+        print(f"quota: errore salvataggio variabile punti per {bottega}: {exc}", file=sys.stderr)
+    if not punti_prima:
+        return "-", "-"
+    diff = differenza_punti(punti_prima, punti_dopo)
+    punto_sel = seleziona_gruppo_punti(punti_dopo, cfg, bottega)
+    if punto_sel is not None and punto_sel.gruppo in diff:
+        ds, d5 = diff[punto_sel.gruppo]
+        return str(ds), str(d5)
+    if diff:
+        ds = sum(v[0] for v in diff.values())
+        d5 = sum(v[1] for v in diff.values())
+        return str(ds), str(d5)
+    return "0", "0"
+
+
+def _imposta_etichetta_categoria(forgia: Forgia, pr_num: int, delicata: bool, attuali: Sequence[str]) -> None:
+    """Imposta `bottega: delicata` o `bottega: non delicata` rimuovendo l'opposta se presente."""
+    desiderata = "bottega: delicata" if delicata else "bottega: non delicata"
+    opposta = "bottega: non delicata" if delicata else "bottega: delicata"
+    if opposta in attuali:
+        forgia.etichetta(pr_num, opposta, aggiungi=False)
+    if desiderata not in attuali:
+        forgia.etichetta(pr_num, desiderata, aggiungi=True)
+
+
+def _passo_finale_pronta(
+    *,
+    lavoro: int,
+    iss_madre: Issue,
+    compito: Issue,
+    sotto_issues: Sequence[Issue],
+    candidato: Candidato,
+    configurazione: Configurazione,
+    forgia: Forgia,
+    board: Board,
+    porte: Mapping[str, Porta] | Callable[[str], Porta] | None,
+    clone_progetto: Path,
+    dir_esec: Path,
+    prefisso: Sequence[str],
+    nome_ramo: str,
+    ramo_principale: str,
+    pr_num: int,
+    d_nota: dict[str, str],
+    adesso: datetime,
+    caso: random.Random,
+    risultati_storici: Mapping[tuple[str, str], Risultati],
+    costi_relativi: Mapping[str, float] | None,
+    quote_map: Mapping[str, str | None],
+    base_consegna: str,
+    fine_consegna: str,
+    cand_cons: Candidato | None,
+    verdetto_cons: Any | None,
+    testo_cons: str | None,
+    cron: _CronometroFasi,
+) -> tuple[EsitoGiro, Any | None, str] | None:
+    """Esegue B15-R9 sul diff intero del ramo se esiste un candidato `rivedere` sul runner."""
+    from bottega.categorie import analizza_verdetto, classifica_diff
+
+    cfg_runner = _solo_runner(configurazione, candidato.runner)
+    if not any("rivedere" in c.funzioni for c in cfg_runner.candidati.values()):
+        return None
+
+    ref_principale = f"refs/remotes/origin/{ramo_principale}"
+    res_ref = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "rev-parse", "--verify", "-q", f"{ref_principale}^{{commit}}"],
+        cwd=str(clone_progetto),
+        capture_output=True,
+        text=True,
+    )
+    if res_ref.returncode != 0:
+        ref_principale = f"refs/heads/{ramo_principale}"
+
+    merge_base = _esegui(
+        ["git", *OPZIONI_GIT_RUNNER, "merge-base", ref_principale, f"refs/heads/{nome_ramo}"],
+        cwd=str(clone_progetto),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    proc_raw = _esegui(
+        [
+            "git", *OPZIONI_GIT_RUNNER, "diff", "--raw", "-z", "-M", "--no-ext-diff",
+            merge_base, f"refs/heads/{nome_ramo}",
+        ],
+        cwd=str(clone_progetto),
+        check=True,
+        capture_output=True,
+    )
+    percorsi_map: dict[str, None] = {}
+    for _st, _sm, _dm, old_p, new_p in analizza_diff_raw(proc_raw.stdout):
+        if old_p:
+            percorsi_map.setdefault(old_p, None)
+        if new_p:
+            percorsi_map.setdefault(new_p, None)
+    percorsi_ramo = list(percorsi_map)
+
+    diff_ramo = _esegui(
+        [
+            "git", *OPZIONI_GIT_RUNNER, "diff", "--no-ext-diff", "--no-textconv",
+            f"{merge_base}..refs/heads/{nome_ramo}",
+        ],
+        cwd=str(clone_progetto),
+        capture_output=True,
+        text=True,
+    ).stdout
+    if len(diff_ramo) > 60000:
+        diff_ramo = diff_ramo[:60000] + "\n[diff troncato a 60 000 caratteri]"
+
+    scelta_rev = scegli(
+        compito=Compito(funzione="rivedere", fuori=True),
+        configurazione=cfg_runner,
+        risultati=risultati_storici,
+        quote=quote_map,
+        adesso=adesso,
+        caso=caso,
+        costi_propri=costi_relativi,
+    )
+    if not scelta_rev.candidato or scelta_rev.aspetta:
+        forgia.commenta(pr_num, f"revisione finale saltata: {scelta_rev.perche}", ruolo="revisore")
+        if compito.numero != iss_madre.numero:
+            forgia.chiudi_issue(compito.numero)
+        _togli_il_rosso(d_nota, board, lavoro)
+        board.consegna(lavoro, pr=pr_num)
+        return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=True), None, "ok"
+
+    cand_rev = configurazione.candidati[scelta_rev.candidato]
+    puo_riuso = (
+        cand_cons is not None
+        and verdetto_cons is not None
+        and cand_cons.id == cand_rev.id
+        and base_consegna == merge_base
+        and fine_consegna == "refs/bottega/consegna"
+    )
+    if puo_riuso:
+        testo_rev = testo_cons or ""
+        verdetto = verdetto_cons
+    else:
+        cron.passa_a("revisione_finale")
+        porta_rev = _ottieni_porta(cand_rev.porta, porte)
+        prompt_rev_f = (
+            f"{_ISTRUZIONE_VERDETTO}"
+            f"Esegui la revisione finale del ramo per il lavoro #{iss_madre.numero} ({iss_madre.titolo}):\n\n"
+            f"{diff_ramo}"
+        )
+        dir_rev_f = dir_esec / "revisione-finale"
+        _esegui([*prefisso, "mkdir", "-p", "--", str(dir_rev_f)], check=True, capture_output=True, cwd=str(dir_esec))
+        lancio_rev_f = porta_rev.lancia(
+            cartella=dir_rev_f,
+            prompt=prompt_rev_f,
+            modello=cand_rev.modello,
+            sola_lettura=True,
+            prefisso=prefisso,
+        )
+        cron.passa_a("chiusura")
+        if lancio_rev_f.esito != "fatto":
+            if lancio_rev_f.esito == "quota":
+                rinnovo_rev = lancio_rev_f.rinnovo or (adesso + timedelta(hours=1))
+                if rinnovo_rev.tzinfo is None:
+                    rinnovo_rev = rinnovo_rev.replace(tzinfo=adesso.tzinfo or timezone.utc)
+                forgia.imposta_variabile(variabile_della_quota(cand_rev), valore_esaurita(rinnovo_rev))
+            forgia.commenta(
+                pr_num,
+                f"revisione finale saltata: il lancio del revisore è finito con «{lancio_rev_f.esito}»",
+                ruolo="revisore",
+            )
+            if compito.numero != iss_madre.numero:
+                forgia.chiudi_issue(compito.numero)
+            _togli_il_rosso(d_nota, board, lavoro)
+            board.consegna(lavoro, pr=pr_num)
+            return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=True), None, "ok"
+        testo_rev = lancio_rev_f.testo
+        verdetto = analizza_verdetto(testo_rev)
+
+    etichette_attuali = forgia.etichette_pr(pr_num)
+    esito_cat = classifica_diff(
+        percorsi_ramo,
+        configurazione.categorie,
+        etichette_pr=etichette_attuali,
+        sicurezza=verdetto.sicurezza,
+    )
+    desc_cat = (
+        f"delicata ({'; '.join(esito_cat.motivi)})"
+        if esito_cat.delicata
+        else f"non delicata ({', '.join(esito_cat.categorie_toccate)})"
+    )
+    msg_rev_f = (
+        f"Revisione finale ({cand_rev.nome}): VERDETTO={verdetto.stato} "
+        f"(gravi={verdetto.gravi}, minori={verdetto.minori}), categoria={desc_cat}\n\n"
+        f"{recinta_testo_modello(testo_rev)}"
+    )
+    forgia.commenta(pr_num, msg_rev_f, ruolo="revisore")
+
+    if not verdetto.valido:
+        if compito.numero != iss_madre.numero:
+            forgia.chiudi_issue(compito.numero)
+        _togli_il_rosso(d_nota, board, lavoro)
+        forgia.commenta(pr_num, "revisione finale con verdetto non leggibile: Esito non impostato", ruolo="revisore")
+        board.consegna(lavoro, pr=pr_num)
+        return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=True), verdetto, "ok"
+
+    if verdetto.sicurezza:
+        if compito.numero != iss_madre.numero:
+            forgia.chiudi_issue(compito.numero)
+        _togli_il_rosso(d_nota, board, lavoro)
+        _imposta_etichetta_categoria(forgia, pr_num, True, etichette_attuali)
+        d_nota["categoria"] = "delicata"
+        d_nota["motivo"] = "sicurezza nella revisione finale"
+        d_nota["revisore"] = cand_rev.id
+        board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
+        board.consegna(lavoro, pr=pr_num)
+        return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=True), verdetto, "ok"
+
+    if verdetto.bloccante:
+        if not sotto_issues:
+            esito_g, _stato = _avanza_gradino_o_blocca(
+                d_nota,
+                configurazione,
+                candidato,
+                "rilievi gravi nella revisione",
+                board,
+                forgia,
+                lavoro,
+                compito.numero,
+                iss_madre=iss_madre,
+            )
+            return (
+                EsitoGiro(
+                    esito_g,
+                    motivo=d_nota.get("motivo", "rilievi gravi nella revisione"),
+                    pr=pr_num,
+                    oracolo_ok=True,
+                ),
+                verdetto,
+                "fallito",
+            )
+        forgia.chiudi_issue(compito.numero)
+        _togli_il_rosso(d_nota, board, lavoro)
+        d_nota["categoria"] = "delicata" if esito_cat.delicata else "non-delicata"
+        d_nota["motivo"] = "rilievi gravi nella revisione finale"
+        d_nota["revisore"] = cand_rev.id
+        board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
+        board.consegna(lavoro, pr=pr_num)
+        return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=True), verdetto, "ok"
+
+    # verdetto.approvato
+    if compito.numero != iss_madre.numero:
+        forgia.chiudi_issue(compito.numero)
+    _togli_il_rosso(d_nota, board, lavoro)
+    _imposta_etichetta_categoria(forgia, pr_num, esito_cat.delicata, etichette_attuali)
+    d_nota["categoria"] = "delicata" if esito_cat.delicata else "non-delicata"
+    d_nota["revisore"] = cand_rev.id
+    board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
+    board.consegna(lavoro, pr=pr_num)
+    board.campo(lavoro, "Esito", "pronta per l'unione")
+    return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=True), verdetto, "ok"
+
+
 def giro(
     lavoro: int,
     bottega: str,
@@ -1343,7 +1756,10 @@ def _giro(
     if bottega not in configurazione.botteghe:
         raise ValueError(f"Bottega sconosciuta: {bottega!r}")
 
-    candidato = _trova_candidato(lavoro, bottega, configurazione, board)
+    lav_iniziale = board.lavoro(lavoro)
+    d_nota_iniziale = nota(lav_iniziale.nota if lav_iniziale else "")
+    funzione_giro = "pianificare" if d_nota_iniziale.get("modo") == "pianifica" else "eseguire"
+    candidato = _trova_candidato(lavoro, bottega, configurazione, board, funzione=funzione_giro)
     porta_esecutore = _ottieni_porta(candidato.porta, porte)
 
     try:
@@ -1423,7 +1839,10 @@ def _giro(
         d_nota.pop("attese", None)
         d_nota.pop("quote", None)
         d_nota.pop("rosso", None)
+        d_nota.pop("gradino", None)
     d_nota["compito"] = str(compito.numero)
+
+    modo_pianifica = d_nota.get("modo") == "pianifica"
 
     # C5: il brief lo può cambiare il suo autore anche dopo l'etichetta: solo issue di un comandante.
     comandanti_ok = {c.strip().lower() for c in configurazione.progetto.comandanti} | {
@@ -1451,13 +1870,21 @@ def _giro(
         return EsitoGiro("bloccato", motivo="ramo non valido")
 
     cmd_fatto_quando = fatto_quando(compito.corpo)
-    if not cmd_fatto_quando:
+    if not modo_pianifica and not cmd_fatto_quando:
         msg = "Lavoro non pronto: manca il blocco «Fatto quando» nel brief."
         forgia.commenta(compito.numero, msg, ruolo="esecutore")
         d_nota["motivo"] = "manca fatto quando"
         board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
         _rilancia_distributore(forgia)
         return EsitoGiro("senza_fatto_quando", motivo="manca fatto quando")
+
+    indice_gradino_usato = _indice_gradino_corrente(d_nota, configurazione, candidato)
+    esito_gradino_finale = "ok"
+    esito_giro_finale = "consegnato"
+    oracolo_esito_finale: bool | None = None
+    verdetto_finale: Any | None = None
+    pr_num_finale: int | None = None
+    punti_prima: dict[str, PuntoQuota] | None = None
 
     d_nota["inizio"] = adesso.isoformat()
     if not prefisso:
@@ -1606,6 +2033,7 @@ def _giro(
         fascicolo_runner = dir_giro / "fascicolo"
 
         pr_esistente = forgia.pr_del_ramo(nome_ramo)
+        pr_num_finale = pr_esistente
         _prepara_fascicolo(
             fascicolo_dir=fascicolo_runner,
             compito=compito,
@@ -1646,30 +2074,44 @@ def _giro(
         )
 
         conversazione_id = d_nota.get("conversazione")
-        intestazione_iniziale = (
-            f"Sei l'esecutore per il compito {compito.numero}: {compito.titolo}.\n\n"
-            f"Fascicolo in {fascicolo_dir}.\n\n"
-            f"Fatto quando:\n{cmd_fatto_quando}\n\n"
-            "Istruzioni:\n"
-            f"1. Lavora in questa cartella e committa nel ramo corrente ({nome_ramo}) un commit per compito.\n"
-            "2. Non toccare mai .github/ o .bottega/. Nei messaggi di commit non scrivere Closes, Fixes o Resolves "
-            "davanti a un numero d'issue.\n"
-            "3. Alla fine scrivi il rapporto come ultimo messaggio.\n"
-            "4. Se sei bloccato o se una scelta contraddice il piano o tocca le quattro barriere, "
-            "scrivi una riga che comincia con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa (le opzioni "
-            "possono seguire, fino alla fine del rapporto).\n"
-            "5. Se in commenti.md l'ultimo esito dell'oracolo è ROSSO, il ramo porta già la consegna di prima: "
-            "correggi ciò che l'oracolo segnala e committa la correzione. Se il codice è giusto e il rosso veniva "
-            "dal comando, che chi decide ha corretto, non committare niente e dillo nel rapporto: il giro riprova "
-            "l'oracolo.\n"
-            # B11: il tempo di un giro va nei passi del modello (circa 5 s l'uno, ognuno rilegge il contesto), non
-            # nelle prove (Jarvis, 2026-11-12: 373 passi in 55 minuti, 174 letture a finestre di 40 righe).
-            "6. Lavora in pochi passi: ogni passo costa tempo e quota. Leggi i file interi o a blocchi grandi; cerca "
-            "tutti i nomi che ti servono con un solo comando; unisci i comandi che non devi guardare uno per uno; "
-            "modifica poche righe alla volta invece di riscrivere un file che esiste. Lancia le prove in primo piano "
-            "e aspetta che finiscano, senza controllarle a ripetizione; il comando di «Fatto quando» lancialo una "
-            "volta sola, alla fine, prima del commit: dopo di te lo rilancia l'oracolo.\n"
-        )
+        if modo_pianifica:
+            percorso_bozza = f"docs/plans/{adesso.strftime('%Y-%m-%d')}-issue-{iss_madre.numero}-bozza.md"
+            intestazione_iniziale = (
+                f"Sei il pianificatore della bottega per il lavoro {iss_madre.numero}: {iss_madre.titolo}.\n\n"
+                f"Fascicolo in {fascicolo_dir}.\n\n"
+                "Istruzioni:\n"
+                f"1. Produci SOLO la bozza di piano in `{percorso_bozza}` (con le sezioni: Scopo, Ruling proposti, "
+                "Review Focus, Compiti con File/Interfacce/Prove/Fatto quando; righe <= 120 colonne).\n"
+                "2. Non modificare né aggiungere alcun file di codice o file fuori da `docs/plans/*.md`.\n"
+                f"3. Committa nel ramo corrente ({nome_ramo}); nei messaggi non scrivere Closes, Fixes o Resolves "
+                "davanti a un numero d'issue.\n"
+                "4. Alla fine scrivi un breve riepilogo come ultimo messaggio.\n"
+            )
+        else:
+            intestazione_iniziale = (
+                f"Sei l'esecutore per il compito {compito.numero}: {compito.titolo}.\n\n"
+                f"Fascicolo in {fascicolo_dir}.\n\n"
+                f"Fatto quando:\n{cmd_fatto_quando}\n\n"
+                "Istruzioni:\n"
+                f"1. Lavora in questa cartella e committa nel ramo corrente ({nome_ramo}) un commit per compito.\n"
+                "2. Non toccare mai .github/ o .bottega/. Nei messaggi di commit non scrivere Closes, Fixes o Resolves "
+                "davanti a un numero d'issue.\n"
+                "3. Alla fine scrivi il rapporto come ultimo messaggio.\n"
+                "4. Se sei bloccato o se una scelta contraddice il piano o tocca le quattro barriere, "
+                "scrivi una riga che comincia con DOMANDA PER CHI DECIDE: seguita dalla domanda precisa (le opzioni "
+                "possono seguire, fino alla fine del rapporto).\n"
+                "5. Se in commenti.md l'ultimo esito dell'oracolo è ROSSO, il ramo porta già la consegna di prima: "
+                "correggi ciò che l'oracolo segnala e committa la correzione. Se il codice è giusto e il rosso veniva "
+                "dal comando, che chi decide ha corretto, non committare niente e dillo nel rapporto: il giro riprova "
+                "l'oracolo.\n"
+                # B11: il tempo di un giro va nei passi del modello (circa 5 s l'uno, ognuno rilegge il contesto), non
+                # nelle prove (Jarvis, 2026-11-12: 373 passi in 55 minuti, 174 letture a finestre di 40 righe).
+                "6. Lavora in pochi passi: ogni passo costa tempo e quota. Leggi i file interi o a blocchi grandi; cerca "
+                "tutti i nomi che ti servono con un solo comando; unisci i comandi che non devi guardare uno per uno; "
+                "modifica poche righe alla volta invece di riscrivere un file che esiste. Lancia le prove in primo piano "
+                "e aspetta che finiscano, senza controllarle a ripetizione; il comando di «Fatto quando» lancialo una "
+                "volta sola, alla fine, prima del commit: dopo di te lo rilancia l'oracolo.\n"
+            )
         prompt_testo = componi_prompt_con_fascicolo(
             intestazione=intestazione_iniziale,
             fascicolo_runner=fascicolo_runner,
@@ -1677,6 +2119,12 @@ def _giro(
             lavoro_dir=lavoro_dir,
             brief_testo=compito.corpo,
         )
+        leggi_quota_fn = getattr(porta_esecutore, "leggi_quota", None)
+        if callable(leggi_quota_fn):
+            try:
+                punti_prima = leggi_quota_fn(prefisso=prefisso)
+            except Exception as exc:
+                print(f"quota: errore lettura punti prima del lancio: {exc}", file=sys.stderr)
         consulti_effettuati = 0
         lanci_esecutore: list[Lancio] = []
         lancio_partito = False
@@ -1709,6 +2157,8 @@ def _giro(
                 consulti_effettuati += 1
                 if consulti_effettuati > 2:
                     cron.passa_a("chiusura")
+                    esito_gradino_finale = "fallito"
+                    esito_giro_finale = "in_attesa"
                     d_nota["motivo"] = "troppi consulti"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
@@ -1730,6 +2180,8 @@ def _giro(
 
                 if not scelta_cons.candidato or scelta_cons.aspetta:
                     cron.passa_a("chiusura")
+                    esito_gradino_finale = "fallito"
+                    esito_giro_finale = "in_attesa"
                     msg = "Nessun consigliere con quota disponibile per il consulto."
                     forgia.commenta(compito.numero, msg, ruolo="avviso")
                     d_nota["motivo"] = "senza consigliere con quota"
@@ -1770,6 +2222,8 @@ def _giro(
 
                 if lancio_cons.esito == "quota":
                     cron.passa_a("chiusura")
+                    esito_gradino_finale = "quota"
+                    esito_giro_finale = "in_attesa"
                     rinnovo_cons = lancio_cons.rinnovo or (adesso + timedelta(hours=1))
                     if rinnovo_cons.tzinfo is None:
                         rinnovo_cons = rinnovo_cons.replace(tzinfo=adesso.tzinfo or timezone.utc)
@@ -1781,6 +2235,8 @@ def _giro(
 
                 if lancio_cons.esito != "fatto":
                     cron.passa_a("chiusura")
+                    esito_gradino_finale = "fallito"
+                    esito_giro_finale = "in_attesa"
                     d_nota["motivo"] = lancio_cons.esito
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
@@ -1809,6 +2265,8 @@ def _giro(
                     continue
                 else:
                     cron.passa_a("chiusura")
+                    esito_gradino_finale = "fallito"
+                    esito_giro_finale = "in_attesa"
                     d_nota["motivo"] = "consulto a chi decide"
                     board.stato(lavoro, "in attesa", nota=scrivi_nota(d_nota))
                     _rilancia_distributore(forgia)
@@ -1821,8 +2279,9 @@ def _giro(
         # RV4: Il lavoro non committato si committa prima di OGNI uscita dopo il lancio
         _committa_lavoro_pendente(lavoro_dir, prefisso, env_rip, f"salvataggio per compito {compito.numero}")
 
-        # B3-R14: Quota esaurita
+        # B3-R14: Quota esaurita (non sale mai di gradino)
         if lancio.esito == "quota":
+            esito_gradino_finale = "quota"
             rinnovo = lancio.rinnovo or (adesso + timedelta(hours=1))
             if rinnovo.tzinfo is None:
                 rinnovo = rinnovo.replace(tzinfo=adesso.tzinfo or timezone.utc)
@@ -1861,16 +2320,20 @@ def _giro(
                     d_nota=d_nota,
                     board=board,
                     lavoro=lavoro,
+                    modo_pianifica=modo_pianifica,
                 )
                 if not ok_salv:
                     cron.passa_a("chiusura")
+                    esito_gradino_finale = "fallito"
+                    esito_giro_finale = _esito_del_rifiuto(d_nota)
                     _rilancia_distributore(forgia)
-                    return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
+                    return EsitoGiro(esito_giro_finale, motivo=d_nota.get("motivo", "consegna rifiutata"))
                 pr_num = forgia.pr_del_ramo(nome_ramo)
                 if pr_num is None and entries_salv:
                     titolo_salv = iss_madre.titolo
                     corpo_salv = f"Lavoro: #{iss_madre.numero}\n\nSalvataggio parziale per quota esaurita."
-                    forgia.apri_pr(nome_ramo, titolo_salv, corpo_salv)
+                    pr_num = forgia.apri_pr(nome_ramo, titolo_salv, corpo_salv)
+                pr_num_finale = pr_num
                 cron.chiudi()
 
             cron.inizia("chiusura")
@@ -1885,29 +2348,45 @@ def _giro(
                 d_nota["motivo"] = "quota ripetuta"
                 board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
                 _rilancia_distributore(forgia)
+                esito_giro_finale = "bloccato"
                 return EsitoGiro("bloccato", motivo="quota ripetuta")
             board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
             _rilancia_distributore(forgia)
+            esito_giro_finale = "quota"
             return EsitoGiro("quota", motivo="quota esaurita")
 
-        # Accesso, errore o ogni altro esito che non è «fatto»: conta un tentativo
+        # Accesso, errore o ogni altro esito che non è «fatto»: sale di gradino o conta un tentativo
         if lancio.esito != "fatto":
             cron.inizia("chiusura")
-            tentativi = int(d_nota.get("tentativi", 0)) + 1
-            d_nota["tentativi"] = str(tentativi)
-            if tentativi >= 3:
-                d_nota["motivo"] = lancio.esito
-                board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
-                msg_err = f"Lavoro bloccato dopo 3 tentativi ({lancio.esito}):\n\n{recinta_testo_modello(lancio.testo)}"
-                forgia.commenta(compito.numero, msg_err, ruolo="esecutore")
-                _rilancia_distributore(forgia)
-                return EsitoGiro("bloccato", motivo=f"3 tentativi falliti ({lancio.esito})")
-            else:
-                board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
-                _rilancia_distributore(forgia)
-                return EsitoGiro("errore", motivo=f"tentativo {tentativi} fallito ({lancio.esito})")
+            esito_gradino_finale = "fallito"
+            msg_blocco_err = (
+                f"Lavoro bloccato dopo 3 tentativi ({lancio.esito}):\n\n{recinta_testo_modello(lancio.testo)}"
+                if not (_scala_attiva(configurazione, iss_madre) and not modo_pianifica)
+                else f"Lavoro bloccato: scala esaurita dopo «{lancio.esito}».\n\n{recinta_testo_modello(lancio.testo)}"
+            )
+            esito_giro_finale, stato_dest = _avanza_gradino_o_blocca(
+                d_nota,
+                configurazione,
+                candidato,
+                lancio.esito,
+                board,
+                forgia,
+                lavoro,
+                compito.numero,
+                iss_madre=iss_madre,
+                modo_pianifica=modo_pianifica,
+                togli_consegnato=False,
+                esito_non_bloccato="errore",
+                commento_blocco=msg_blocco_err,
+            )
+            motivo_err = (
+                f"3 tentativi falliti ({lancio.esito})"
+                if stato_dest == "bloccato" and not (_scala_attiva(configurazione, iss_madre) and not modo_pianifica)
+                else d_nota.get("motivo", lancio.esito)
+            )
+            return EsitoGiro(esito_giro_finale, motivo=motivo_err)
 
-        # RV4: Niente commit nuovi -> nessuna PR nuova, il lavoro torna pronto con tentativi+1 e rapporto in commento
+        # RV4: Niente commit nuovi -> nessuna PR nuova
         cur_head = _esegui(
             [*prefisso, "git", "rev-parse", "HEAD"],
             cwd=str(lavoro_dir),
@@ -1922,18 +2401,18 @@ def _giro(
         base_consegna = base_commit
         base_ripresa = (
             _base_della_consegna_fatta(d_nota, compito.numero, base_commit, clone_progetto)
-            if cur_head == base_commit and ramo_remoto
+            if cur_head == base_commit and ramo_remoto and not modo_pianifica
             else None
         )
         # 0.2.8: senza commit nuovi e senza una consegna da riprendere, una consegna rossa si riprova se chi decide ha
         # cambiato da allora il ramo o il «Fatto quando». I controlli e la rilettura guardano solo la consegna
         # dell'esecutore (`fine_consegna`), l'oracolo il ramo di oggi.
-        impronta = _impronta_fatto_quando(cmd_fatto_quando)
+        impronta = _impronta_fatto_quando(cmd_fatto_quando or "")
         fine_consegna = "refs/bottega/consegna"
         sha_della_consegna = base_commit
         dal_rosso = (
             _ripresa_dal_rosso(d_nota, compito.numero, base_commit, impronta, clone_progetto)
-            if cur_head == base_commit and ramo_remoto and base_ripresa is None
+            if cur_head == base_commit and ramo_remoto and base_ripresa is None and not modo_pianifica
             else None
         )
         if dal_rosso is not None:
@@ -1941,18 +2420,24 @@ def _giro(
             fine_consegna = sha_della_consegna
         if cur_head == base_commit and base_ripresa is None:
             cron.inizia("chiusura")
-            tentativi = int(d_nota.get("tentativi", 0)) + 1
-            d_nota["tentativi"] = str(tentativi)
-            d_nota["motivo"] = "nessun commit"
-            stato_dest = "bloccato" if tentativi >= 3 else "pronto"
-            board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
-            forgia.commenta(
+            esito_gradino_finale = "fallito"
+            msg_nc = f"Rapporto dell'esecutore per il compito {compito.numero}:\n\n{recinta_testo_modello(lancio.testo)}"
+            esito_giro_finale, _stato = _avanza_gradino_o_blocca(
+                d_nota,
+                configurazione,
+                candidato,
+                "nessun commit",
+                board,
+                forgia,
+                lavoro,
                 compito.numero,
-                f"Rapporto dell'esecutore per il compito {compito.numero}:\n\n{recinta_testo_modello(lancio.testo)}",
-                ruolo="esecutore",
+                iss_madre=iss_madre,
+                modo_pianifica=modo_pianifica,
+                esito_non_bloccato="pronto",
+                commento_non_bloccato=msg_nc,
+                commento_blocco=msg_nc,
             )
-            _rilancia_distributore(forgia)
-            return EsitoGiro(stato_dest, motivo="nessun commit")
+            return EsitoGiro(esito_giro_finale, motivo="nessun commit")
 
         if base_ripresa is not None:
             base_consegna = base_ripresa
@@ -2006,28 +2491,37 @@ def _giro(
                 d_nota=d_nota,
                 board=board,
                 lavoro=lavoro,
+                modo_pianifica=modo_pianifica,
             )
             if not ok_consegna:
                 cron.passa_a("chiusura")
+                esito_gradino_finale = "fallito"
+                esito_giro_finale = _esito_del_rifiuto(d_nota)
                 _rilancia_distributore(forgia)
-                return EsitoGiro(_esito_del_rifiuto(d_nota), motivo=d_nota.get("motivo", "consegna rifiutata"))
+                return EsitoGiro(esito_giro_finale, motivo=d_nota.get("motivo", "consegna rifiutata"))
 
             # RV4: Se il commit è vuoto (nessun file toccato nel diff)
             if not entries_diff:
                 cron.passa_a("chiusura")
-                tentativi = int(d_nota.get("tentativi", 0)) + 1
-                d_nota["tentativi"] = str(tentativi)
-                d_nota["motivo"] = "commit vuoto"
-                stato_dest = "bloccato" if tentativi >= 3 else "pronto"
-                board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+                esito_gradino_finale = "fallito"
                 rapporto_vuoto = recinta_testo_modello(lancio.testo)
-                forgia.commenta(
+                msg_vuoto = f"Rapporto dell'esecutore per il compito {compito.numero}:\n\n{rapporto_vuoto}"
+                esito_giro_finale, _stato = _avanza_gradino_o_blocca(
+                    d_nota,
+                    configurazione,
+                    candidato,
+                    "commit vuoto",
+                    board,
+                    forgia,
+                    lavoro,
                     compito.numero,
-                    f"Rapporto dell'esecutore per il compito {compito.numero}:\n\n{rapporto_vuoto}",
-                    ruolo="esecutore",
+                    iss_madre=iss_madre,
+                    modo_pianifica=modo_pianifica,
+                    esito_non_bloccato="pronto",
+                    commento_non_bloccato=msg_vuoto,
+                    commento_blocco=msg_vuoto,
                 )
-                _rilancia_distributore(forgia)
-                return EsitoGiro(stato_dest, motivo="commit vuoto")
+                return EsitoGiro(esito_giro_finale, motivo="commit vuoto")
 
             # B7-2: la consegna è sul ramo remoto. La nota lo dice subito, prima dell'oracolo: se il giro cade dopo
             # (anche senza passare dal gestore d'errore), il giro seguente riprende da qui invece di contare un
@@ -2047,7 +2541,32 @@ def _giro(
             board.stato(lavoro, "in corso", nota=scrivi_nota(d_nota))
             cron.chiudi()
 
+        if modo_pianifica:
+            cron.inizia("chiusura")
+            pr_num = forgia.pr_del_ramo(nome_ramo)
+            testo_recintato = recinta_testo_modello(lancio.testo)
+            if pr_num is None:
+                titolo_pr = f"Bozza di piano: {iss_madre.titolo}"
+                corpo_pr = (
+                    f"Lavoro: #{iss_madre.numero}\n\n"
+                    f"## Bozza di piano\n\n{testo_recintato}\n"
+                )
+                pr_num = forgia.apri_pr(nome_ramo, titolo_pr, corpo_pr)
+            else:
+                forgia.commenta(pr_num, f"Aggiornamento bozza di piano:\n\n{testo_recintato}", ruolo="esecutore")
+            pr_num_finale = pr_num
+            forgia.etichetta(pr_num, ETICHETTA_BOZZA_PIANO, aggiungi=True)
+            forgia.etichetta(iss_madre.numero, ETICHETTA_BOZZA_PIANO, aggiungi=True)
+            _togli_il_rosso(d_nota, board, lavoro)
+            d_nota.pop("consegnato", None)
+            board.campo(lavoro, "Nota del giro", scrivi_nota(d_nota))
+            board.consegna(lavoro, pr=pr_num)
+            _rilancia_distributore(forgia)
+            esito_giro_finale = "consegnato"
+            return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=None)
+
         # B3-R12: Oracolo su copia fresca
+        assert cmd_fatto_quando is not None
         cron.inizia("oracolo")
         dir_oracolo = dir_esec / "oracolo"
         bundle_oracolo = dir_giro / "oracolo.bundle"
@@ -2072,6 +2591,7 @@ def _giro(
             tempo=tempo_oracolo,
             env=env_rip,
         )
+        oracolo_esito_finale = oracolo_ok
 
         testo_oracolo = (
             f"Esito dell'oracolo: {'VERDE' if oracolo_ok else 'ROSSO'} (codice {codice_oracolo})\n\n"
@@ -2099,6 +2619,7 @@ def _giro(
                 f"Esito oracolo: {esito_oracolo_str}"
             )
             forgia.commenta(pr_num, comm_rapporto, ruolo="esecutore")
+        pr_num_finale = pr_num
 
         # RV8: «Prove cambiate»: ogni stato diverso da 'A' su un percorso di prova, dal diff a NUL
         # C5: anche i file che cambiano come girano le prove (conftest.py, pyproject.toml…), nuovi o no.
@@ -2158,7 +2679,9 @@ def _giro(
         if segreti_trovati:
             forgia.etichetta(pr_num, "bottega: segreti", aggiungi=True)
 
-        # B3-R17: Rilettura del consigliere
+        # B3-R17 & B15-R5: Rilettura del consigliere
+        from bottega.categorie import analizza_verdetto
+
         compito_cons = Compito(funzione="consigliare", fuori=True)
         quote_map = {v: forgia.variabile(v) for v in variabili_da_leggere(configurazione)}
         scelta_cons = scegli(
@@ -2170,6 +2693,9 @@ def _giro(
             caso=caso,
             costi_propri=costi_relativi,
         )
+        cand_cons_rilettura: Candidato | None = None
+        verdetto_rilettura: Any | None = None
+        testo_rilettura: str | None = None
         if scelta_cons.candidato and not scelta_cons.aspetta:
             cron.inizia("rilettura")
             cand_cons = configurazione.candidati[scelta_cons.candidato]
@@ -2177,7 +2703,7 @@ def _giro(
             diff_testo = diff_consegna
             if len(diff_testo) > 60000:
                 diff_testo = diff_testo[:60000] + "\n[diff troncato a 60 000 caratteri]"
-            prompt_rev = f"Rileggi il seguente diff per il compito {compito.numero}:\n\n{diff_testo}"
+            prompt_rev = f"{_ISTRUZIONE_VERDETTO}Rileggi il seguente diff per il compito {compito.numero}:\n\n{diff_testo}"
             dir_rev = dir_esec / "revisione"
             # La crea l'esecutore: il runner non crea né cambia niente in `esecutore/` (un link al posto della cartella
             # porterebbe un chmod del runner fuori dal giro).
@@ -2190,6 +2716,11 @@ def _giro(
                 prefisso=prefisso,
             )
             if lancio_rev.esito == "fatto":
+                cand_cons_rilettura = cand_cons
+                testo_rilettura = lancio_rev.testo
+                verdetto_rilettura = analizza_verdetto(lancio_rev.testo)
+                if verdetto_rilettura.valido:
+                    verdetto_finale = verdetto_rilettura
                 msg_rev = f"Revisione del consigliere ({cand_cons.nome}):\n\n{recinta_testo_modello(lancio_rev.testo)}"
                 forgia.commenta(pr_num, msg_rev, ruolo="consigliere")
             else:
@@ -2206,45 +2737,112 @@ def _giro(
                 ruolo="consigliere",
             )
 
-        # B9-R4: un oracolo rosso non chiude il compito e non consegna il lavoro (la PR e il commento col suo esito
-        # restano visibili). Il ramo porta già la consegna rossa e il giro dopo riparte da lì: la chiave `consegnato`
-        # si toglie (B7-2: con quella il giro dopo riprenderebbe dall'oracolo senza lasciare all'esecutore il modo di
-        # correggere). Conta un tentativo, come ogni giro che non porta a una consegna buona; al terzo serve chi decide.
+        # B9-R4 & B15-R6: un oracolo rosso non chiude il compito e non consegna il lavoro
         cron.inizia("chiusura")
         if not oracolo_ok:
-            tentativi = int(d_nota.get("tentativi", 0)) + 1
-            d_nota["tentativi"] = str(tentativi)
-            d_nota["motivo"] = "oracolo rosso"
-            d_nota.pop("consegnato", None)
-            # 0.2.8: la consegna rossa resta nella nota, con la punta provata e l'impronta del «Fatto quando»: se chi
-            # decide cambia l'uno o l'altro, il giro dopo la riprova anche senza un commit dell'esecutore.
+            esito_gradino_finale = "fallito"
+            # 0.2.8: la consegna rossa resta nella nota, con la punta provata e l'impronta del «Fatto quando».
             punta_provata = base_commit if base_ripresa is not None else sha_della_consegna
-            d_nota["rosso"] = ":".join((str(compito.numero), base_consegna, sha_della_consegna, punta_provata, impronta))
-            if tentativi >= 3:
-                board.stato(lavoro, "bloccato", nota=scrivi_nota(d_nota))
-                forgia.commenta(
-                    compito.numero,
-                    "Lavoro bloccato: tre tentativi, l'ultimo con l'oracolo rosso, serve chi decide. Il ramo porta la "
-                    "consegna dell'ultimo tentativo; l'esito dell'oracolo è nei commenti qui sopra.",
-                    ruolo="esecutore",
-                )
-                # Come gli altri lavori bloccati: il distributore riparte subito per gli altri lavori pronti.
-                _rilancia_distributore(forgia)
-                return EsitoGiro("bloccato", motivo="oracolo rosso", pr=pr_num, oracolo_ok=False)
-            board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
-            _rilancia_distributore(forgia)
-            return EsitoGiro("errore", motivo="oracolo rosso", pr=pr_num, oracolo_ok=False)
+            d_nota["rosso"] = ":".join(
+                (str(compito.numero), base_consegna, sha_della_consegna, punta_provata, impronta)
+            )
+            msg_blocco_oracolo = (
+                "Lavoro bloccato: tre tentativi, l'ultimo con l'oracolo rosso, serve chi decide. Il ramo porta la "
+                "consegna dell'ultimo tentativo; l'esito dell'oracolo è nei commenti qui sopra."
+                if not _scala_attiva(configurazione, iss_madre)
+                else None
+            )
+            esito_giro_finale, _stato = _avanza_gradino_o_blocca(
+                d_nota,
+                configurazione,
+                candidato,
+                "oracolo rosso",
+                board,
+                forgia,
+                lavoro,
+                compito.numero,
+                iss_madre=iss_madre,
+                esito_non_bloccato="errore",
+                commento_blocco=msg_blocco_oracolo,
+            )
+            return EsitoGiro(
+                esito_giro_finale,
+                motivo=d_nota.get("motivo", "oracolo rosso"),
+                pr=pr_num,
+                oracolo_ok=False,
+            )
 
-        # B3-R4: Chiusura sotto-issue o completamento madre
-        if compito.numero != iss_madre.numero:
-            forgia.chiudi_issue(compito.numero)
+        # B15-R5 & B15-R6: rilettura bloccante non chiude il compito e fa salire di gradino
+        if verdetto_rilettura is not None and verdetto_rilettura.bloccante:
+            esito_gradino_finale = "fallito"
+            esito_giro_finale, _stato = _avanza_gradino_o_blocca(
+                d_nota,
+                configurazione,
+                candidato,
+                "rilievi gravi nella rilettura",
+                board,
+                forgia,
+                lavoro,
+                compito.numero,
+                iss_madre=iss_madre,
+                esito_non_bloccato="errore",
+            )
+            return EsitoGiro(
+                esito_giro_finale,
+                motivo=d_nota.get("motivo", "rilievi gravi nella rilettura"),
+                pr=pr_num,
+                oracolo_ok=True,
+            )
 
         if ultima_sotto_issue:
+            risultato_finale = _passo_finale_pronta(
+                lavoro=lavoro,
+                iss_madre=iss_madre,
+                compito=compito,
+                sotto_issues=sotto_issues,
+                candidato=candidato,
+                configurazione=configurazione,
+                forgia=forgia,
+                board=board,
+                porte=porte,
+                clone_progetto=clone_progetto,
+                dir_esec=dir_esec,
+                prefisso=prefisso,
+                nome_ramo=nome_ramo,
+                ramo_principale=ramo_principale,
+                pr_num=pr_num,
+                d_nota=d_nota,
+                adesso=adesso,
+                caso=caso,
+                risultati_storici=risultati_storici,
+                costi_relativi=costi_relativi,
+                quote_map=quote_map,
+                base_consegna=base_consegna,
+                fine_consegna=fine_consegna,
+                cand_cons=cand_cons_rilettura,
+                verdetto_cons=verdetto_rilettura,
+                testo_cons=testo_rilettura,
+                cron=cron,
+            )
+            if risultato_finale is not None:
+                esito_passo, verdetto_passo, esito_grad_passo = risultato_finale
+                if verdetto_passo is not None and verdetto_passo.valido:
+                    verdetto_finale = verdetto_passo
+                esito_gradino_finale = esito_grad_passo
+                esito_giro_finale = esito_passo.esito
+                _rilancia_distributore(forgia)
+                return esito_passo
+
+            # Nessun candidato `rivedere` sul runner: comportamento B14
+            if compito.numero != iss_madre.numero:
+                forgia.chiudi_issue(compito.numero)
             # 0.2.8: un rosso vecchio non resta nella nota di un lavoro consegnato (un rilancio lo riprenderebbe).
             _togli_il_rosso(d_nota, board, lavoro)
             board.consegna(lavoro, pr=pr_num)
         else:
-            # RV8: precedente è l'id del candidato; azzeramento tentativi e attese
+            if compito.numero != iss_madre.numero:
+                forgia.chiudi_issue(compito.numero)
+            # RV8: precedente è l'id del candidato; azzeramento tentativi, attese e gradino
             d_nota["precedente"] = candidato.id
             d_nota.pop("conversazione", None)
             d_nota.pop("tentativi", None)
@@ -2252,32 +2850,54 @@ def _giro(
             d_nota.pop("quote", None)
             d_nota.pop("consegnato", None)
             d_nota.pop("rosso", None)
+            d_nota.pop("gradino", None)
             board.stato(lavoro, "pronto", nota=scrivi_nota(d_nota))
 
         _rilancia_distributore(forgia)
+        esito_giro_finale = "consegnato"
         return EsitoGiro("consegnato", pr=pr_num, oracolo_ok=oracolo_ok)
 
     except Exception as exc:
         # RV5: Nessuna eccezione esce da giro()
         if "lancio_partito" in locals() and lancio_partito and cron.fase_corrente != "chiusura":
             cron.passa_a("chiusura")
-        tentativi = int(d_nota.get("tentativi", 0)) + 1
-        d_nota["tentativi"] = str(tentativi)
-        d_nota["motivo"] = f"errore: {exc}"
-        stato_dest = "bloccato" if tentativi >= 3 else "pronto"
+        esito_gradino_finale = "fallito"
+        msg_exc = f"Errore durante il giro dell'esecutore:\n\n{recinta_testo_modello(str(exc))}"
         try:
-            board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
-        except Exception:
-            pass
-        try:
-            target_comm = compito.numero if "compito" in locals() else lavoro
-            forgia.commenta(
-                target_comm, f"Errore durante il giro dell'esecutore:\n\n{recinta_testo_modello(str(exc))}", ruolo="esecutore"
+            esito_giro_finale, _stato = _avanza_gradino_o_blocca(
+                d_nota,
+                configurazione,
+                candidato,
+                f"errore: {exc}",
+                board,
+                forgia,
+                lavoro,
+                compito.numero,
+                iss_madre=iss_madre,
+                modo_pianifica=modo_pianifica,
+                togli_consegnato=False,
+                esito_non_bloccato="errore",
+                commento_non_bloccato=msg_exc,
+                commento_blocco=msg_exc,
             )
+            return EsitoGiro(esito_giro_finale, motivo=str(exc))
         except Exception:
-            pass
-        _rilancia_distributore(forgia)
-        return EsitoGiro("bloccato" if tentativi >= 3 else "errore", motivo=str(exc))
+            tentativi = int(d_nota.get("tentativi", 0)) + 1
+            d_nota["tentativi"] = str(tentativi)
+            d_nota["motivo"] = f"errore: {exc}"
+            stato_dest = "bloccato" if tentativi >= 3 else "pronto"
+            esito_giro_finale = "bloccato" if tentativi >= 3 else "errore"
+            try:
+                board.stato(lavoro, stato_dest, nota=scrivi_nota(d_nota))
+            except Exception:
+                pass
+            try:
+                target_comm = compito.numero if "compito" in locals() else lavoro
+                forgia.commenta(target_comm, msg_exc, ruolo="esecutore")
+            except Exception:
+                pass
+            _rilancia_distributore(forgia)
+            return EsitoGiro(esito_giro_finale, motivo=str(exc))
 
     finally:
         if "lancio_partito" in locals() and lancio_partito:
@@ -2290,6 +2910,12 @@ def _giro(
                     fine_lancio = time.monotonic()
                 durata_sec = int(max(0.0, fine_lancio - tempo_inizio_lancio)) if tempo_inizio_lancio is not None else 0
                 token_tot = sum(misure.token_dei_contatori(candidato.porta, l.contatori) for l in lanci_esecutore)
+                scala_misura = (
+                    bool(configurazione.progetto.scala)
+                    and candidato.id in configurazione.progetto.scala
+                    and _scala_attiva(configurazione, iss_madre)
+                    and not modo_pianifica
+                )
                 _scrivi_misure(
                     board=board,
                     compito_numero=compito.numero,
@@ -2299,7 +2925,36 @@ def _giro(
                     token_esecutore=token_tot,
                     forgia=forgia,
                     lavoro_numero=lavoro,
+                    scala_attiva=scala_misura,
+                    esito_gradino=esito_gradino_finale,
                 )
+                ds_str, d5_str = _aggiorna_punti_quota(
+                    porta_esecutore, prefisso, punti_prima, configurazione, bottega, forgia, adesso
+                )
+                tot_gradini = len(configurazione.progetto.scala) if configurazione.progetto.scala else 1
+                k_gradino = (indice_gradino_usato + 1) if configurazione.progetto.scala else 1
+                oracolo_str = (
+                    "ok" if oracolo_esito_finale is True else ("rosso" if oracolo_esito_finale is False else "-")
+                )
+                gravi_n = verdetto_finale.gravi if verdetto_finale is not None and verdetto_finale.valido else 0
+                minori_n = verdetto_finale.minori if verdetto_finale is not None and verdetto_finale.valido else 0
+                riga_misura = (
+                    f"misura gradino: candidato={candidato.id}; gradino={k_gradino}/{tot_gradini}; "
+                    f"durata={durata_sec}; token={token_tot}; punti_settimana={ds_str}; punti_5h={d5_str}; "
+                    f"oracolo={oracolo_str}; rilievi_gravi={gravi_n}; rilievi_minori={minori_n}; "
+                    f"esito={esito_giro_finale}"
+                )
+                print(riga_misura)
+                if pr_num_finale is not None:
+                    try:
+                        forgia.commenta(pr_num_finale, riga_misura, ruolo="esecutore")
+                    except Exception as exc:
+                        print(f"misure: commento riepilogo gradino non scritto: {exc}", file=sys.stderr)
+                elif scala_misura or ds_str != "-":
+                    try:
+                        forgia.commenta(compito.numero, riga_misura, ruolo="esecutore")
+                    except Exception as exc:
+                        print(f"misure: commento riepilogo gradino non scritto: {exc}", file=sys.stderr)
             except Exception as exc:
                 print(f"misure: errore in _scrivi_misure: {exc}", file=sys.stderr)
             cron.chiudi()
