@@ -34,7 +34,7 @@ SEZIONI = [
 # «Gemini» conta solo col nome del modello dopo (`Gemini Pro`, `gemini-3-pro`): `GEMINI.md` e `~/.gemini/` sono nomi di
 # file e percorsi della CLI, che le pagine per porta descrivono.
 NOMI_DI_MODELLO = re.compile(
-    r"\b(opus|sonnet|haiku|fable|gpt|argon|hydrogen|carbon|flash|gemma|llama|mistral|grok|codex|deepseek)\w*"
+    r"\b(opus|sonnet|haiku|fable|gpt|argon|hydrogen|carbon|neon|flash|gemma|llama|mistral|grok|codex|deepseek)\w*"
     r"|\bgemini(?:[ \t]+|-)\w"
     r"|\bo[34]\b",
     re.IGNORECASE,
@@ -211,7 +211,19 @@ def test_il_controllo_dei_modelli_copre_anche_i_modelli():
 
 @pytest.mark.parametrize(
     "forma",
-    ["Gemini Pro", "gemini-3-pro", "Gemini 3.8 Flash", "codex", "deepseek", "o3", "o4", "opus", "Hydrogen", "Carbon"],
+    [
+        "Gemini Pro",
+        "gemini-3-pro",
+        "Gemini 3.8 Flash",
+        "codex",
+        "deepseek",
+        "o3",
+        "o4",
+        "opus",
+        "Hydrogen",
+        "Carbon",
+        "Neon",
+    ],
 )
 def test_il_controllo_dei_modelli_prende_le_forme_senza_numero(forma):
     assert NOMI_DI_MODELLO.search(forma)
