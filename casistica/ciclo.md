@@ -661,3 +661,53 @@ mente. E un giro che gira col codice vecchio non dà errori: dà solo i risultat
 fascicolo nel prompt) e chi decide se n'è accorto solo cercando nel log le righe nuove. Con B, due righe corrette in
 un minuto.
 **Fonte:** dal vivo 2026-11-14
+
+### CICLO-43. La scala sui fallimenti
+
+**Scenario:** un lavoro fuori senza etichetta `esegue:` fallisce al primo giro per oracolo rosso con `scala`
+configurata in `bottega.toml`. In un altro lavoro con `esegue:` esplicito, invece, il giro si ferma per quota esaurita
+(429).
+**Domanda:** quando si sale al gradino successivo della scala?
+**Opzioni:**
+- A) su qualsiasi errore o 429, anche con `esegue:` esplicito
+- B) solo sui fallimenti del modello (oracolo rosso, rilettura bloccante, consegna vuota o errore) quando `scala` è
+  configurata e manca `esegue:`; una quota esaurita mantiene il gradino corrente
+- C) mai: si ripetono sempre 3 tentativi sullo stesso candidato
+**Scelta:** B
+**Perché:** la scala evita di bruciare tentativi sullo stesso modello economico quando sbaglia, ma non deve aggirare
+una scelta esplicita (`esegue:`) né sprecare un modello più caro per un semplice limite di quota temporaneo.
+**Esito:** adottata nella configurazione con `progetto.scala`.
+**Fonte:** deciso dall'utente
+
+### CICLO-44. L'unione per categorie
+
+**Scenario:** la revisione finale dell'intero ramo termina con `VERDETTO: APPROVATO`, `GRAVI: 0` e nessuna
+segnalazione di sicurezza. La PR tocca solo file in `docs/` e `tests/`, entrambi coperti da `[categorie]` in
+`bottega.toml`, e nessun file del pavimento protetto (`.github/`, `.bottega/`, `.gitleaksignore`).
+**Domanda:** come viene classificata la PR?
+**Opzioni:**
+- A) delicata in ogni caso, perché tutte le PR passano prima a mano
+- B) `bottega: non delicata` ed `Esito = pronta per l'unione`, perché tutti i file rientrano nelle categorie ammesse e
+  il verdetto è approvato
+- C) `bottega: non delicata` anche se un file toccato fosse in `.github/`, purché un glob lo copra
+**Scelta:** B
+**Perché:** le categorie strette e il verdetto strutturato permettono di distinguere le PR sicure da unire velocemente
+da quelle delicate; il pavimento protetto resta sempre non aggirabile.
+**Esito:** adottata nel passo finale del giro e in `bottega categoria`.
+**Fonte:** deciso dall'utente
+
+### CICLO-45. Il ritmo della quota con riserva
+
+**Scenario:** a metà settimana la quota settimanale è indietro di 25 punti rispetto al tempo trascorso (sopra la soglia
+di 15 punti), ma la finestra di 5 ore è scesa al 20%, sotto la riserva configurata del 30%. Ci sono lavori di debito
+tecnico pronti con `## Fatto quando` in `aree_non_delicate`.
+**Domanda:** il distributore lancia un riempitivo?
+**Opzioni:**
+- A) sì, perché la quota settimanale è indietro di oltre 15 punti
+- B) no, perché la finestra di 5 ore è sotto la riserva configurata
+- C) sì, ma solo di notte
+**Scelta:** B
+**Perché:** la riserva sulle 5 ore protegge la capacità immediata per i lavori urgenti e per chi decide, evitando che i
+riempitivi esauriscano la finestra breve.
+**Esito:** adottata in `valuta_ritmo` e nel distributore.
+**Fonte:** deciso dall'utente
