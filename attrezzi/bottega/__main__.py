@@ -8,6 +8,7 @@ from bottega import VERSIONE
 from bottega.banco import argomenti_banco, comando_banco
 from bottega.board import ErroreBoard
 from bottega.casi import argomenti_casi, comando_casi
+from bottega.categorie import argomenti_categoria, comando_categoria
 from bottega.configurazione import (
     ErroreConfigurazione,
     argomenti_configurazione,
@@ -38,7 +39,13 @@ from bottega.lancio import (
 )
 from bottega.misura import argomenti_misura, comando_misura
 from bottega.pubblico import argomenti_controlla_pubblico, controlla_pubblico
-from bottega.scelta import argomenti_scegli, comando_scegli
+from bottega.ritmo import argomenti_ritmo, comando_ritmo
+from bottega.scelta import (
+    argomenti_scala,
+    argomenti_scegli,
+    comando_scala,
+    comando_scegli,
+)
 from bottega.segno import argomenti_segno, comando_segno
 
 # Nome del sottocomando -> funzione che riceve gli argomenti letti e restituisce l'esito (0 = tutto bene).
@@ -63,6 +70,9 @@ COMANDI: dict[str, Callable[[argparse.Namespace], int]] = {
     "aggiorna": comando_aggiorna,
     "lancia": comando_lancia,
     "segui": comando_segui,
+    "categoria": comando_categoria,
+    "ritmo": comando_ritmo,
+    "scala": comando_scala,
 }
 # Nome del sottocomando -> funzione che aggiunge i suoi argomenti al sottoparser (solo i comandi che ne hanno).
 ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
@@ -85,6 +95,9 @@ ARGOMENTI: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "aggiorna": argomenti_aggiorna,
     "lancia": argomenti_lancia,
     "segui": argomenti_segui,
+    "categoria": argomenti_categoria,
+    "ritmo": argomenti_ritmo,
+    "scala": argomenti_scala,
 }
 
 
