@@ -39,10 +39,11 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
   configurazione si fa un candidato per livello. Nomi ed esiti delle prove:
   `<clone>/docs/ricognizioni/2026-11-14-quote-riserva-livelli.md`, §14-§15.
 - Un «Orchestrator» mette due modelli in un solo agente: uno pianifica, ripianifica e controlla, l'altro esegue. Ha un
-  livello fisso (niente `--effort`), consuma la quota del modello che pianifica e va senza mani come gli altri, con la
-  stessa busta JSON. Nella prova del 2026-11-14 sullo stesso bug ha impiegato 56 s e 48k token contro 33 s e 27k del
-  solo modello che esegue: sui compiti piccoli non conviene, conviene sulle tappe intere con `su_richiesta = true` e un
-  `tempo` lungo (`<clone>/docs/specs/2026-11-14-b13-tappe-intere-design.md`).
+  livello fisso (niente `--effort`), gira su secchio condiviso con i modelli del fornitore (un 429 su quel secchio
+  ferma tutto il gruppo) e va senza mani come gli altri, con la stessa busta JSON. Nella prova del 2026-11-14 sullo
+  stesso bug ha impiegato 56 s e 48k token contro 33 s e 27k del solo modello che esegue: sui compiti piccoli non
+  conviene, conviene sulle tappe intere con `su_richiesta = true` e un `tempo` lungo
+  (`<clone>/docs/specs/2026-11-14-b13-tappe-intere-design.md`).
 
 ## Trascrizioni e contatori
 
@@ -58,11 +59,15 @@ Comando `agy`. Fatti della ricognizione del 2026-11-08 (`<clone>/docs/ricognizio
 - Esito headless: `status` diverso da `SUCCESS` (`ERROR`, `CANCELED`, `INTERRUPTED`, `INVALID`, `WAITING`), con il
   motivo nel campo `error`.
 - Quote: `/usage` (alias `/quota`) mostra le quote per gruppo di modelli, con limite settimanale e limite di cinque
-  ore. Va anche senza mani (`agy -p /quota`, `agy -p /credits`) e non spende quota.
-- I gruppi sono separati: alla versione 1.5.8 `/quota` ne stampa tre, ognuno coi suoi limiti, e un gruppo esaurito
-  non ferma gli altri (visto il 2026-11-12). In configurazione è **una sola bottega** con un secchio per gruppo
+  ore. Va anche senza mani (`agy -p /quota`, `agy -p /credits`) e non spende quota. In uscita non-TTY stampa righe TSV
+  a 4 colonne (`<gruppo>\t<Weekly Limit Remaining|Five Hour Limit Remaining>\t<N>%\t<ISO 8601 UTC>`), usando il
+  segnaposto `1970-01-01T00:00:00Z` quando la finestra non è ancora avviata (a riposo). La bottega salva la fotografia
+  dei punti nella variabile di Actions `BOTTEGA_PUNTI_<BOTTEGA>` per calcolare ritmo e consumo per gradino.
+- I gruppi sono separati: alla versione 1.5.8 `/quota` ne stampava tre, alla 1.5.17 (2026-11-26) due, uno per
+  tutti i modelli di Google e uno per gli altri fornitori, ognuno coi suoi limiti; un gruppo esaurito non ferma gli
+  altri (visto il 2026-11-12). In configurazione è **una sola bottega** con un secchio per gruppo
   (`quote = { <gruppo> = "<peso>", … }`), e ogni candidato indica il secchio del suo gruppo (`quota = "<gruppo>"`): un
-  429 ferma solo i candidati di quel secchio.
+  429 ferma solo i candidati di quel secchio. Un secchio che non ha più il suo gruppo si toglie dalla configurazione.
 - Crediti: l'impostazione «Use AI Credits» li usa quando le quote del piano sono esaurite.
 
 ## Versione e accesso

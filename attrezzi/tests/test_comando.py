@@ -9,7 +9,7 @@ def test_versione(capsys):
     with pytest.raises(SystemExit) as e:
         main(["--version"])
     assert e.value.code == 0
-    assert capsys.readouterr().out.strip() == "bottega 0.2.8"
+    assert capsys.readouterr().out.strip() == "bottega 0.3.0"
 
 
 def test_senza_comando_esce_2(capsys):
@@ -36,4 +36,15 @@ def test_c4_errore_di_configurazione_senza_traccia(tmp_path: Path, capsys: pytes
     err = capsys.readouterr().err
     assert err.startswith("errore:")
     assert "Traceback" not in err
+
+
+def test_comandi_b15_registrati():
+    attesi = {"categoria", "ritmo", "scala"}
+    assert attesi <= set(COMANDI)
+    assert attesi <= set(ARGOMENTI)
+    for comando in sorted(attesi):
+        with pytest.raises(SystemExit) as e:
+            main([comando, "--help"])
+        assert e.value.code == 0
+
 

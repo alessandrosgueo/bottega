@@ -614,3 +614,28 @@ def test_b14_senza_repo_i_percorsi_api_usano_i_segnaposto_di_gh() -> None:
     assert forgia.sotto_issue(3) == []
     assert forgia.chiusura(3) is None
     assert [a[1].split("/issues/")[0] for a in visti] == ["repos/{owner}/{repo}"] * 3
+
+
+def test_etichette_pr_gh() -> None:
+    chiamate: list[list[str]] = []
+
+    def esegui_finto(argomenti: list[str], ingresso: str | None = None) -> str:
+        chiamate.append(argomenti)
+        return json.dumps({"labels": [{"name": "bottega: non delicata"}, {"name": "docs"}]})
+
+    forgia = ForgiaGh("proprietario/repo", esegui=esegui_finto)
+    assert forgia.etichette_pr(42) == ["bottega: non delicata", "docs"]
+    assert chiamate == [["pr", "view", "42", "--repo", "proprietario/repo", "--json", "labels"]]
+
+
+def test_etichette_pr_finta() -> None:
+    finta = ForgiaFinta()
+    pr_num = finta.apri_pr("bottega/1-ramo", "PR 1", "Corpo PR")
+    assert finta.etichette_pr(pr_num) == []
+
+    finta.etichetta(pr_num, "bottega: non delicata", aggiungi=True)
+    finta.etichetta(pr_num, "docs", aggiungi=True)
+    assert finta.etichette_pr(pr_num) == ["bottega: non delicata", "docs"]
+
+    finta.etichetta(pr_num, "docs", aggiungi=False)
+    assert finta.etichette_pr(pr_num) == ["bottega: non delicata"]

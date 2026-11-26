@@ -47,7 +47,7 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
 - **Porta:** la CLI con cui si entra in una bottega. Una CLI può aprire più botteghe e una bottega può avere più porte.
   Ogni porta ha la sua pagina: [Claude Code](porte/claude-code.md), [Antigravity](porte/antigravity.md),
   [Pi](porte/pi.md), [GitHub Copilot CLI](porte/copilot-cli.md).
-- **Le quattro funzioni:**
+- **Le cinque funzioni:**
 
   | Funzione | Che cosa fa |
   |---|---|
@@ -55,6 +55,7 @@ Tutto il resto è giudizio di chi lavora, controllato dal diff. In questa skill 
   | eseguire | un compito da un brief, in TDD, in sessione o fuori come PR |
   | rivedere | la rilettura a mente fresca di un compito, di un ramo o di una PR |
   | consigliare | critiche a design e piani, arbitrati, controlli su tutto il repo, consulti di chi esegue |
+  | pianificare | scrive bozze di piano in `docs/plans/` per i lavori senza «Fatto quando», di notte |
 
 - **Candidato:** un modello di una bottega, da una porta, per una funzione. Il suo nome è un titolo più il nome del
   modello, scelto dall'utente («Maestro …», «Lavorante …»). Può stare di **riserva** (`riserva = true`) ed essere
@@ -94,7 +95,16 @@ minimo costo. La scelta viva lo serve, non lo sostituisce.
   Un candidato di riserva entra in gioco solo se tutti i normali della stessa funzione sono senza quota, e appena un
   normale torna disponibile la scelta torna a lui. A metà tappa, chi resta senza quota tiene il compito per un giro; se
   manca ancora, passa al candidato seguente, che riparte dal ramo e dalle note.
-- **A mano:** l'etichetta `esegue: <nome>` su un lavoro vince sulla scelta. Il risultato conta comunque.
+- **A mano:** l'etichetta `esegue: <nome>` su un lavoro vince sulla scelta e disattiva la scala sui fallimenti. Il
+  risultato conta comunque.
+- **La scala sui fallimenti (`progetto.scala`):** se configurata e manca `esegue:`, un fallimento del modello (oracolo
+  rosso, rilettura con rilievi gravi, consegna vuota o errore) fa salire il lavoro al gradino successivo invece di
+  ripetere sullo stesso candidato; se la scala si esaurisce, il lavoro diventa «bloccato» e torna a chi decide. Una
+  quota esaurita (429) non fa mai salire di gradino.
+- **Il ritmo della quota (`[ritmo]` e `aree_non_delicate`):** quando non ci sono lavori ordinari e la quota settimanale
+  è indietro rispetto al tempo trascorso (di serie almeno 15 punti) restando sopra le riserve (30% sulle 5 ore e 15%
+  sulla settimana), il distributore lancia riempitivi non delicati con `## Fatto quando`, privilegiando debiti e bug,
+  poi prove, poi documenti, poi le altre aree configurate.
 - **Chi sceglie:** per i compiti fuori il workflow, con un calcolo senza modello; per quelli in sessione chi decide,
   con gli stessi numeri (`bottega conti`). Ogni scelta lascia sul lavoro una riga col perché. Lo stesso criterio
   sceglie quale consigliere risponde a un consulto.
@@ -244,11 +254,20 @@ un brief per ogni compito.
   segno nascosto e non sono mai comandi.
 - **L'esito** di una revisione è il campo «Esito» del Project (`pronta per l'unione`, `correzioni`, `rifiutata`): il
   distributore riprende i lavori con `correzioni`.
-- **Che cosa prende l'esecutore fuori:** prima i lavori che chi decide gli assegna; finiti quelli, i debiti e i bug
-  che hanno un «Fatto quando» (un consigliere può scriverlo a quelli che lo meritano), annunciandolo sul lavoro. Non
-  prende mai: decisioni dell'utente, design, lavori che aspettano l'utente o già presi, ciò che tocca le quattro
-  barriere, più ciò che la costituzione aggiunge. Non tocca `.github/` né i rami protetti: la consegna lo rifiuta. Usa
-  sotto-agenti solo col suo modello.
+- **Che cosa prende l'esecutore fuori:** prima i lavori che chi decide gli assegna (`bottega: fuori` o `liberi` con
+  `## Fatto quando`); finiti quelli, i riempitivi nelle `aree_non_delicate` se il ritmo della quota lo consente,
+  privilegiando debiti, bug, prove e documenti. Di notte (`bozze_piano`, tetto di serie 3), un lavoro pronto senza
+  `## Fatto quando` può essere affidato a `pianificare` in qualsiasi area: produce solo una bozza in
+  `docs/plans/*.md` e apre una PR in bozza `bottega: bozza di piano` senza oracolo (qualsiasi codice toccato fa
+  rifiutare la consegna). Non prende mai: decisioni dell'utente, design, lavori che aspettano l'utente o già presi, ciò
+  che tocca le quattro barriere, più ciò che la costituzione aggiunge. Non tocca `.github/` né i rami protetti: la
+  consegna lo rifiuta. Usa sotto-agenti solo col suo modello.
+- **Passo finale «pronta per l'unione» e categorie (`[categorie]`):** sull'ultima sotto-issue, dopo l'oracolo verde,
+  un revisore valuta l'intero diff dalla base rispondendo con `VERDETTO:` / `GRAVI:` / `MINORI:`. Se è `APPROVATO`
+  senza rilievi gravi né segnalazioni di sicurezza e tutti i file rientrano nelle `[categorie]` configurate (escluso il
+  pavimento protetto `.github/`, `.bottega/`, `.gitleaks*`), il giro segna la PR `bottega: non delicata` ed `Esito =
+  pronta per l'unione`; altrimenti segna `bottega: delicata` (e con `SICUREZZA` o verdetto non valido lascia `Esito`
+  vuoto).
 - **Solo issue di un comandante:** il brief è il corpo dell'issue, e chi l'ha scritta lo può cambiare anche dopo
   l'etichetta. Un lavoro proposto da altri si copia in un'issue nuova.
 - **La CI del progetto e i rami `bottega/*`:** quei rami li scrive un modello, e la CI che li prova esegue codice suo:
@@ -275,7 +294,9 @@ un brief per ogni compito.
 gesto che fa il lavoro. Per ogni compito, nei campi del Project:
 
 - chi l'ha eseguito, da che porta, in sessione o fuori; durata, giri, consulti, token: li scrive il giro (i token
-  contano anche i giri falliti);
+  contano anche i giri falliti). Con `scala` attiva, `Misure parziali` registra ciascun gradino separatamente
+  (`gradino:<id>:<esito>:<token>:<durata>`) così scelta viva e `bottega conti` attribuiscono esiti e costi al singolo
+  candidato;
 - **l'esito** (unito com'era, corretto, rifiutato) e i rilievi per origine: `corretto` lo scrive `bottega correggi`
   quando chi decide chiede la correzione; alla chiusura del lavoro il distributore dà `unito com'era` ai compiti
   rimasti senza esito, o `rifiutato` se il lavoro è chiuso come «non pianificato». La scelta viva impara da qui;

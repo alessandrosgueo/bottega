@@ -72,6 +72,8 @@ def _cambia(testo: str, vecchio: str, nuovo: str) -> str:
 
 
 def test_esempio_si_legge_per_intero():
+    from bottega.configurazione import Ritmo
+
     assert leggi_configurazione(MODELLO) == Configurazione(
         versione=1,
         progetto=Progetto(
@@ -82,6 +84,9 @@ def test_esempio_si_legge_per_intero():
             manutenzione=("03:00-04:30", "23:30-01:00"),
             project=1,
             liberi=("<etichetta>",),
+            scala=("lavorante", "riserva"),
+            aree_non_delicate=("docs", "prove", "debito"),
+            bozze_piano=3,
         ),
         botteghe={
             "principale": Bottega("principale", "scarsa", ("claude-code",)),
@@ -121,7 +126,23 @@ def test_esempio_si_legge_per_intero():
                 riserva=True,
                 quaderno="<nome>",
             ),
+            "pianificatore": Candidato(
+                "pianificatore",
+                "Pianificatore <modello>",
+                "secondaria",
+                "pi",
+                "<modello>",
+                ("pianificare",),
+                "<etichetta del runner>",
+                quota="veloce",
+            ),
         },
+        categorie={
+            "documenti": ("docs/**", "*.md"),
+            "prove": ("tests/**",),
+            "quaderni": ("quaderni/**",),
+        },
+        ritmo=Ritmo(gruppo="<gruppo>", ritardo=15, riserva_5h=30, riserva_settimana=15),
     )
 
 
@@ -131,7 +152,7 @@ def test_esempio_passa_il_controllo():
 
 def test_esempio_ha_ogni_chiave_ammessa():
     dati = tomllib.loads(MODELLO.read_text(encoding="utf-8"))
-    assert set(dati) == {"versione", "progetto", "botteghe", "candidati"}
+    assert set(dati) == {"versione", "progetto", "botteghe", "candidati", "categorie", "ritmo"}
     assert set(dati["progetto"]) == {
         "comandanti",
         "adattatore",
@@ -140,6 +161,9 @@ def test_esempio_ha_ogni_chiave_ammessa():
         "manutenzione",
         "project",
         "liberi",
+        "scala",
+        "aree_non_delicate",
+        "bozze_piano",
     }
     assert {chiave for voce in dati["botteghe"].values() for chiave in voce} == {"quota", "quote", "porte"}
     assert {chiave for voce in dati["candidati"].values() for chiave in voce} == {
@@ -354,7 +378,7 @@ ERRORI = [
         'funzioni = ["decidere", "scrivere"]',
         [
             "bottega.toml: candidati.maestro.funzioni[1]: «scrivere» non è una funzione "
-            "(decidere, eseguire, rivedere, consigliare)"
+            "(decidere, eseguire, rivedere, consigliare, pianificare)"
         ],
         id="funzione-fuori-elenco",
     ),
@@ -567,13 +591,13 @@ def test_leggi_con_errori_solleva_con_l_elenco(tmp_path):
 
 def test_elenchi_del_formato():
     assert PORTE == ("claude-code", "antigravity", "pi", "copilot-cli")
-    assert FUNZIONI == ("decidere", "eseguire", "rivedere", "consigliare")
+    assert FUNZIONI == ("decidere", "eseguire", "rivedere", "consigliare", "pianificare")
     assert QUOTE == ("scarsa", "normale", "abbondante")
 
 
 def test_comando_esempio_esce_0_con_il_conteggio(capsys):
     assert main(["configurazione", "--file", str(MODELLO)]) == 0
-    assert capsys.readouterr().out == "bottega.toml: botteghe 2, candidati 3, nessun errore\n"
+    assert capsys.readouterr().out == "bottega.toml: botteghe 2, candidati 4, nessun errore\n"
 
 
 def test_comando_con_errori_esce_1_e_li_stampa(tmp_path, capsys):
@@ -850,5 +874,207 @@ def test_variabili_da_leggere(tmp_path):
 
     cfg_semplice = leggi_configurazione(_scrivi(tmp_path, BASE))
     assert variabili_da_leggere(cfg_semplice) == ["BOTTEGA_QUOTA_PRINCIPALE"]
+
+
+def test_funzione_pianificare_valida(tmp_path):
+    testo = BASE + """
+[candidati.pianificatore]
+nome = "Pianificatore <modello>"
+bottega = "principale"
+porta = "claude-code"
+modello = "<modello>"
+funzioni = ["pianificare"]
+"""
+    assert _errori(tmp_path, testo) == []
+    cfg = leggi_configurazione(_scrivi(tmp_path, testo))
+    assert cfg.candidati["pianificatore"].funzioni == ("pianificare",)
+
+
+def test_scala_valida_con_riserva_e_su_richiesta(tmp_path):
+    testo_vuota = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nscala = []')
+    assert _errori(tmp_path, testo_vuota) == []
+    assert leggi_configurazione(_scrivi(tmp_path, testo_vuota)).progetto.scala == ()
+
+    testo = _cambia(
+        BASE,
+        'fuso = "Europe/Rome"',
+        'fuso = "Europe/Rome"\nscala = ["lavorante", "riserva", "speciale"]',
+    ) + """
+[candidati.lavorante]
+nome = "Lavorante <modello>"
+bottega = "principale"
+porta = "claude-code"
+modello = "<modello>"
+funzioni = ["eseguire"]
+
+[candidati.riserva]
+nome = "Riserva <modello>"
+bottega = "principale"
+porta = "claude-code"
+modello = "<modello>"
+funzioni = ["eseguire"]
+riserva = true
+
+[candidati.speciale]
+nome = "Speciale <modello>"
+bottega = "principale"
+porta = "claude-code"
+modello = "<modello>"
+funzioni = ["eseguire"]
+su_richiesta = true
+"""
+    assert _errori(tmp_path, testo) == []
+    cfg = leggi_configurazione(_scrivi(tmp_path, testo))
+    assert cfg.progetto.scala == ("lavorante", "riserva", "speciale")
+
+
+def test_scala_errori(tmp_path):
+    t_inesistente = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nscala = ["manca"]')
+    assert _errori(tmp_path, t_inesistente) == [
+        "bottega.toml: progetto.scala[0]: candidato inesistente: «manca»"
+    ]
+
+    t_senza_eseguire = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nscala = ["maestro"]')
+    assert _errori(tmp_path, t_senza_eseguire) == [
+        "bottega.toml: progetto.scala[0]: il candidato «maestro» non ha la funzione «eseguire»"
+    ]
+
+    base_lav = BASE + """
+[candidati.lavorante]
+nome = "Lavorante <modello>"
+bottega = "principale"
+porta = "claude-code"
+modello = "<modello>"
+funzioni = ["eseguire"]
+"""
+    t_duplicato = _cambia(base_lav, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nscala = ["lavorante", "lavorante"]')
+    errori_dup = _errori(tmp_path, t_duplicato)
+    assert len(errori_dup) == 1
+    assert errori_dup[0].startswith("bottega.toml: progetto.scala[1]: ")
+
+    t_non_lista = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\nscala = "lavorante"')
+    assert _errori(tmp_path, t_non_lista) == [
+        "bottega.toml: progetto.scala: tipo sbagliato: serve una lista"
+    ]
+
+
+def test_aree_non_delicate_valide_ed_errori(tmp_path):
+    t_valida = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\naree_non_delicate = ["docs", "prove"]')
+    assert _errori(tmp_path, t_valida) == []
+    assert leggi_configurazione(_scrivi(tmp_path, t_valida)).progetto.aree_non_delicate == ("docs", "prove")
+
+    t_vuota = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\naree_non_delicate = []')
+    assert _errori(tmp_path, t_vuota) == []
+    assert leggi_configurazione(_scrivi(tmp_path, t_vuota)).progetto.aree_non_delicate == ()
+
+    t_dup = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\naree_non_delicate = ["docs", "DOCS"]')
+    assert _errori(tmp_path, t_dup) == ["bottega.toml: progetto.aree_non_delicate[1]: «DOCS» ripetuta"]
+
+    t_voce_vuota = _cambia(BASE, 'fuso = "Europe/Rome"', 'fuso = "Europe/Rome"\naree_non_delicate = [""]')
+    assert _errori(tmp_path, t_voce_vuota) == ["bottega.toml: progetto.aree_non_delicate[0]: valore vuoto"]
+
+
+def test_bozze_piano_valide_ed_errori(tmp_path):
+    for valore in (0, 3, 10):
+        testo = _cambia(BASE, 'fuso = "Europe/Rome"', f'fuso = "Europe/Rome"\nbozze_piano = {valore}')
+        assert _errori(tmp_path, testo) == []
+        assert leggi_configurazione(_scrivi(tmp_path, testo)).progetto.bozze_piano == valore
+
+    for valore in (-1, 11):
+        testo = _cambia(BASE, 'fuso = "Europe/Rome"', f'fuso = "Europe/Rome"\nbozze_piano = {valore}')
+        assert _errori(tmp_path, testo) == [
+            f"bottega.toml: progetto.bozze_piano: fuori intervallo: {valore} (serve da 0 a 10)"
+        ]
+
+    for valore in ("true", '"3"'):
+        testo = _cambia(BASE, 'fuso = "Europe/Rome"', f'fuso = "Europe/Rome"\nbozze_piano = {valore}')
+        assert _errori(tmp_path, testo) == [
+            "bottega.toml: progetto.bozze_piano: tipo sbagliato: serve un numero intero"
+        ]
+
+
+def test_categorie_valide_ed_errori(tmp_path):
+    t_valida = BASE + """
+[categorie]
+documenti = ["docs/**", "*.md"]
+prove = ["tests/**/*.py"]
+"""
+    assert _errori(tmp_path, t_valida) == []
+    cfg = leggi_configurazione(_scrivi(tmp_path, t_valida))
+    assert cfg.categorie == {"documenti": ("docs/**", "*.md"), "prove": ("tests/**/*.py",)}
+
+    t_nome_invalido = BASE + '\n[categorie]\nDocs = ["docs/**"]\n'
+    errori = _errori(tmp_path, t_nome_invalido)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: categorie.Docs: ")
+
+    t_lista_vuota = BASE + "\n[categorie]\ndocumenti = []\n"
+    errori = _errori(tmp_path, t_lista_vuota)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: categorie.documenti: ")
+
+    t_glob_assoluto = BASE + '\n[categorie]\ndocumenti = ["/docs/**"]\n'
+    errori = _errori(tmp_path, t_glob_assoluto)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: categorie.documenti[0]: ")
+
+    t_parent = BASE + '\n[categorie]\ndocumenti = ["docs/../x.md"]\n'
+    errori = _errori(tmp_path, t_parent)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: categorie.documenti[0]: ")
+
+    for largo in ("**", "**/*"):
+        t_largo = BASE + f'\n[categorie]\ndocumenti = ["{largo}"]\n'
+        errori = _errori(tmp_path, t_largo)
+        assert errori == [f"bottega.toml: categorie.documenti[0]: modello troppo largo: «{largo}»"]
+
+    t_dup = BASE + '\n[categorie]\ndocumenti = ["docs/**", "docs/**"]\n'
+    errori = _errori(tmp_path, t_dup)
+    assert len(errori) == 1
+    assert errori[0].startswith("bottega.toml: categorie.documenti[1]: ")
+
+
+def test_ritmo_valido_ed_errori(tmp_path):
+    cfg_default = leggi_configurazione(_scrivi(tmp_path, BASE))
+    assert cfg_default.ritmo.gruppo is None
+    assert cfg_default.ritmo.ritardo == 15
+    assert cfg_default.ritmo.riserva_5h == 30
+    assert cfg_default.ritmo.riserva_settimana == 15
+
+    t_valido = BASE + """
+[ritmo]
+gruppo = "Gemini Models"
+ritardo = 20
+riserva_5h = 25
+riserva_settimana = 10
+"""
+    assert _errori(tmp_path, t_valido) == []
+    cfg = leggi_configurazione(_scrivi(tmp_path, t_valido))
+    assert cfg.ritmo.gruppo == "Gemini Models"
+    assert cfg.ritmo.ritardo == 20
+    assert cfg.ritmo.riserva_5h == 25
+    assert cfg.ritmo.riserva_settimana == 10
+
+    for chiave, valore in (
+        ("ritardo", 0),
+        ("ritardo", 100),
+        ("riserva_5h", -1),
+        ("riserva_5h", 101),
+        ("riserva_settimana", "true"),
+        ("sconosciuta", 1),
+    ):
+        t_err = BASE + f"\n[ritmo]\n{chiave} = {valore}\n"
+        errori = _errori(tmp_path, t_err)
+        assert len(errori) == 1
+        assert errori[0].startswith(f"bottega.toml: ritmo.{chiave}: ")
+
+
+def test_glob_equivalenti_a_tutto_rifiutati(tmp_path):
+    for largo in ("**", "**/*", "./**", "**/**", "*/**", "*", "*/*", "."):
+        t_largo = BASE + f'\n[categorie]\ndocumenti = ["{largo}"]\n'
+        assert _errori(tmp_path, t_largo) == [
+            f"bottega.toml: categorie.documenti[0]: modello troppo largo: «{largo}»"
+        ]
+
 
 

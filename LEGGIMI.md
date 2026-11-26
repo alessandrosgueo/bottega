@@ -50,7 +50,7 @@ fuori servono anche systemd, `sudo` (una volta) e `nftables`.
 
 ## Stato
 
-Versione 0.2.8. Costruita in quindici tappe (B0-B14), più di mille prove. Il collaudo è stato fatto dal vivo,
+Versione 0.3.0. Costruita in sedici tappe (B0-B15), più di mille prove. Il collaudo è stato fatto dal vivo,
 adottandola in un progetto vero: sei lavori dell'esecutore fuori, più di venti compiti, sono arrivati alla PR,
 e ogni intervento a mano è diventato una correzione con la sua prova. La 0.2.1 chiude i fermi silenziosi visti dal
 vivo: ritentativi sugli errori passeggeri di GitHub, un giro di riserva ogni ora, un oracolo rosso che non chiude il
@@ -67,7 +67,12 @@ il suo tempo e dà il fascicolo all'esecutore dentro il prompt, perché il tempo
 0.2.7 non scambia più per YAML il testo degli scalari a blocco (`run: |` e simili): un gruppo `{ … }` della
 shell in un `run:` non ferma più i lavori fuori del progetto. La 0.2.8 non perde più un compito il cui rosso veniva
 dal «Fatto quando»: se chi decide corregge il comando o il ramo, l'esecutore senza niente da aggiungere lascia il
-giro all'oracolo, che riprova e chiude il compito se è verde.
+giro all'oracolo, che riprova e chiude il compito se è verde. La 0.3.0 si adegua ai modelli che pescano
+da un solo secchio (B15): un ruolo nuovo, «pianificare», per chi scrive i piani e i brief che chi decide firma; la
+scala sui fallimenti dichiarata nella configurazione (un tentativo per gradino, poi chi decide); il ritmo della quota,
+che lancia riempitivi solo fra i lavori già affidati quando la quota della settimana resta indietro, e mai sotto le
+riserve; le bozze di piano di notte, con un tetto; le categorie dei percorsi, che separano le PR non delicate da quelle
+che chi decide deve rileggere; e le misure per gradino.
 
 **Limiti noti:**
 - Il token del runner (`BOTTEGA_TOKEN`) è l'accesso `gh` di chi installa e vale su tutti i suoi repo. Un token a grana

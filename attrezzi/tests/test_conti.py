@@ -203,3 +203,35 @@ def test_comando_conti_json(capsys):
     assert "per_dove" in dati
     assert "spia" in dati
     assert dati["spia"]["fuori"] == 1000.0
+
+
+def test_conti_attribuisce_compito_per_gradino():
+    lav = Lavoro(
+        numero=10,
+        titolo="Compito con scala",
+        esecutore="cand-b",
+        campi={
+            "Esecutore": "cand-b",
+            "Dove": "fuori",
+            "Giri": "2",
+            "Durata": "150",
+            "Token esecutore": "300",
+            "Esito del compito": "unito com'era",
+            "Misure parziali": "gradino:cand-a:fallito:100:60, gradino:cand-b:ok:200:90",
+        },
+    )
+    res = conti([lav])
+    assert "cand-a" in res["per_candidato"]
+    assert "cand-b" in res["per_candidato"]
+
+    cand_a = res["per_candidato"]["cand-a"]
+    assert cand_a["compiti"] == 1
+    assert cand_a["durata_media"] == 60.0
+    assert cand_a["token_esecutore_medi"] == 100.0
+    assert cand_a["esiti"] == {"unito com'era": 0, "corretto": 1, "rifiutato": 0}
+
+    cand_b = res["per_candidato"]["cand-b"]
+    assert cand_b["compiti"] == 1
+    assert cand_b["durata_media"] == 90.0
+    assert cand_b["token_esecutore_medi"] == 200.0
+    assert cand_b["esiti"] == {"unito com'era": 1, "corretto": 0, "rifiutato": 0}

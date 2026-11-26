@@ -8,7 +8,7 @@ import argparse
 import re
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -19,15 +19,33 @@ PERCORSO_PREDEFINITO = ".github/bottega/bottega.toml"
 PREFISSO = "bottega.toml"
 VERSIONE_FORMATO = 1
 PORTE = ("claude-code", "antigravity", "pi", "copilot-cli")
-FUNZIONI = ("decidere", "eseguire", "rivedere", "consigliare")
+FUNZIONI = ("decidere", "eseguire", "rivedere", "consigliare", "pianificare")
 QUOTE = ("scarsa", "normale", "abbondante")
 TEMPO_MINIMO = 5
 TEMPO_MASSIMO = 270
 TEMPO_PREDEFINITO = 60
+BOZZE_PIANO_PREDEFINITE = 3
+BOZZE_PIANO_MASSIME = 10
+RITMO_RITARDO_PREDEFINITO = 15
+RITMO_RISERVA_5H_PREDEFINITA = 30
+RITMO_RISERVA_SETTIMANA_PREDEFINITA = 15
 
-_CHIAVI_TOP = ("versione", "progetto", "botteghe", "candidati")
-_CHIAVI_PROGETTO = ("comandanti", "adattatore", "fuso", "notte", "manutenzione", "project", "liberi", "costituzione")
+_CHIAVI_TOP = ("versione", "progetto", "botteghe", "candidati", "categorie", "ritmo")
+_CHIAVI_PROGETTO = (
+    "comandanti",
+    "adattatore",
+    "fuso",
+    "notte",
+    "manutenzione",
+    "project",
+    "liberi",
+    "costituzione",
+    "scala",
+    "aree_non_delicate",
+    "bozze_piano",
+)
 _CHIAVI_BOTTEGA = ("quota", "quote", "porte")
+_CHIAVI_RITMO = ("gruppo", "ritardo", "riserva_5h", "riserva_settimana")
 _CHIAVI_CANDIDATO = (
     "nome",
     "bottega",
@@ -45,6 +63,7 @@ _ID = re.compile(r"[a-z0-9-]+")
 _ORA = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 _FINESTRA = re.compile(r"((?:[01][0-9]|2[0-3]):[0-5][0-9])-((?:[01][0-9]|2[0-3]):[0-5][0-9])")
 _PERCORSO_COSTITUZIONE = re.compile(r"^[A-Za-z0-9._/-]+$")
+_GLOB_CARATTERI = re.compile(r"^[A-Za-z0-9._/*?-]+$")
 
 
 @dataclass(frozen=True)
@@ -59,6 +78,19 @@ class Progetto:
     project: int | None = None
     liberi: tuple[str, ...] = ()
     costituzione: str = "docs/costituzione.md"
+    scala: tuple[str, ...] = ()
+    aree_non_delicate: tuple[str, ...] = ()
+    bozze_piano: int = BOZZE_PIANO_PREDEFINITE
+
+
+@dataclass(frozen=True)
+class Ritmo:
+    """La sezione `[ritmo]`: soglie per lanciare i riempitivi sulla quota residua."""
+
+    gruppo: str | None = None
+    ritardo: int = RITMO_RITARDO_PREDEFINITO
+    riserva_5h: int = RITMO_RISERVA_5H_PREDEFINITA
+    riserva_settimana: int = RITMO_RISERVA_SETTIMANA_PREDEFINITA
 
 
 @dataclass(frozen=True)
@@ -97,6 +129,8 @@ class Configurazione:
     progetto: Progetto
     botteghe: dict[str, Bottega]
     candidati: dict[str, Candidato]
+    categorie: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    ritmo: Ritmo = field(default_factory=Ritmo)
 
 
 def peso_del_candidato(cfg: Configurazione, c: Candidato) -> str:
@@ -250,9 +284,13 @@ def _valida(dati: dict) -> tuple[Configurazione | None, list[str]]:
     grezze = dati.get("botteghe", {})
     ids = set(grezze) if isinstance(grezze, dict) else None  # senza tabella valida, niente controllo dei riferimenti
     candidati = _candidati(dati, ids, botteghe, errori)
+    if progetto is not None:
+        _valida_scala(progetto.scala, candidati, errori)
+    categorie = _categorie(dati, errori)
+    ritmo = _ritmo(dati, errori)
     if errori or versione is None or progetto is None:
         return None, errori
-    return Configurazione(versione, progetto, botteghe, candidati), []
+    return Configurazione(versione, progetto, botteghe, candidati, categorie, ritmo), []
 
 
 def _ha_runner(dati: dict) -> bool:
@@ -297,8 +335,13 @@ def _progetto(dati: dict, errori: list[str], ha_runner: bool = False) -> Progett
     comandanti = _comandanti(tabella, "progetto", errori)
     manutenzione = _manutenzione(tabella, "progetto", errori)
     project = _project(tabella, "progetto", errori, obbligatorio=ha_runner)
-    liberi = _liberi(tabella, "progetto", errori)
+    liberi = _lista_testi_unici(tabella, "liberi", "progetto", errori, case_insensitive=True)
     costituzione = _costituzione(tabella, "progetto", errori)
+    scala = _lista_testi_unici(tabella, "scala", "progetto", errori, case_insensitive=False)
+    aree_non_delicate = _lista_testi_unici(tabella, "aree_non_delicate", "progetto", errori, case_insensitive=True)
+    bozze_piano = _intero_intervallo(
+        tabella, "bozze_piano", "progetto", errori, 0, BOZZE_PIANO_MASSIME, BOZZE_PIANO_PREDEFINITE
+    )
     if fuso is None or costituzione is None:
         return None
     return Progetto(
@@ -310,6 +353,9 @@ def _progetto(dati: dict, errori: list[str], ha_runner: bool = False) -> Progett
         project=project,
         liberi=liberi,
         costituzione=costituzione,
+        scala=scala,
+        aree_non_delicate=aree_non_delicate,
+        bozze_piano=bozze_piano,
     )
 
 
@@ -406,7 +452,7 @@ def _candidati(
         su_richiesta = _booleano(tabella, "su_richiesta", percorso, errori, predefinito=False)
         if su_richiesta and riserva:
             _errore(errori, f"{percorso}.su_richiesta", "non può essere «true» insieme a «riserva»")
-        tempo = _tempo_candidato(tabella, percorso, errori)
+        tempo = _intero_intervallo(tabella, "tempo", percorso, errori, TEMPO_MINIMO, TEMPO_MASSIMO, TEMPO_PREDEFINITO)
         if len(errori) == n and None not in (nome, bottega, porta, modello, funzioni):
             valide[id_] = Candidato(
                 id_,
@@ -480,18 +526,26 @@ def _booleano(tabella: dict, chiave: str, percorso: str, errori: list[str], pred
     return valore
 
 
-def _tempo_candidato(tabella: dict, percorso: str, errori: list[str]) -> int:
-    """Valida la chiave `tempo` del candidato: intero da 5 a 270 minuti (di serie 60)."""
-    completa = _completa(percorso, "tempo")
-    if "tempo" not in tabella:
-        return TEMPO_PREDEFINITO
-    valore = tabella["tempo"]
+def _intero_intervallo(
+    tabella: dict,
+    chiave: str,
+    percorso: str,
+    errori: list[str],
+    minimo: int,
+    massimo: int,
+    predefinito: int,
+) -> int:
+    """Valida una chiave intera facoltativa nell'intervallo [minimo, massimo] (rifiuta booleani)."""
+    completa = _completa(percorso, chiave)
+    if chiave not in tabella:
+        return predefinito
+    valore = tabella[chiave]
     if type(valore) is not int:  # bool è un int per Python: qui no
         _errore(errori, completa, "tipo sbagliato: serve un numero intero")
-        return TEMPO_PREDEFINITO
-    if not (TEMPO_MINIMO <= valore <= TEMPO_MASSIMO):
-        _errore(errori, completa, f"fuori intervallo: {valore} (serve da {TEMPO_MINIMO} a {TEMPO_MASSIMO})")
-        return TEMPO_PREDEFINITO
+        return predefinito
+    if not (minimo <= valore <= massimo):
+        _errore(errori, completa, f"fuori intervallo: {valore} (serve da {minimo} a {massimo})")
+        return predefinito
     return valore
 
 
@@ -558,11 +612,19 @@ def _project(tabella: dict, percorso: str, errori: list[str], obbligatorio: bool
     return valore
 
 
-def _liberi(tabella: dict, percorso: str, errori: list[str]) -> tuple[str, ...]:
-    completa = _completa(percorso, "liberi")
-    if "liberi" not in tabella:
+def _lista_testi_unici(
+    tabella: dict,
+    chiave: str,
+    percorso: str,
+    errori: list[str],
+    *,
+    case_insensitive: bool,
+) -> tuple[str, ...]:
+    """Valida una lista facoltativa di stringhe non vuote e senza duplicati."""
+    completa = _completa(percorso, chiave)
+    if chiave not in tabella:
         return ()
-    lista = _come_lista(tabella["liberi"], completa, errori)
+    lista = _come_lista(tabella[chiave], completa, errori)
     if lista is None:
         return ()
     valori: list[str] = []
@@ -572,13 +634,85 @@ def _liberi(tabella: dict, percorso: str, errori: list[str]) -> tuple[str, ...]:
         valore = _come_testo(voce, voce_completa, errori)
         if valore is None:
             continue
-        chiave = valore.casefold()
-        if chiave in viste:
+        chiave_vista = valore.casefold() if case_insensitive else valore
+        if chiave_vista in viste:
             _errore(errori, voce_completa, f"«{valore}» ripetuta")
         else:
-            viste.add(chiave)
+            viste.add(chiave_vista)
             valori.append(valore)
     return tuple(valori)
+
+
+def _valida_scala(scala: tuple[str, ...], candidati: dict[str, Candidato], errori: list[str]) -> None:
+    """Controlla che ogni voce di `progetto.scala` esista in `candidati` e abbia la funzione `eseguire`."""
+    for i, id_ in enumerate(scala):
+        voce_completa = f"progetto.scala[{i}]"
+        if id_ not in candidati:
+            _errore(errori, voce_completa, f"candidato inesistente: «{id_}»")
+        elif "eseguire" not in candidati[id_].funzioni:
+            _errore(errori, voce_completa, f"il candidato «{id_}» non ha la funzione «eseguire»")
+
+
+def _categorie(dati: dict, errori: list[str]) -> dict[str, tuple[str, ...]]:
+    """Valida la sezione facoltativa `[categorie]` e i suoi modelli glob."""
+    if "categorie" not in dati:
+        return {}
+    tabella = _tabella(dati["categorie"], "categorie", errori)
+    if tabella is None:
+        return {}
+    valide: dict[str, tuple[str, ...]] = {}
+    for id_, voce in tabella.items():
+        percorso = f"categorie.{id_}"
+        n = len(errori)
+        _id(id_, percorso, errori)
+        lista = _come_lista(voce, percorso, errori)
+        if lista is None:
+            continue
+        if not lista:
+            _errore(errori, percorso, "lista vuota: serve almeno un modello")
+            continue
+        modelli: list[str] = []
+        viste: set[str] = set()
+        for i, grezzo in enumerate(lista):
+            voce_completa = f"{percorso}[{i}]"
+            modello = _come_testo(grezzo, voce_completa, errori)
+            if modello is None:
+                continue
+            if len(modello) > 200:
+                _errore(errori, voce_completa, f"modello troppo lungo ({len(modello)} caratteri, massimo 200)")
+            elif modello.startswith(("/", "-")):
+                _errore(errori, voce_completa, f"«{modello}» non può cominciare con «/» né con «-»")
+            elif not _GLOB_CARATTERI.fullmatch(modello):
+                _errore(errori, voce_completa, f"«{modello}» contiene caratteri non ammessi (solo [A-Za-z0-9._/*?-])")
+            elif ".." in modello.split("/"):
+                _errore(errori, voce_completa, f"«{modello}» non può contenere «..»")
+            elif not set(modello) - {"*", "/", "."}:
+                _errore(errori, voce_completa, f"modello troppo largo: «{modello}»")
+            elif modello in viste:
+                _errore(errori, voce_completa, f"«{modello}» ripetuto")
+            else:
+                viste.add(modello)
+                modelli.append(modello)
+        if len(errori) == n:
+            valide[id_] = tuple(modelli)
+    return valide
+
+
+def _ritmo(dati: dict, errori: list[str]) -> Ritmo:
+    """Valida la sezione facoltativa `[ritmo]`."""
+    if "ritmo" not in dati:
+        return Ritmo()
+    tabella = _tabella(dati["ritmo"], "ritmo", errori)
+    if tabella is None:
+        return Ritmo()
+    _sconosciute(tabella, _CHIAVI_RITMO, "ritmo", errori)
+    gruppo = _testo(tabella, "gruppo", "ritmo", errori, obbligatoria=False)
+    ritardo = _intero_intervallo(tabella, "ritardo", "ritmo", errori, 1, 99, RITMO_RITARDO_PREDEFINITO)
+    riserva_5h = _intero_intervallo(tabella, "riserva_5h", "ritmo", errori, 0, 100, RITMO_RISERVA_5H_PREDEFINITA)
+    riserva_settimana = _intero_intervallo(
+        tabella, "riserva_settimana", "ritmo", errori, 0, 100, RITMO_RISERVA_SETTIMANA_PREDEFINITA
+    )
+    return Ritmo(gruppo=gruppo, ritardo=ritardo, riserva_5h=riserva_5h, riserva_settimana=riserva_settimana)
 
 
 def _costituzione(tabella: dict, percorso: str, errori: list[str]) -> str | None:
